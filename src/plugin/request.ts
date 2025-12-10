@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { 
-  ANTIGRAVITY_HEADERS, 
+import {
+  ANTIGRAVITY_HEADERS,
   ANTIGRAVITY_ENDPOINT,
 } from "../constants";
 import { logAntigravityDebugResponse, type AntigravityDebugContext } from "./debug";
@@ -49,7 +49,7 @@ function transformStreamingPayload(payload: string): string {
         if (parsed.response !== undefined) {
           return `data: ${JSON.stringify(parsed.response)}`;
         }
-      } catch (_) {}
+      } catch (_) { }
       return line;
     })
     .join("\n");
@@ -98,9 +98,8 @@ export function prepareAntigravityRequest(
   const upstreamModel = rawModel;
   const streaming = rawAction === STREAM_ACTION;
   const baseEndpoint = endpointOverride ?? ANTIGRAVITY_ENDPOINT;
-  const transformedUrl = `${baseEndpoint}/v1internal:${rawAction}${
-    streaming ? "?alt=sse" : ""
-  }`;
+  const transformedUrl = `${baseEndpoint}/v1internal:${rawAction}${streaming ? "?alt=sse" : ""
+    }`;
   const isClaudeModel = upstreamModel.toLowerCase().includes("claude");
 
   let body = baseInit.body;
@@ -140,7 +139,7 @@ export function prepareAntigravityRequest(
         const cachedContentFromExtra =
           typeof requestPayload.extra_body === "object" && requestPayload.extra_body
             ? (requestPayload.extra_body as Record<string, unknown>).cached_content ??
-              (requestPayload.extra_body as Record<string, unknown>).cachedContent
+            (requestPayload.extra_body as Record<string, unknown>).cachedContent
             : undefined;
         const cachedContent =
           (requestPayload.cached_content as string | undefined) ??
@@ -309,10 +308,14 @@ export function prepareAntigravityRequest(
         }
 
         // For Claude models, ensure functionCall/tool use parts carry IDs (required by Anthropic).
+        // We use a two-pass approach: first collect all functionCalls and assign IDs,
+        // then match functionResponses to their corresponding calls using a FIFO queue per function name.
         if (isClaudeModel && Array.isArray(requestPayload.contents)) {
           let toolCallCounter = 0;
-          const lastCallIdByName = new Map<string, string>();
+          // Track pending call IDs per function name as a FIFO queue
+          const pendingCallIdsByName = new Map<string, string[]>();
 
+          // First pass: assign IDs to all functionCalls and collect them
           requestPayload.contents = requestPayload.contents.map((content: any) => {
             if (!content || !Array.isArray(content.parts)) {
               return content;
@@ -325,21 +328,37 @@ export function prepareAntigravityRequest(
                   call.id = `tool-call-${++toolCallCounter}`;
                 }
                 const nameKey = typeof call.name === "string" ? call.name : `tool-${toolCallCounter}`;
-                lastCallIdByName.set(nameKey, call.id);
+                // Push to the queue for this function name
+                const queue = pendingCallIdsByName.get(nameKey) || [];
+                queue.push(call.id);
+                pendingCallIdsByName.set(nameKey, queue);
                 return { ...part, functionCall: call };
               }
+              return part;
+            });
 
+            return { ...content, parts: newParts };
+          });
+
+          // Second pass: match functionResponses to their corresponding calls (FIFO order)
+          requestPayload.contents = (requestPayload.contents as any[]).map((content: any) => {
+            if (!content || !Array.isArray(content.parts)) {
+              return content;
+            }
+
+            const newParts = content.parts.map((part: any) => {
               if (part && typeof part === "object" && part.functionResponse) {
                 const resp = { ...part.functionResponse };
                 if (!resp.id && typeof resp.name === "string") {
-                  const linkedId = lastCallIdByName.get(resp.name);
-                  if (linkedId) {
-                    resp.id = linkedId;
+                  const queue = pendingCallIdsByName.get(resp.name);
+                  if (queue && queue.length > 0) {
+                    // Consume the first pending ID (FIFO order)
+                    resp.id = queue.shift();
+                    pendingCallIdsByName.set(resp.name, queue);
                   }
                 }
                 return { ...part, functionResponse: resp };
               }
-
               return part;
             });
 
@@ -362,11 +381,11 @@ export function prepareAntigravityRequest(
 
         // Add additional Antigravity fields
         Object.assign(wrappedBody, {
-             userAgent: "antigravity",
-             requestId: "agent-" + crypto.randomUUID(), 
+          userAgent: "antigravity",
+          requestId: "agent-" + crypto.randomUUID(),
         });
         if (wrappedBody.request && typeof wrappedBody.request === 'object') {
-             (wrappedBody.request as any).sessionId = "-" + Math.floor(Math.random() * 9000000000000000000).toString();
+          (wrappedBody.request as any).sessionId = "-" + Math.floor(Math.random() * 9000000000000000000).toString();
         }
 
         body = JSON.stringify(wrappedBody);
@@ -436,47 +455,47 @@ export async function transformAntigravityResponse(
   try {
     const text = await response.text();
     const headers = new Headers(response.headers);
-    
-    if (!response.ok) {
-       let errorBody;
-       try {
-         errorBody = JSON.parse(text);
-       } catch {
-         errorBody = { error: { message: text } };
-       }
 
-       // Inject Debug Info
-       if (errorBody?.error) {
-          const debugInfo = `\n\n[Debug Info]\nRequested Model: ${requestedModel || "Unknown"}\nEffective Model: ${effectiveModel || "Unknown"}\nProject: ${projectId || "Unknown"}\nEndpoint: ${endpoint || "Unknown"}\nStatus: ${response.status}\nRequest ID: ${headers.get('x-request-id') || "N/A"}${toolDebugMissing !== undefined ? `\nTool Debug Missing: ${toolDebugMissing}` : ""}${toolDebugSummary ? `\nTool Debug Summary: ${toolDebugSummary}` : ""}${toolDebugPayload ? `\nTool Debug Payload: ${toolDebugPayload}` : ""}`;
-          errorBody.error.message = (errorBody.error.message || "Unknown error") + debugInfo;
-          
-          return new Response(JSON.stringify(errorBody), {
-             status: response.status,
-             statusText: response.statusText,
-             headers
-          });
-       }
-       
+    if (!response.ok) {
+      let errorBody;
+      try {
+        errorBody = JSON.parse(text);
+      } catch {
+        errorBody = { error: { message: text } };
+      }
+
+      // Inject Debug Info
+      if (errorBody?.error) {
+        const debugInfo = `\n\n[Debug Info]\nRequested Model: ${requestedModel || "Unknown"}\nEffective Model: ${effectiveModel || "Unknown"}\nProject: ${projectId || "Unknown"}\nEndpoint: ${endpoint || "Unknown"}\nStatus: ${response.status}\nRequest ID: ${headers.get('x-request-id') || "N/A"}${toolDebugMissing !== undefined ? `\nTool Debug Missing: ${toolDebugMissing}` : ""}${toolDebugSummary ? `\nTool Debug Summary: ${toolDebugSummary}` : ""}${toolDebugPayload ? `\nTool Debug Payload: ${toolDebugPayload}` : ""}`;
+        errorBody.error.message = (errorBody.error.message || "Unknown error") + debugInfo;
+
+        return new Response(JSON.stringify(errorBody), {
+          status: response.status,
+          statusText: response.statusText,
+          headers
+        });
+      }
+
       if (errorBody?.error?.details && Array.isArray(errorBody.error.details)) {
-          const retryInfo = errorBody.error.details.find(
-            (detail: any) => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
-          );
-          
-          if (retryInfo?.retryDelay) {
-            const match = retryInfo.retryDelay.match(/^([\d.]+)s$/);
-            if (match && match[1]) {
-              const retrySeconds = parseFloat(match[1]);
-              if (!isNaN(retrySeconds) && retrySeconds > 0) {
-                const retryAfterSec = Math.ceil(retrySeconds).toString();
-                const retryAfterMs = Math.ceil(retrySeconds * 1000).toString();
-                headers.set('Retry-After', retryAfterSec);
-                headers.set('retry-after-ms', retryAfterMs);
-              }
+        const retryInfo = errorBody.error.details.find(
+          (detail: any) => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
+        );
+
+        if (retryInfo?.retryDelay) {
+          const match = retryInfo.retryDelay.match(/^([\d.]+)s$/);
+          if (match && match[1]) {
+            const retrySeconds = parseFloat(match[1]);
+            if (!isNaN(retrySeconds) && retrySeconds > 0) {
+              const retryAfterSec = Math.ceil(retrySeconds).toString();
+              const retryAfterMs = Math.ceil(retrySeconds * 1000).toString();
+              headers.set('Retry-After', retryAfterSec);
+              headers.set('retry-after-ms', retryAfterMs);
             }
           }
         }
+      }
     }
-    
+
     const init = {
       status: response.status,
       statusText: response.statusText,
