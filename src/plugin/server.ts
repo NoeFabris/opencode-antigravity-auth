@@ -151,6 +151,10 @@ const successResponse = `<!DOCTYPE html>
       .btn:hover {
         opacity: 0.9;
       }
+      .btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
       .sub-text {
         margin-top: 1rem;
         font-size: 0.8rem;
@@ -161,7 +165,7 @@ const successResponse = `<!DOCTYPE html>
   <body>
     <div class="card">
       <div class="icon-wrapper">
-        <svg class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg class="icon" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
         </svg>
       </div>
@@ -172,11 +176,15 @@ const successResponse = `<!DOCTYPE html>
     </div>
     <script>
       function closeWindow() {
-        window.close();
+        try {
+          window.close();
+        } catch (e) {}
         // Fallback if window.close() is blocked
-        document.querySelector('.btn').textContent = "Tab cannot be closed automatically";
-        document.querySelector('.btn').style.opacity = "0.5";
-        document.querySelector('.btn').style.cursor = "default";
+        const btn = document.querySelector('.btn');
+        btn.textContent = "Please close this tab manually";
+        btn.disabled = true;
+        btn.style.cursor = "default";
+        btn.style.opacity = "0.7";
       }
     </script>
   </body>
