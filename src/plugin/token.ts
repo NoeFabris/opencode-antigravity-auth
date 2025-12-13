@@ -71,6 +71,11 @@ export async function refreshAccessToken(
     return undefined;
   }
 
+  if (!ANTIGRAVITY_CLIENT_SECRET) {
+    console.error("[Antigravity OAuth] Missing ANTIGRAVITY_CLIENT_SECRET environment variable");
+    return undefined;
+  }
+
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",

@@ -1,3 +1,5 @@
+import { env } from "node:process";
+
 /**
  * Constants used for Antigravity OAuth flows and Cloud Code Assist API integration.
  */
@@ -5,8 +7,9 @@ export const ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g4
 
 /**
  * Client secret issued for the Antigravity OAuth application.
+ * Must be provided via environment variable ANTIGRAVITY_CLIENT_SECRET.
  */
-export const ANTIGRAVITY_CLIENT_SECRET = "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";
+export const ANTIGRAVITY_CLIENT_SECRET = env.ANTIGRAVITY_CLIENT_SECRET || "";
 
 /**
  * Scopes required for Antigravity integrations.

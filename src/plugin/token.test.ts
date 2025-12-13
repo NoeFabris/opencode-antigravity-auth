@@ -4,6 +4,14 @@ import { ANTIGRAVITY_PROVIDER_ID } from "../constants";
 import { refreshAccessToken } from "./token";
 import type { OAuthAuthDetails, PluginClient } from "./types";
 
+vi.mock("../constants", async () => {
+  const actual = await vi.importActual("../constants");
+  return {
+    ...actual,
+    ANTIGRAVITY_CLIENT_SECRET: "mock-secret",
+  };
+});
+
 const baseAuth: OAuthAuthDetails = {
   type: "oauth",
   refresh: "refresh-token|project-123",

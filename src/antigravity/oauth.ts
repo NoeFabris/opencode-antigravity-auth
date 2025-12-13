@@ -184,6 +184,10 @@ export async function exchangeAntigravity(
   state: string,
 ): Promise<AntigravityTokenExchangeResult> {
   try {
+    if (!ANTIGRAVITY_CLIENT_SECRET) {
+      return { type: "failed", error: "Missing ANTIGRAVITY_CLIENT_SECRET environment variable" };
+    }
+
     const { verifier, projectId } = decodeState(state);
 
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
