@@ -17,7 +17,7 @@ import {
   extractUsageMetadata,
   filterUnsignedThinkingBlocks,
   filterMessagesThinkingBlocks,
-  isThinkingCapableModel,
+  isGemini3Model,
   normalizeThinkingConfig,
   parseAntigravityApiBody,
   resolveThinkingConfig,
@@ -719,7 +719,7 @@ export function prepareAntigravityRequest(
 
         const finalThinkingConfig = resolveThinkingConfig(
           userThinkingConfig,
-          isThinkingCapableModel(upstreamModel),
+          upstreamModel,
           isClaudeModel,
           hasAssistantHistory,
         );
@@ -727,6 +727,8 @@ export function prepareAntigravityRequest(
         const normalizedThinking = normalizeThinkingConfig(finalThinkingConfig);
         if (normalizedThinking) {
           const thinkingBudget = normalizedThinking.thinkingBudget;
+          const thinkingLevel = normalizedThinking.thinkingLevel;
+          const isGemini3 = isGemini3Model(upstreamModel);
           const thinkingConfig: Record<string, unknown> = isClaudeThinkingModel
             ? {
               include_thoughts: normalizedThinking.includeThoughts ?? true,
@@ -736,7 +738,15 @@ export function prepareAntigravityRequest(
             }
             : {
               includeThoughts: normalizedThinking.includeThoughts,
-              ...(typeof thinkingBudget === "number" && thinkingBudget > 0 ? { thinkingBudget } : {}),
+              ...(isGemini3
+                ? (thinkingLevel
+                  ? { thinkingLevel }
+                  : typeof thinkingBudget === "number" && thinkingBudget > 0
+                    ? { thinkingBudget }
+                    : {})
+                : typeof thinkingBudget === "number" && thinkingBudget > 0
+                  ? { thinkingBudget }
+                  : {}),
             };
 
           if (rawGenerationConfig) {

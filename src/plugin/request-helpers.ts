@@ -27,10 +27,18 @@ export interface AntigravityUsageMetadata {
 }
 
 /**
+ * Valid thinking levels for Gemini 3 models.
+ * - Gemini 3 Pro: "low", "high"
+ * - Gemini 3 Flash: "minimal", "low", "medium", "high"
+ */
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high";
+
+/**
  * Normalized thinking configuration accepted by Antigravity.
  */
 export interface ThinkingConfig {
   thinkingBudget?: number;
+  thinkingLevel?: ThinkingLevel;
   includeThoughts?: boolean;
 }
 
@@ -41,13 +49,42 @@ export interface ThinkingConfig {
 export const DEFAULT_THINKING_BUDGET = 16000;
 
 /**
+ * Checks if a model is a Gemini 3 model.
+ */
+export function isGemini3Model(modelName: string): boolean {
+  return /gemini-3/i.test(modelName);
+}
+
+/**
+ * Checks if a model is a Gemini 2.5 model.
+ */
+export function isGemini25Model(modelName: string): boolean {
+  return /gemini-2\.5/i.test(modelName);
+}
+
+/**
+ * Checks if a model is specifically Gemini 3 Pro (supports only "low" and "high" levels).
+ */
+export function isGemini3ProModel(modelName: string): boolean {
+  return /gemini-3[^a-z]*pro/i.test(modelName);
+}
+
+/**
+ * Checks if a model is specifically Gemini 3 Flash (supports all thinking levels).
+ */
+export function isGemini3FlashModel(modelName: string): boolean {
+  return /gemini-3[^a-z]*flash/i.test(modelName);
+}
+
+/**
  * Checks if a model name indicates thinking/reasoning capability.
- * Models with "thinking", "gemini-3", or "opus" in their name support extended thinking.
+ * Models with "thinking", "gemini-3", "gemini-2.5", or "opus" in their name support extended thinking.
  */
 export function isThinkingCapableModel(modelName: string): boolean {
   const lowerModel = modelName.toLowerCase();
   return lowerModel.includes("thinking")
     || lowerModel.includes("gemini-3")
+    || lowerModel.includes("gemini-2.5")
     || lowerModel.includes("opus");
 }
 
@@ -66,10 +103,24 @@ export function extractThinkingConfig(
 
   if (thinkingConfig && typeof thinkingConfig === "object") {
     const config = thinkingConfig as Record<string, unknown>;
-    return {
-      includeThoughts: Boolean(config.includeThoughts),
-      thinkingBudget: typeof config.thinkingBudget === "number" ? config.thinkingBudget : DEFAULT_THINKING_BUDGET,
-    };
+    const result: ThinkingConfig = {};
+
+    // Extract thinkingLevel (for Gemini 3)
+    if (typeof config.thinkingLevel === "string") {
+      result.thinkingLevel = config.thinkingLevel.toLowerCase() as ThinkingLevel;
+    }
+
+    // Extract thinkingBudget (for Gemini 2.5 and backward compat)
+    if (typeof config.thinkingBudget === "number") {
+      result.thinkingBudget = config.thinkingBudget;
+    }
+
+    // Extract includeThoughts
+    if (typeof config.includeThoughts === "boolean") {
+      result.includeThoughts = config.includeThoughts;
+    }
+
+    return Object.keys(result).length > 0 ? result : undefined;
   }
 
   // Convert Anthropic-style "thinking" option: { type: "enabled", budgetTokens: N }
@@ -87,24 +138,74 @@ export function extractThinkingConfig(
   return undefined;
 }
 
+/** Valid thinking levels for Gemini 3 Pro models. */
+const GEMINI_3_PRO_LEVELS: ThinkingLevel[] = ["low", "high"];
+
+/** Valid thinking levels for Gemini 3 Flash models (supports all levels). */
+const GEMINI_3_FLASH_LEVELS: ThinkingLevel[] = ["minimal", "low", "medium", "high"];
+
+/**
+ * Validates thinking configuration for the given model.
+ * Logs a warning and removes invalid thinkingLevel values.
+ */
+function validateThinkingConfig(
+  modelName: string,
+  config: ThinkingConfig,
+): ThinkingConfig {
+  const result: ThinkingConfig = { ...config };
+
+  // Validate thinkingLevel for Gemini 3 models
+  if (result.thinkingLevel && isGemini3Model(modelName)) {
+    const validLevels = isGemini3ProModel(modelName)
+      ? GEMINI_3_PRO_LEVELS
+      : GEMINI_3_FLASH_LEVELS;
+
+    if (!validLevels.includes(result.thinkingLevel)) {
+      console.warn(
+        `[opencode-antigravity-auth] Invalid thinkingLevel "${result.thinkingLevel}" ` +
+        `for ${modelName}. Valid: ${validLevels.join(", ")}. Using API default.`
+      );
+      delete result.thinkingLevel;
+    }
+  }
+
+  return result;
+}
+
 /**
  * Determines the final thinking configuration based on model capabilities and user settings.
  * For Claude thinking models, we keep thinking enabled even in multi-turn conversations.
  * The filterUnsignedThinkingBlocks function will handle signature validation/restoration.
+ * For Gemini 3/2.5 models, we don't apply defaults - let the API decide.
  */
 export function resolveThinkingConfig(
   userConfig: ThinkingConfig | undefined,
-  isThinkingModel: boolean,
+  modelName: string,
   _isClaudeModel: boolean,
   _hasAssistantHistory: boolean,
 ): ThinkingConfig | undefined {
-  // For thinking-capable models (including Claude thinking models), enable thinking by default
-  // The signature validation/restoration is handled by filterUnsignedThinkingBlocks
-  if (isThinkingModel && !userConfig) {
+  // If user provided config, validate and pass it through.
+  if (userConfig) {
+    const validated = validateThinkingConfig(modelName, userConfig);
+    if (!isGemini3Model(modelName) && !isGemini25Model(modelName)) {
+      if (validated.includeThoughts && validated.thinkingBudget === undefined) {
+        return { ...validated, thinkingBudget: DEFAULT_THINKING_BUDGET };
+      }
+    }
+    return validated;
+  }
+
+  // For Gemini 3/2.5: DON'T apply defaults - let OpenCode/API decide.
+  if (isGemini3Model(modelName) || isGemini25Model(modelName)) {
+    return undefined;
+  }
+
+  // For other thinking models (Claude Opus), keep existing default behavior.
+  if (isThinkingCapableModel(modelName)) {
     return { includeThoughts: true, thinkingBudget: DEFAULT_THINKING_BUDGET };
   }
 
-  return userConfig;
+  return undefined;
 }
 
 /**
@@ -431,7 +532,8 @@ export function transformThinkingParts(response: unknown): unknown {
 }
 
 /**
- * Ensures thinkingConfig is valid: includeThoughts only allowed when budget > 0.
+ * Normalizes a thinkingConfig object, supporting both camelCase and snake_case.
+ * Handles thinkingLevel (for Gemini 3) and thinkingBudget (for Gemini 2.5).
  */
 export function normalizeThinkingConfig(config: unknown): ThinkingConfig | undefined {
   if (!config || typeof config !== "object") {
@@ -439,22 +541,39 @@ export function normalizeThinkingConfig(config: unknown): ThinkingConfig | undef
   }
 
   const record = config as Record<string, unknown>;
+
+  // Support both camelCase and snake_case
   const budgetRaw = record.thinkingBudget ?? record.thinking_budget;
+  const levelRaw = record.thinkingLevel ?? record.thinking_level;
   const includeRaw = record.includeThoughts ?? record.include_thoughts;
 
   const thinkingBudget = typeof budgetRaw === "number" && Number.isFinite(budgetRaw) ? budgetRaw : undefined;
+  const thinkingLevel = typeof levelRaw === "string" ? levelRaw.toLowerCase() as ThinkingLevel : undefined;
   const includeThoughts = typeof includeRaw === "boolean" ? includeRaw : undefined;
 
-  const enableThinking = thinkingBudget !== undefined && thinkingBudget > 0;
-  const finalInclude = enableThinking ? includeThoughts ?? false : false;
+  const enableThinking = (thinkingBudget !== undefined && thinkingBudget > 0) || thinkingLevel !== undefined;
+  let finalInclude = includeThoughts;
 
-  if (!enableThinking && finalInclude === false && thinkingBudget === undefined && includeThoughts === undefined) {
+  if (thinkingBudget !== undefined && thinkingBudget <= 0 && thinkingLevel === undefined) {
+    finalInclude = false;
+  }
+
+  if (
+    !enableThinking
+    && finalInclude === undefined
+    && thinkingBudget === undefined
+    && thinkingLevel === undefined
+    && includeThoughts === undefined
+  ) {
     return undefined;
   }
 
   const normalized: ThinkingConfig = {};
   if (thinkingBudget !== undefined) {
     normalized.thinkingBudget = thinkingBudget;
+  }
+  if (thinkingLevel !== undefined) {
+    normalized.thinkingLevel = thinkingLevel;
   }
   if (finalInclude !== undefined) {
     normalized.includeThoughts = finalInclude;

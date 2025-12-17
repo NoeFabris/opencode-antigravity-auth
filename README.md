@@ -301,6 +301,71 @@ The `/connect` command in the TUI adds accounts non-destructively — it will ne
 - If Google revokes a refresh token (`invalid_grant`), that account is automatically removed from the pool
 - Rerun `opencode auth login` to re-add the account
 
+## Thinking Configuration
+
+Gemini models support "thinking" (extended reasoning). The plugin uses model-appropriate parameters per [Google's documentation](https://ai.google.dev/gemini-api/docs/thinking).
+
+### Gemini 3 Models (thinkingLevel)
+
+Gemini 3 models use `thinkingLevel` to control reasoning depth:
+
+| Model | Valid Levels | Default |
+|-------|--------------|---------|
+| gemini-3-pro | `"low"`, `"high"` | `"high"` (dynamic) |
+| gemini-3-flash | `"minimal"`, `"low"`, `"medium"`, `"high"` | `"high"` (dynamic) |
+
+**Default behavior:** If you don't specify a thinkingLevel, the API uses its default (`"high"` with dynamic reasoning).
+
+To override, configure in your model options in `opencode.json`:
+
+```json
+{
+  "provider": {
+    "google": {
+      "models": {
+        "gemini-3-pro-low": {
+          "name": "Gemini 3 Pro Low",
+          "options": {
+            "thinkingConfig": {
+              "thinkingLevel": "low"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Gemini 2.5 Models (thinkingBudget)
+
+Gemini 2.5 models use `thinkingBudget` (token count):
+
+| Setting | Behavior |
+|---------|----------|
+| Not set | Dynamic thinking (API decides) |
+| `0` | Disable thinking |
+| `-1` | Dynamic thinking |
+| `128` to `32768` | Fixed budget (varies by model) |
+
+```json
+{
+  "provider": {
+    "google": {
+      "models": {
+        "gemini-2.5-flash": {
+          "options": {
+            "thinkingConfig": {
+              "thinkingBudget": 8192
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
 ## Architecture & Flow
 
 For contributors and advanced users, see the detailed documentation:
@@ -387,5 +452,4 @@ Built with help and inspiration from:
 If this plugin helps you, consider supporting its continued maintenance:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/S6S81QBOIR)
-
 

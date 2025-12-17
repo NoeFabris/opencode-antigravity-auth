@@ -244,7 +244,7 @@ describe("extractThinkingConfig", () => {
       { thinkingConfig: { includeThoughts: true } },
       undefined,
     );
-    expect(result).toEqual({ includeThoughts: true, thinkingBudget: DEFAULT_THINKING_BUDGET });
+    expect(result).toEqual({ includeThoughts: true });
   });
 });
 
@@ -252,7 +252,7 @@ describe("resolveThinkingConfig", () => {
   it("keeps thinking enabled for Claude models with assistant history", () => {
     const result = resolveThinkingConfig(
       { includeThoughts: true, thinkingBudget: 8000 },
-      true, // isThinkingModel
+      "claude-opus-4-5-thinking",
       true, // isClaudeModel
       true, // hasAssistantHistory
     );
@@ -262,7 +262,7 @@ describe("resolveThinkingConfig", () => {
   it("enables thinking for thinking-capable models without user config", () => {
     const result = resolveThinkingConfig(
       undefined,
-      true, // isThinkingModel
+      "claude-opus-4-5-thinking",
       false, // isClaudeModel
       false, // hasAssistantHistory
     );
@@ -273,7 +273,7 @@ describe("resolveThinkingConfig", () => {
     const userConfig = { includeThoughts: false, thinkingBudget: 5000 };
     const result = resolveThinkingConfig(
       userConfig,
-      true,
+      "gemini-2.5-flash",
       false,
       false,
     );
@@ -284,17 +284,24 @@ describe("resolveThinkingConfig", () => {
     const userConfig = { includeThoughts: true, thinkingBudget: 8000 };
     const result = resolveThinkingConfig(
       userConfig,
-      true,
+      "claude-opus-4-5-thinking",
       true, // isClaudeModel
       false, // no history
     );
     expect(result).toEqual(userConfig);
   });
 
+  it("skips defaults for Gemini 3/2.5 when no user config", () => {
+    const gemini3 = resolveThinkingConfig(undefined, "gemini-3-pro", false, false);
+    const gemini25 = resolveThinkingConfig(undefined, "gemini-2.5-flash", false, false);
+    expect(gemini3).toBeUndefined();
+    expect(gemini25).toBeUndefined();
+  });
+
   it("returns undefined for non-thinking model without user config", () => {
     const result = resolveThinkingConfig(
       undefined,
-      false, // not thinking model
+      "gpt-4o", // not thinking model
       false,
       false,
     );
@@ -627,8 +634,7 @@ describe("normalizeThinkingConfig", () => {
       thinkingBudget: Infinity,
       includeThoughts: true,
     });
-    // When budget is non-finite (undefined), includeThoughts is forced to false
-    expect(result).toEqual({ includeThoughts: false });
+    expect(result).toEqual({ includeThoughts: true });
   });
 });
 
