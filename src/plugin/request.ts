@@ -249,8 +249,17 @@ export function prepareAntigravityRequest(
             const functionDeclarations: any[] = [];
             const passthroughTools: any[] = [];
 
-            // Normalizes JSON schemas for Claude models via Antigravity.
-            // Preserves anyOf/allOf/oneOf (supported by Anthropic API/JSON Schema Draft 2020-12).
+            /**
+             * Recursively normalizes JSON schemas for Claude models via Antigravity.
+             * Preserves JSON Schema Draft 2020-12 combinators (anyOf/allOf/oneOf) and
+             * recursively processes nested schemas in properties, items, additionalProperties,
+             * conditional keywords (if/then/else), negation (not), array constraints
+             * (contains/prefixItems), object constraints (patternProperties/propertyNames),
+             * and schema definitions ($defs/definitions).
+             *
+             * @param schema - The JSON schema object to normalize
+             * @returns Normalized schema with all nested schemas recursively processed
+             */
             const normalizeSchemaRecursive = (schema: any): any => {
               if (!schema || typeof schema !== "object") {
                 return schema;
@@ -272,6 +281,33 @@ export function prepareAntigravityRequest(
                   result[key] = value.map((item: any) =>
                     typeof item === "object" ? normalizeSchemaRecursive(item) : item
                   );
+                } else if ((key === "if" || key === "then" || key === "else" || key === "not") && value && typeof value === "object") {
+                  // Conditional schemas (if/then/else) and negation (not)
+                  result[key] = normalizeSchemaRecursive(value);
+                } else if ((key === "contains" || key === "propertyNames") && value && typeof value === "object") {
+                  // Array constraint (contains) and object constraint (propertyNames)
+                  result[key] = normalizeSchemaRecursive(value);
+                } else if (key === "prefixItems" && Array.isArray(value)) {
+                  // Array of schemas for tuple validation
+                  result.prefixItems = value.map((item: any) =>
+                    typeof item === "object" ? normalizeSchemaRecursive(item) : item
+                  );
+                } else if (key === "patternProperties" && value && typeof value === "object") {
+                  // Object constraint: map pattern keys to schemas
+                  result.patternProperties = {};
+                  for (const [patternKey, patternValue] of Object.entries(value)) {
+                    result.patternProperties[patternKey] = typeof patternValue === "object"
+                      ? normalizeSchemaRecursive(patternValue)
+                      : patternValue;
+                  }
+                } else if ((key === "$defs" || key === "definitions") && value && typeof value === "object") {
+                  // Schema definitions: map definition names to schemas
+                  result[key] = {};
+                  for (const [defKey, defValue] of Object.entries(value)) {
+                    result[key][defKey] = typeof defValue === "object"
+                      ? normalizeSchemaRecursive(defValue)
+                      : defValue;
+                  }
                 } else {
                   result[key] = value;
                 }
@@ -279,6 +315,14 @@ export function prepareAntigravityRequest(
               return result;
             };
 
+            /**
+             * Normalizes a top-level JSON schema for Claude tool declarations.
+             * Handles missing/invalid schemas by returning a strict void schema.
+             * Uses structuredClone to ensure the original schema object is not mutated.
+             *
+             * @param schema - The JSON schema object to normalize
+             * @returns Normalized schema suitable for Claude API, with void fallback for invalid inputs
+             */
             const normalizeSchema = (schema: any) => {
               // Handle missing or invalid schemas
               if (!schema || typeof schema !== "object" || Object.keys(schema).length === 0) {
@@ -305,6 +349,13 @@ export function prepareAntigravityRequest(
             };
 
             requestPayload.tools.forEach((tool: any, idx: number) => {
+              /**
+               * Extracts tool declaration metadata (name, description, schema) from various
+               * tool definition formats and pushes a normalized functionDeclaration entry.
+               *
+               * @param decl - The tool declaration object (from functionDeclarations, function, or custom)
+               * @param source - Debug label indicating the source of this declaration
+               */
               const pushDeclaration = (decl: any, source: string) => {
                 const schema =
                   decl?.parameters ||

@@ -3,6 +3,14 @@ import { prepareAntigravityRequest } from "./request";
 
 type RequestBody = Record<string, unknown>;
 
+/**
+ * Helper to build and parse Antigravity requests for testing tool normalization.
+ *
+ * @param model - The model name (e.g. "claude-3.5", "gemini-2.0")
+ * @param body - The request body containing tools and contents
+ * @param action - The API action (default: "generateContent")
+ * @returns Parsed request payload components for assertion
+ */
 function buildAntigravityRequest(
   model: string,
   body: RequestBody,
@@ -170,5 +178,50 @@ describe("prepareAntigravityRequest tool normalization", () => {
     const functionDecls = tools?.[0]?.functionDeclarations as Record<string, unknown>[] | undefined;
     const normalizedSchema = functionDecls?.[0]?.parameters as Record<string, unknown> | undefined;
     expect(normalizedSchema?.properties).toEqual(sharedSchema.properties);
+  });
+
+  test("recursively normalizes nested schemas in properties and prefixItems", () => {
+    const nestedSchema = {
+      type: "object",
+      properties: {
+        config: {
+          anyOf: [{ type: "string" }, { type: "object" }],
+        },
+      },
+      prefixItems: [
+        { type: "string" },
+        {
+          type: "object",
+          properties: {
+            nested: { oneOf: [{ type: "number" }, { type: "boolean" }] },
+          },
+        },
+      ],
+    };
+
+    const payload: RequestBody = {
+      contents: [],
+      tools: [
+        {
+          functionDeclarations: [
+            { name: "nested-tool", parameters: nestedSchema },
+          ],
+        },
+      ],
+    };
+
+    const { requestPayload } = buildAntigravityRequest("claude-3.5", payload);
+    const tools = requestPayload.tools as Record<string, unknown>[];
+    const functionDecls = tools?.[0]?.functionDeclarations as Record<string, unknown>[] | undefined;
+    const params = functionDecls?.[0]?.parameters as Record<string, unknown>;
+
+    // Verify nested anyOf in properties was preserved
+    expect((params?.properties as any)?.config?.anyOf).toEqual(nestedSchema.properties.config.anyOf);
+
+    // Verify nested oneOf in prefixItems was preserved
+    const prefixItems = params?.prefixItems as any[];
+    expect(prefixItems?.[1]?.properties?.nested?.oneOf).toEqual(
+      (nestedSchema.prefixItems[1] as any).properties.nested.oneOf
+    );
   });
 });
