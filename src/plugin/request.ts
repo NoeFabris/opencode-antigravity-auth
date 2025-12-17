@@ -249,55 +249,59 @@ export function prepareAntigravityRequest(
             const functionDeclarations: any[] = [];
             const passthroughTools: any[] = [];
 
-            // Sanitize schema - remove features not supported by JSON Schema draft 2020-12
-            // Recursively strips anyOf/allOf/oneOf and converts to permissive types
-            const sanitizeSchema = (schema: any): any => {
+            // Normalizes JSON schemas for Claude models via Antigravity.
+            // Preserves anyOf/allOf/oneOf (supported by Anthropic API/JSON Schema Draft 2020-12).
+            const normalizeSchemaRecursive = (schema: any): any => {
               if (!schema || typeof schema !== "object") {
                 return schema;
               }
 
-              const sanitized: any = {};
+              const result: any = {};
 
-              for (const key of Object.keys(schema)) {
-                // Skip anyOf/allOf/oneOf - not well supported
-                if (key === "anyOf" || key === "allOf" || key === "oneOf") {
-                  continue;
-                }
-
-                const value = schema[key];
-
-                if (key === "items" && value && typeof value === "object") {
-                  // Handle array items - if it has anyOf, replace with permissive type
-                  if (value.anyOf || value.allOf || value.oneOf) {
-                    sanitized.items = {};
-                  } else {
-                    sanitized.items = sanitizeSchema(value);
+              for (const [key, value] of Object.entries(schema)) {
+                if (key === "properties" && value && typeof value === "object") {
+                  result.properties = {};
+                  for (const [propKey, propValue] of Object.entries(value)) {
+                    result.properties[propKey] = normalizeSchemaRecursive(propValue);
                   }
-                } else if (key === "properties" && value && typeof value === "object") {
-                  // Recursively sanitize properties
-                  sanitized.properties = {};
-                  for (const propKey of Object.keys(value)) {
-                    sanitized.properties[propKey] = sanitizeSchema(value[propKey]);
-                  }
+                } else if (key === "items" && value && typeof value === "object") {
+                  result.items = normalizeSchemaRecursive(value);
                 } else if (key === "additionalProperties" && value && typeof value === "object") {
-                  sanitized.additionalProperties = sanitizeSchema(value);
+                  result.additionalProperties = normalizeSchemaRecursive(value);
+                } else if ((key === "anyOf" || key === "allOf" || key === "oneOf") && Array.isArray(value)) {
+                  result[key] = value.map((item: any) =>
+                    typeof item === "object" ? normalizeSchemaRecursive(item) : item
+                  );
                 } else {
-                  sanitized[key] = value;
+                  result[key] = value;
                 }
               }
-
-              return sanitized;
+              return result;
             };
 
             const normalizeSchema = (schema: any) => {
-              if (!schema || typeof schema !== "object") {
+              // Handle missing or invalid schemas
+              if (!schema || typeof schema !== "object" || Object.keys(schema).length === 0) {
                 toolDebugMissing += 1;
-                // Minimal fallback for tools without schemas
-                return { type: "object" };
+                // Proper void schema: accepts no parameters
+                return {
+                  type: "object",
+                  properties: {},
+                  additionalProperties: false
+                };
               }
 
-              // Sanitize and pass through
-              return sanitizeSchema(schema);
+              // Handle schemas with only 'type: object' (effectively void)
+              if (schema.type === "object" && !schema.properties && !schema.additionalProperties) {
+                return {
+                  ...schema,
+                  properties: {},
+                  additionalProperties: false
+                };
+              }
+
+              const normalized = structuredClone(schema);
+              return normalizeSchemaRecursive(normalized);
             };
 
             requestPayload.tools.forEach((tool: any, idx: number) => {
