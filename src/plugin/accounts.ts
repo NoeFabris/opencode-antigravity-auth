@@ -1,5 +1,6 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
 import { loadAccounts, saveAccounts, type AccountStorageV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle } from "./storage";
+import { isAccountReserved, reserveAccount, releaseAccount } from "./reservation";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 
 export type { ModelFamily, HeaderStyle } from "./storage";
@@ -215,6 +216,27 @@ export class AccountManager {
     return next;
   }
 
+  async getCurrentOrNextForFamilyWithReservation(family: ModelFamily): Promise<ManagedAccount | null> {
+    const current = this.getCurrentAccountForFamily(family);
+    if (current) {
+      clearExpiredRateLimits(current);
+      if (!isRateLimitedForFamily(current, family)) {
+        const reserved = await isAccountReserved(current.index, family);
+        if (!reserved) {
+          await reserveAccount(current.index, family);
+          current.lastUsed = nowMs();
+          return current;
+        }
+      }
+    }
+
+    const next = await this.getNextForFamilyWithReservation(family);
+    if (next) {
+      this.currentAccountIndexByFamily[family] = next.index;
+    }
+    return next;
+  }
+
   getNextForFamily(family: ModelFamily): ManagedAccount | null {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
@@ -233,6 +255,38 @@ export class AccountManager {
     this.cursor++;
     account.lastUsed = nowMs();
     return account;
+  }
+
+  async getNextForFamilyWithReservation(family: ModelFamily): Promise<ManagedAccount | null> {
+    const available: ManagedAccount[] = [];
+
+    for (const a of this.accounts) {
+      clearExpiredRateLimits(a);
+      if (isRateLimitedForFamily(a, family)) continue;
+
+      const reserved = await isAccountReserved(a.index, family);
+      if (reserved) continue;
+
+      available.push(a);
+    }
+
+    if (available.length === 0) {
+      return this.getNextForFamily(family);
+    }
+
+    const account = available[this.cursor % available.length];
+    if (!account) {
+      return null;
+    }
+
+    await reserveAccount(account.index, family);
+    this.cursor++;
+    account.lastUsed = nowMs();
+    return account;
+  }
+
+  async releaseAccountReservation(accountIndex: number): Promise<void> {
+    await releaseAccount(accountIndex);
   }
 
   markRateLimited(account: ManagedAccount, retryAfterMs: number, family: ModelFamily, headerStyle: HeaderStyle = "antigravity"): void {

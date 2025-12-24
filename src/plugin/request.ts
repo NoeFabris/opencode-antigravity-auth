@@ -27,6 +27,7 @@ import {
   transformThinkingParts,
   type AntigravityApiBody,
 } from "./request-helpers";
+import { fixDcpSyntheticMessages } from "./compat";
 
 /**
  * Stable session ID for the plugin's lifetime.
@@ -825,6 +826,11 @@ export function prepareAntigravityRequest(
           stripInjectedDebugFromRequestPayload(req as Record<string, unknown>);
 
           if (isClaudeModel) {
+            // Step 0: Fix DCP synthetic messages that lack thinking blocks
+            if (isClaudeThinkingModel && Array.isArray((req as any).messages)) {
+              (req as any).messages = fixDcpSyntheticMessages((req as any).messages);
+            }
+
             // Step 1: Strip corrupted/unsigned thinking blocks FIRST
             deepFilterThinkingBlocks(req, signatureSessionKey, getCachedSignature, true);
 
@@ -1184,6 +1190,11 @@ export function prepareAntigravityRequest(
         // Attempts to restore signatures from cache for multi-turn conversations
         // Handle both Gemini-style contents[] and Anthropic-style messages[] payloads.
         if (isClaudeModel) {
+          // Step 0: Fix DCP synthetic messages that lack thinking blocks
+          if (isClaudeThinkingModel && Array.isArray(requestPayload.messages)) {
+            requestPayload.messages = fixDcpSyntheticMessages(requestPayload.messages);
+          }
+
           // Step 1: Strip corrupted/unsigned thinking blocks FIRST
           deepFilterThinkingBlocks(requestPayload, signatureSessionKey, getCachedSignature, true);
 

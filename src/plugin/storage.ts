@@ -89,6 +89,10 @@ export function getStoragePath(): string {
   return join(getConfigDir(), "antigravity-accounts.json");
 }
 
+export function getReservationPath(): string {
+  return join(getConfigDir(), "antigravity-reservations.json");
+}
+
 function migrateV1ToV2(v1: AccountStorageV1): AccountStorage {
   return {
     version: 2,

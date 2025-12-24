@@ -1026,6 +1026,50 @@ export function filterUnsignedThinkingBlocks(
 }
 
 /**
+ * Ensures all assistant messages start with a thinking block for Claude thinking models.
+ * DCP (Dynamic Context Pruning) creates synthetic assistant messages that lack thinking blocks,
+ * which causes Claude API to reject with "Expected 'thinking', but found 'text'".
+ * 
+ * This function injects a redacted_thinking block at the start of any assistant message
+ * that doesn't already begin with a thinking/redacted_thinking block.
+ */
+export function ensureAssistantMessagesHaveThinking(messages: any[]): any[] {
+  return messages.map((message: any) => {
+    if (!message || typeof message !== "object") {
+      return message;
+    }
+
+    if (message.role !== "assistant") {
+      return message;
+    }
+
+    const content = message.content;
+    if (!Array.isArray(content) || content.length === 0) {
+      return message;
+    }
+
+    const firstBlock = content[0];
+    if (!firstBlock || typeof firstBlock !== "object") {
+      return message;
+    }
+
+    if (firstBlock.type === "thinking" || firstBlock.type === "redacted_thinking") {
+      return message;
+    }
+
+    const syntheticThinking = {
+      type: "redacted_thinking",
+      data: "W0RDUF0=",
+    };
+
+    return {
+      ...message,
+      content: [syntheticThinking, ...content],
+    };
+  });
+}
+
+/**
  * Filters thinking blocks from Anthropic-style messages[] payloads using cached signatures.
  */
 export function filterMessagesThinkingBlocks(

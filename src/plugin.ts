@@ -26,6 +26,7 @@ import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
 import { clearAccounts, loadAccounts, saveAccounts } from "./plugin/storage";
 import { AccountManager, type ModelFamily } from "./plugin/accounts";
+import { releaseAllReservations, releaseAllReservationsSync, applyStartupJitter } from "./plugin/reservation";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import type {
   GetAuth,
@@ -41,6 +42,34 @@ const MAX_WARMUP_SESSIONS = 1000;
 const MAX_WARMUP_RETRIES = 2;
 const warmupAttemptedSessionIds = new Set<string>();
 const warmupSucceededSessionIds = new Set<string>();
+
+let jitterApplied = false;
+let cleanupRegistered = false;
+
+function registerProcessCleanup(): void {
+  if (cleanupRegistered) return;
+  cleanupRegistered = true;
+
+  process.on("exit", () => {
+    releaseAllReservationsSync();
+  });
+
+  process.on("SIGINT", async () => {
+    await releaseAllReservations();
+    process.exit(0);
+  });
+
+  process.on("SIGTERM", async () => {
+    await releaseAllReservations();
+    process.exit(0);
+  });
+}
+
+async function ensureJitterApplied(): Promise<void> {
+  if (jitterApplied) return;
+  jitterApplied = true;
+  await applyStartupJitter();
+}
 
 function trackWarmupAttempt(sessionId: string): boolean {
   if (warmupSucceededSessionIds.has(sessionId)) {
@@ -514,6 +543,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
         }
       }
 
+      registerProcessCleanup();
+
       if (isDebugEnabled()) {
         const logPath = getLogFilePath();
         if (logPath) {
@@ -615,7 +646,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
               throw new Error("No Antigravity accounts available. Run `opencode auth login`.");
             }
 
-            const account = accountManager.getCurrentOrNextForFamily(family);
+            await ensureJitterApplied();
+            const account = await accountManager.getCurrentOrNextForFamilyWithReservation(family);
             
             if (!account) {
               // All accounts are rate-limited - wait and retry
