@@ -42,7 +42,7 @@ If the agent only installs the plugin, ask it to also add models under `provider
 
    ```json
    {
-     "plugin": ["opencode-antigravity-auth@1.2.3"]
+     "plugin": ["opencode-antigravity-auth@1.2.4"]
    }
    ```
 
@@ -60,7 +60,7 @@ If the agent only installs the plugin, ask it to also add models under `provider
 
    ```json
    {
-     "plugin": ["opencode-antigravity-auth@1.2.3"],
+     "plugin": ["opencode-antigravity-auth@1.2.4"],
      "provider": {
        "google": {
          "models": {
@@ -110,14 +110,14 @@ mkdir -p ~/.config/opencode
 
 if [ -f ~/.config/opencode/opencode.json ]; then
     if command -v jq &> /dev/null; then
-        jq '.plugin = ((.plugin // []) + ["opencode-antigravity-auth@1.2.3"] | unique)' \
+        jq '.plugin = ((.plugin // []) + ["opencode-antigravity-auth@1.2.4"] | unique)' \
             ~/.config/opencode/opencode.json > /tmp/oc.json && \
             mv /tmp/oc.json ~/.config/opencode/opencode.json
     else
-        echo "Add \"opencode-antigravity-auth@1.2.3\" to the plugin array manually"
+        echo "Add \"opencode-antigravity-auth@1.2.4\" to the plugin array manually"
     fi
 else
-    echo '{"plugin":["opencode-antigravity-auth@1.2.3"]}' > ~/.config/opencode/opencode.json
+    echo '{"plugin":["opencode-antigravity-auth@1.2.4"]}' > ~/.config/opencode/opencode.json
 fi
 ```
 

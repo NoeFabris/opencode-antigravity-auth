@@ -4,11 +4,31 @@
 
 Switching from non-Claude providers to Antigravity Claude can carry foreign thinking signatures. Claude rejects those with "Invalid signature in thinking block."
 
-## Solution: Unconditional Stripping for Claude Models
+## Solution: Unconditional Stripping for Claude Models (Default)
 
-For Claude models, all thinking/reasoning blocks are **unconditionally stripped** from outgoing requests. This eliminates signature validation errors entirely.
+For Claude models, all thinking/reasoning blocks are **unconditionally stripped** from outgoing requests by default. This eliminates signature validation errors entirely.
 
-### Why This Approach?
+### Opt-in: Preserve Thinking Blocks
+
+If you want to preserve thinking blocks (for maximum context), you can opt-in:
+
+```bash
+export OPENCODE_ANTIGRAVITY_KEEP_THINKING=1
+```
+
+**Trade-offs:**
+
+| Mode | Reliability | Context | Token Usage |
+|------|-------------|---------|-------------|
+| **Strip (default)** | 100% | Slightly reduced | ~5-15% more |
+| **Keep (opt-in)** | ~80-90% | Full | Normal |
+
+**When to use `KEEP_THINKING=1`:**
+- You need maximum context across multi-turn conversations
+- Your OpenCode setup doesn't modify thinking blocks
+- You're willing to accept occasional signature errors
+
+### Why Stripping is the Default
 
 Previous attempts to validate/restore signatures had too many edge cases:
 - Session IDs can differ between requests

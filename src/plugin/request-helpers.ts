@@ -1,3 +1,5 @@
+import { KEEP_THINKING_BLOCKS } from "../constants.js";
+
 const ANTIGRAVITY_PREVIEW_LINK = "https://goo.gle/enable-preview-features"; // TODO: Update to Antigravity link if available
 
 // ============================================================================
@@ -920,7 +922,9 @@ function filterContentArray(
   getCachedSignatureFn?: (sessionId: string, text: string) => string | undefined,
   isClaudeModel?: boolean,
 ): any[] {
-  if (isClaudeModel) {
+  // For Claude models, strip thinking blocks by default for reliability
+  // User can opt-in to keep thinking via OPENCODE_ANTIGRAVITY_KEEP_THINKING=1
+  if (isClaudeModel && !KEEP_THINKING_BLOCKS) {
     return stripAllThinkingBlocks(contentArray);
   }
 

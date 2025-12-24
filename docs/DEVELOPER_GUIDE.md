@@ -449,6 +449,7 @@ const isThinkingModel = modelId.includes("thinking");
 | `OPENCODE_ANTIGRAVITY_DEBUG` | `1`, `2` | Debug logging level |
 | `OPENCODE_ANTIGRAVITY_QUIET` | `1` | Suppress toast notifications |
 | `OPENCODE_ANTIGRAVITY_LOG_DIR` | path | Custom log directory |
+| `OPENCODE_ANTIGRAVITY_KEEP_THINKING` | `1` | Preserve thinking blocks for Claude (experimental, may cause signature errors) |
 
 ---
 
