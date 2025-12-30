@@ -160,6 +160,9 @@ if command -v jq &> /dev/null; then
       "gemini-3-pro-low": {"name": "Gemini 3 Pro Low (Antigravity)", "limit": {"context": 1048576, "output": 65535}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
       "gemini-3-pro-high": {"name": "Gemini 3 Pro High (Antigravity)", "limit": {"context": 1048576, "output": 65535}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
       "gemini-3-flash": {"name": "Gemini 3 Flash (Antigravity)", "limit": {"context": 1048576, "output": 65536}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
+      "gemini-3-flash-preview-low": {"name": "Gemini 3 Flash Preview Low (Antigravity)", "limit": {"context": 1048576, "output": 65535}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
+      "gemini-3-flash-preview-medium": {"name": "Gemini 3 Flash Preview Medium (Antigravity)", "limit": {"context": 1048576, "output": 65535}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
+      "gemini-3-flash-preview-high": {"name": "Gemini 3 Flash Preview High (Antigravity)", "limit": {"context": 1048576, "output": 65535}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
       "claude-sonnet-4-5": {"name": "Claude Sonnet 4.5 (Antigravity)", "limit": {"context": 200000, "output": 64000}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
       "claude-sonnet-4-5-thinking-low": {"name": "Claude Sonnet 4.5 Thinking Low (Antigravity)", "limit": {"context": 200000, "output": 64000}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
       "claude-sonnet-4-5-thinking-medium": {"name": "Claude Sonnet 4.5 Thinking Medium (Antigravity)", "limit": {"context": 200000, "output": 64000}, "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]}},
@@ -300,6 +303,9 @@ Add these models to your `~/.config/opencode/opencode.json` under `provider.goog
 | `gemini-3-pro-low` | Gemini 3 Pro (low thinking) | thinkingLevel: "low" |
 | `gemini-3-pro-high` | Gemini 3 Pro (high thinking) | thinkingLevel: "high" |
 | `gemini-3-flash` | Gemini 3 Flash | Default |
+| `gemini-3-flash-preview-low` | Gemini 3 Flash Preview (low thinking) | thinkingLevel: "low" |
+| `gemini-3-flash-preview-medium` | Gemini 3 Flash Preview (medium thinking) | thinkingLevel: "medium" |
+| `gemini-3-flash-preview-high` | Gemini 3 Flash Preview (high thinking) | thinkingLevel: "high" |
 
 ### Claude Models
 
@@ -342,6 +348,21 @@ Add these models to your `~/.config/opencode/opencode.json` under `provider.goog
         "gemini-3-flash": {
           "name": "Gemini 3 Flash (Antigravity)",
           "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-flash-preview-low": {
+          "name": "Gemini 3 Flash Preview Low (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-flash-preview-medium": {
+          "name": "Gemini 3 Flash Preview Medium (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-flash-preview-high": {
+          "name": "Gemini 3 Flash Preview High (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "claude-sonnet-4-5": {
