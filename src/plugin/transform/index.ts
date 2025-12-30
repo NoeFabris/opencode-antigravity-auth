@@ -52,3 +52,13 @@ export {
   applyGeminiTransforms,
 } from "./gemini";
 export type { GeminiTransformOptions, GeminiTransformResult } from "./gemini";
+
+// Cross-model sanitization
+export {
+  sanitizeCrossModelPayload,
+  sanitizeCrossModelPayloadInPlace,
+  getModelFamily as getCrossModelFamily,
+  stripGeminiThinkingMetadata,
+  stripClaudeThinkingFields,
+} from "./cross-model-sanitizer";
+export type { SanitizerOptions } from "./cross-model-sanitizer";

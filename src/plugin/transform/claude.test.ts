@@ -770,6 +770,21 @@ describe("applyClaudeTransforms", () => {
     expect(result.toolDebugMissing).toBe(1);
     expect(result.toolDebugSummaries).toContain("decl=my_tool,src=function/custom,hasSchema=n");
   });
+
+  it("converts stop_sequences in generationConfig", () => {
+    const payload: RequestPayload = {
+      generationConfig: { stop_sequences: ["END"] },
+    };
+    
+    applyClaudeTransforms(payload, {
+      model: "claude-sonnet-4-5",
+      cleanJSONSchema: mockCleanJSONSchema,
+    });
+    
+    const genConfig = payload.generationConfig as any;
+    expect(genConfig.stopSequences).toEqual(["END"]);
+    expect(genConfig.stop_sequences).toBeUndefined();
+  });
 });
 
 describe("constants", () => {

@@ -288,6 +288,18 @@ export function normalizeClaudeTools(
 }
 
 /**
+ * Convert snake_case stop_sequences to camelCase stopSequences.
+ */
+export function convertStopSequences(
+  generationConfig: Record<string, unknown>,
+): void {
+  if (Array.isArray(generationConfig.stop_sequences)) {
+    generationConfig.stopSequences = generationConfig.stop_sequences;
+    delete generationConfig.stop_sequences;
+  }
+}
+
+/**
  * Apply all Claude-specific transformations to a request payload.
  */
 export interface ClaudeTransformOptions {
@@ -318,6 +330,10 @@ export function applyClaudeTransforms(
 
   // 1. Configure tool calling mode
   configureClaudeToolConfig(payload);
+
+  if (payload.generationConfig) {
+    convertStopSequences(payload.generationConfig as Record<string, unknown>);
+  }
 
   // 2. Apply thinking config if needed
   if (normalizedThinking) {

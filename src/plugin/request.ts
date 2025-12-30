@@ -51,6 +51,7 @@ import {
   closeToolLoopForThinking,
   needsThinkingRecovery,
 } from "./thinking-recovery";
+import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
 import {
   resolveModelWithTier,
   isClaudeModel,
@@ -678,6 +679,9 @@ export function prepareAntigravityRequest(
           stripInjectedDebugFromRequestPayload(req as Record<string, unknown>);
 
           if (isClaude) {
+            // Step 0: Sanitize cross-model metadata (strips Gemini signatures when sending to Claude)
+            sanitizeCrossModelPayloadInPlace(req, { targetModel: effectiveModel });
+
             // Step 1: Strip corrupted/unsigned thinking blocks FIRST
             deepFilterThinkingBlocks(req, signatureSessionKey, getCachedSignature, true);
 
