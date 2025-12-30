@@ -726,12 +726,14 @@ function hasSignatureField(part: Record<string, unknown>): boolean {
  * Tool blocks must never be filtered - they're required for tool call/result pairing.
  * Handles multiple formats:
  * - Anthropic: { type: "tool_use" }, { type: "tool_result", tool_use_id }
+ * - OpenCode: { type: "tool" }
  * - Nested: { tool_result: { tool_use_id } }, { tool_use: { id } }
  * - Gemini: { functionCall }, { functionResponse }
  */
 function isToolBlock(part: Record<string, unknown>): boolean {
   return part.type === "tool_use"
     || part.type === "tool_result"
+    || part.type === "tool"
     || part.tool_use_id !== undefined
     || part.tool_call_id !== undefined
     || part.tool_result !== undefined
@@ -742,18 +744,64 @@ function isToolBlock(part: Record<string, unknown>): boolean {
 }
 
 /**
+ * Strips thought signatures from tool parts, including Google metadata.
+ * Gemini may attach thoughtSignature to tool blocks (top-level or metadata.google),
+ * which Claude cannot validate when processing cross-model session history.
+ */
+function stripGoogleThoughtSignature(part: Record<string, unknown>): Record<string, unknown> {
+  const hasTopLevelSignature = "thoughtSignature" in part || "signature" in part;
+  const base = hasTopLevelSignature
+    ? (({ thoughtSignature: _ts, signature: _sig, ...rest }) => rest)(part)
+    : part;
+
+  if (!base.metadata || typeof base.metadata !== "object") {
+    return base;
+  }
+
+  const metadata = base.metadata as Record<string, unknown>;
+  if (!metadata.google || typeof metadata.google !== "object") {
+    return base;
+  }
+
+  const google = metadata.google as Record<string, unknown>;
+  if (!("thoughtSignature" in google)) {
+    return base;
+  }
+
+  const { thoughtSignature, ...restGoogle } = google;
+  const newGoogle = Object.keys(restGoogle).length > 0 ? restGoogle : undefined;
+
+  const { google: _oldGoogle, ...restMetadata } = metadata;
+  const newMetadata = newGoogle
+    ? { ...restMetadata, google: newGoogle }
+    : (Object.keys(restMetadata).length > 0 ? restMetadata : undefined);
+
+  return newMetadata !== undefined
+    ? { ...base, metadata: newMetadata }
+    : (({ metadata: _m, ...rest }) => rest)(base);
+}
+
+/**
  * Unconditionally strips ALL thinking/reasoning blocks from a content array.
  * Used for Claude models to avoid signature validation errors entirely.
  * Claude will generate fresh thinking for each turn.
  */
 function stripAllThinkingBlocks(contentArray: any[]): any[] {
-  return contentArray.filter(item => {
-    if (!item || typeof item !== "object") return true;
-    if (isToolBlock(item)) return true;
-    if (isThinkingPart(item)) return false;
-    if (hasSignatureField(item)) return false;
-    return true;
-  });
+  return contentArray
+    .filter(item => {
+      if (!item || typeof item !== "object") return true;
+      if (isToolBlock(item)) return true;
+      if (isThinkingPart(item)) return false;
+      if (hasSignatureField(item)) return false;
+      return true;
+    })
+    .map(item => {
+      if (!item || typeof item !== "object") return item;
+      if (isToolBlock(item)) {
+        return stripGoogleThoughtSignature(item as Record<string, unknown>);
+      }
+      return item;
+    });
 }
 
 /**
