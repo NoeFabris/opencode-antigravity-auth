@@ -459,6 +459,65 @@ describe("filterUnsignedThinkingBlocks", () => {
     expect(result[1].parts[0]).toEqual({ type: "tool_result", tool_use_id: "tool_123", content: "file1.txt" });
   });
 
+  it("strips google thoughtSignature from tool metadata for Claude", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          {
+            type: "tool",
+            tool: "bash",
+            state: { status: "completed" },
+            metadata: {
+              google: { thoughtSignature: "sig", other: "keep" },
+              source: "client",
+            },
+          },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents, undefined, undefined, true);
+    expect(result[0].parts[0].metadata).toEqual({
+      google: { other: "keep" },
+      source: "client",
+    });
+  });
+
+  it("strips top-level thoughtSignature from tool blocks for Claude", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          {
+            functionCall: { name: "bash", args: { command: "ls" }, id: "tool-call-1" },
+            thoughtSignature: "sig",
+          },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents, undefined, undefined, true);
+    expect(result[0].parts[0].functionCall).toBeDefined();
+    expect(result[0].parts[0].thoughtSignature).toBeUndefined();
+  });
+
+  it("removes empty google metadata after stripping thoughtSignature", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool_789",
+            content: "ok",
+            metadata: { google: { thoughtSignature: "sig" } },
+          },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents, undefined, undefined, true);
+    expect(result[0].parts[0].metadata).toBeUndefined();
+  });
+
   it("preserves tool blocks even if they have signature-like fields", () => {
     const contents = [
       {
