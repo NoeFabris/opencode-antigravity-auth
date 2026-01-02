@@ -108,17 +108,17 @@ Create `~/.config/opencode/opencode.json`:
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "gemini-3-pro-low": {
-          "name": "Gemini 3 Pro Low (Antigravity)",
+          "name": "Gemini 3 Pro Low",
           "limit": { "context": 1048576, "output": 65535 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "gemini-3-pro-high": {
-          "name": "Gemini 3 Pro High (Antigravity)",
+          "name": "Gemini 3 Pro High",
           "limit": { "context": 1048576, "output": 65535 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "gemini-3-flash": {
-          "name": "Gemini 3 Flash (Antigravity)",
+          "name": "Gemini 3 Flash",
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
