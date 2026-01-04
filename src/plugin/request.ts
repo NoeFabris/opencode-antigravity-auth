@@ -58,6 +58,7 @@ import {
   isClaudeThinkingModel,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
 } from "./transform";
+import { applyHeaderStyleAliases } from "./quota-fallback";
 import { detectErrorType } from "./recovery";
 
 const log = createLogger("request");
@@ -81,12 +82,6 @@ function buildSignatureSessionKey(
     : "default";
   return `${sessionId}:${modelKey}:${projectPart}:${conversationPart}`;
 }
-
-
-
-
-
-
 
 function shouldCacheThinkingSignatures(model?: string): boolean {
   if (typeof model !== "string") return false;
@@ -622,7 +617,10 @@ export function prepareAntigravityRequest(
 
   // Use model resolver for tier-based thinking configuration
   const resolved = resolveModelWithTier(rawModel);
-  const effectiveModel = resolved.actualModel;
+  // Apply header-style aliases (Issue #100: quota fallback model resolution)
+  // When using Gemini CLI headers, convert tier-suffixed models to base models
+  // e.g., "gemini-3-pro-high" → "gemini-3-pro"
+  const effectiveModel = applyHeaderStyleAliases(resolved.actualModel, headerStyle);
 
   const streaming = rawAction === STREAM_ACTION;
   const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
@@ -992,7 +990,9 @@ export function prepareAntigravityRequest(
               };
 
               if (Array.isArray(tool.functionDeclarations) && tool.functionDeclarations.length > 0) {
-                tool.functionDeclarations.forEach((decl: any) => pushDeclaration(decl, "functionDeclarations"));
+                tool.functionDeclarations.forEach((decl: any) => {
+                  pushDeclaration(decl, "functionDeclarations");
+                });
                 return;
               }
 
@@ -1437,7 +1437,7 @@ export async function transformAntigravityResponse(
     const text = await response.text();
 
     if (!response.ok) {
-      let errorBody;
+      let errorBody: any;
       try {
         errorBody = JSON.parse(text);
       } catch {
