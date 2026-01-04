@@ -15,6 +15,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import type { SignatureCacheConfig } from "../config";
+import { ensureGitignoreSync } from "../storage";
 
 // =============================================================================
 // Types
@@ -339,6 +340,8 @@ export class SignatureCache {
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
+
+      ensureGitignoreSync(dir);
 
       const now = Date.now();
 
