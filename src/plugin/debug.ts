@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { env } from "node:process";
 import type { AntigravityConfig } from "./config";
+import { ensureGitignoreSync } from "./storage";
 
 const MAX_BODY_PREVIEW_CHARS = 12000;
 const MAX_BODY_VERBOSE_CHARS = 50000;
@@ -102,6 +103,10 @@ export function initializeDebug(config: AntigravityConfig): void {
   const verboseEnabled = debugLevel >= 2;
   const logFilePath = debugEnabled ? createLogFilePath(config.log_dir) : undefined;
   const logWriter = createLogWriter(logFilePath);
+
+  if (debugEnabled) {
+    ensureGitignoreSync(getConfigDir());
+  }
 
   debugState = {
     debugLevel,

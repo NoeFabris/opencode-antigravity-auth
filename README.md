@@ -438,6 +438,18 @@ OPENCODE_ANTIGRAVITY_KEEP_THINKING=1 # keep_thinking
 
 </details>
 
+## Troubleshoot
+
+### Multi account auth issues
+If you encounter auth issue please try remove `antigravity-account.json` and auth again
+
+### Gemini model not found
+Try add this line to in `google` field under `provider`
+`"npm": "@ai-sdk/google"`
+
+### Error during the session
+If you encounter error during the session, try chat `continue` the recover session mechanism should be trigger and you can continue the session, if the error blocked the session please workaround by use command `/undo` to revert to the state before the error and try again it should work
+
 ## Known Plugin Interactions
 
 ### @tarquinen/opencode-dcp
@@ -454,6 +466,17 @@ DCP creates synthetic assistant messages that lack thinking blocks. **Our plugin
 ```
 
 ### oh-my-opencode
+When using opencode-antigravity-auth, disable the built-in auth and override agent models in oh-my-opencode.json:
+```json
+{
+  "google_auth": false,
+  "agents": {
+    "frontend-ui-ux-engineer": { "model": "google/gemini-3-pro-high" },
+    "document-writer": { "model": "google/gemini-3-flash" },
+    "multimodal-looker": { "model": "google/gemini-3-flash" }
+  }
+}
+```
 
 When spawning parallel subagents, multiple processes may select the same account causing rate limit errors. **Workaround:** Add more accounts via `opencode auth login`.
 

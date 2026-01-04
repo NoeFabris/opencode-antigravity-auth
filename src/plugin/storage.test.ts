@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { deduplicateAccountsByEmail, migrateV2ToV3, loadAccounts, type AccountMetadata, type AccountStorage } from "./storage";
 import { promises as fs } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 
 describe("deduplicateAccountsByEmail", () => {
   it("returns empty array for empty input", () => {
@@ -126,7 +127,12 @@ vi.mock("node:fs", async () => {
       writeFile: vi.fn(),
       mkdir: vi.fn(),
       unlink: vi.fn(),
+      appendFile: vi.fn(),
     },
+    existsSync: vi.fn(),
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    appendFileSync: vi.fn(),
   };
 });
 
@@ -312,6 +318,118 @@ describe("Storage Migration", () => {
       expect(savedContent.accounts[0].rateLimitResetTimes).toEqual({
         "gemini-antigravity": future,
       });
+    });
+  });
+
+  describe("ensureGitignore", () => {
+    const configDir = "/tmp/opencode-test";
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("creates .gitignore when file does not exist", async () => {
+      vi.mocked(fs.readFile).mockRejectedValue({ code: "ENOENT" });
+
+      const { ensureGitignore } = await import("./storage");
+      await ensureGitignore(configDir);
+
+      expect(fs.writeFile).toHaveBeenCalled();
+      const [path, content] = vi.mocked(fs.writeFile).mock.calls[0]!;
+      expect(path).toContain(".gitignore");
+      expect(content).toContain("antigravity-accounts.json");
+      expect(content).toContain("antigravity-signature-cache.json");
+      expect(content).toContain("antigravity-logs/");
+    });
+
+    it("appends missing entries to existing .gitignore", async () => {
+      vi.mocked(fs.readFile).mockResolvedValue("existing-entry");
+
+      const { ensureGitignore } = await import("./storage");
+      await ensureGitignore(configDir);
+
+      expect(fs.appendFile).toHaveBeenCalled();
+      const [path, content] = vi.mocked(fs.appendFile).mock.calls[0]!;
+      expect(path).toContain(".gitignore");
+      expect(content).toContain("antigravity-accounts.json");
+      expect((content as string).startsWith("\n")).toBe(true);
+    });
+
+    it("does nothing when all entries already exist", async () => {
+      const existing = [
+        "antigravity-accounts.json",
+        "antigravity-signature-cache.json",
+        "antigravity-logs/",
+      ].join("\n");
+      vi.mocked(fs.readFile).mockResolvedValue(existing);
+
+      const { ensureGitignore } = await import("./storage");
+      await ensureGitignore(configDir);
+
+      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(fs.appendFile).not.toHaveBeenCalled();
+    });
+
+    it("handles permission errors gracefully", async () => {
+      vi.mocked(fs.readFile).mockRejectedValue({ code: "EACCES" });
+
+      const { ensureGitignore } = await import("./storage");
+      await expect(ensureGitignore(configDir)).resolves.not.toThrow();
+
+      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(fs.appendFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ensureGitignoreSync", () => {
+    const configDir = "/tmp/opencode-test-sync";
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("creates .gitignore when file does not exist", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const { ensureGitignoreSync } = await import("./storage");
+      ensureGitignoreSync(configDir);
+
+      expect(writeFileSync).toHaveBeenCalled();
+      const [path, content] = vi.mocked(writeFileSync).mock.calls[0]!;
+      expect(path).toContain(".gitignore");
+      expect(content).toContain("antigravity-accounts.json");
+      expect(content).toContain("antigravity-signature-cache.json");
+      expect(content).toContain("antigravity-logs/");
+    });
+
+    it("appends missing entries to existing .gitignore", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue("existing-entry");
+
+      const { ensureGitignoreSync } = await import("./storage");
+      ensureGitignoreSync(configDir);
+
+      expect(appendFileSync).toHaveBeenCalled();
+      const [path, content] = vi.mocked(appendFileSync).mock.calls[0]!;
+      expect(path).toContain(".gitignore");
+      expect(content).toContain("antigravity-accounts.json");
+      expect((content as string).startsWith("\n")).toBe(true);
+    });
+
+    it("does nothing when all entries already exist", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const existing = [
+        "antigravity-accounts.json",
+        "antigravity-signature-cache.json",
+        "antigravity-logs/",
+      ].join("\n");
+      vi.mocked(readFileSync).mockReturnValue(existing);
+
+      const { ensureGitignoreSync } = await import("./storage");
+      ensureGitignoreSync(configDir);
+
+      expect(writeFileSync).not.toHaveBeenCalled();
+      expect(appendFileSync).not.toHaveBeenCalled();
     });
   });
 });
