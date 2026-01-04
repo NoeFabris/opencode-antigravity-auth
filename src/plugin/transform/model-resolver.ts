@@ -42,11 +42,6 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-3-flash-medium": "gemini-3-flash",
   "gemini-3-flash-high": "gemini-3-flash",
 
-  // Gemini CLI models with -preview suffix
-  // These are aliased to base names for the v1internal endpoint
-  "gemini-3-pro-preview": "gemini-3-pro",
-  "gemini-3-flash-preview": "gemini-3-flash",
-
   // Claude proxy names (gemini- prefix for compatibility)
   "gemini-claude-sonnet-4-5": "claude-sonnet-4-5",
   "gemini-claude-sonnet-4-5-thinking-low": "claude-sonnet-4-5-thinking",
@@ -184,10 +179,7 @@ export function resolveModelWithTier(requestedModel: string): ResolvedModel {
   const explicitQuota = isAntigravity;
 
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
-  // When falling back to Antigravity from Gemini CLI, we need to ensure the model name
-  // is recognizable by the internal backend.
-  const isGemini3Preview = modelWithoutQuota.toLowerCase().endsWith("-preview") && isGemini3;
-  const skipAlias = (isAntigravity && isGemini3) || (quotaPreference === "antigravity" && isGemini3Preview);
+  const skipAlias = isAntigravity && isGemini3;
 
   const actualModel = skipAlias
     ? modelWithoutQuota
