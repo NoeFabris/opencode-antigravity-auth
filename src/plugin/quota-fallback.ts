@@ -30,12 +30,8 @@ export function applyHeaderStyleAliases(
   effectiveModel: string,
   headerStyle: HeaderStyle
 ): string {
-  // When using Gemini CLI headers, apply MODEL_ALIASES
-  // This handles the quota fallback case where we switch from Antigravity → Gemini CLI
-  if (headerStyle === "gemini-cli") {
-    return MODEL_ALIASES[effectiveModel] || effectiveModel;
-  }
-  
-  // Antigravity accepts tier-suffixed models as-is
+  // BUG: Original behavior - no alias application
+  // This causes 500 errors when falling back to Gemini CLI
+  // because Gemini CLI doesn't recognize tier-suffixed models like "gemini-3-pro-high"
   return effectiveModel;
 }
