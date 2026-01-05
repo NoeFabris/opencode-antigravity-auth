@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isThinkingCapableModel,
   extractThinkingConfig,
+  extractVariantThinkingConfig,
   resolveThinkingConfig,
   filterUnsignedThinkingBlocks,
   filterMessagesThinkingBlocks,
@@ -1527,5 +1528,57 @@ describe("createSyntheticErrorResponse", () => {
     const messageDelta = events.find((e) => e.type === "message_delta");
 
     expect(messageDelta?.delta?.stop_reason).toBe("end_turn");
+  });
+});
+
+describe("extractVariantThinkingConfig", () => {
+  it("returns undefined for undefined input", () => {
+    expect(extractVariantThinkingConfig(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined for empty object", () => {
+    expect(extractVariantThinkingConfig({})).toBeUndefined();
+  });
+
+  it("extracts thinkingBudget from Google format", () => {
+    const result = extractVariantThinkingConfig({
+      google: { thinkingConfig: { thinkingBudget: 16384 } },
+    });
+    expect(result).toEqual({ thinkingBudget: 16384 });
+  });
+
+  it("extracts budgetTokens from Anthropic format", () => {
+    const result = extractVariantThinkingConfig({
+      anthropic: { thinking: { type: "enabled", budgetTokens: 8192 } },
+    });
+    expect(result).toEqual({ thinkingBudget: 8192 });
+  });
+
+  it("maps OpenRouter effort to budget", () => {
+    expect(extractVariantThinkingConfig({
+      openrouter: { reasoning: { effort: "low" } },
+    })).toEqual({ thinkingBudget: 8192 });
+
+    expect(extractVariantThinkingConfig({
+      openrouter: { reasoning: { effort: "medium" } },
+    })).toEqual({ thinkingBudget: 16384 });
+
+    expect(extractVariantThinkingConfig({
+      openrouter: { reasoning: { effort: "high" } },
+    })).toEqual({ thinkingBudget: 32768 });
+  });
+
+  it("returns undefined for unknown effort values", () => {
+    expect(extractVariantThinkingConfig({
+      openrouter: { reasoning: { effort: "extreme" } },
+    })).toBeUndefined();
+  });
+
+  it("prioritizes Google format over others", () => {
+    const result = extractVariantThinkingConfig({
+      google: { thinkingConfig: { thinkingBudget: 1000 } },
+      anthropic: { thinking: { budgetTokens: 2000 } },
+    });
+    expect(result).toEqual({ thinkingBudget: 1000 });
   });
 });
