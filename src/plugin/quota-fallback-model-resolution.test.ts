@@ -188,5 +188,29 @@ describe("Quota Fallback Model Resolution (Issue #100)", () => {
 
       expect(prepared.effectiveModel).toBe("gemini-3-pro");
     });
+
+    it("GEMINI CLI: preserves gemini-3-pro-preview when using gemini-cli headers", () => {
+      const requestUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent";
+      const requestInit: RequestInit = {
+        method: "POST",
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "Test" }] }],
+        }),
+      };
+
+      const prepared = prepareAntigravityRequest(
+        requestUrl,
+        requestInit,
+        mockAccessToken,
+        mockProjectId,
+        undefined,
+        "gemini-cli",
+        false,
+        {},
+      );
+
+      // Should keep the CLI model identifier; rewriting to base causes 404s.
+      expect(prepared.effectiveModel).toBe("gemini-3-pro-preview");
+    });
   });
 });
