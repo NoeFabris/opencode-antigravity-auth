@@ -189,10 +189,10 @@ export function resolveModelWithTier(requestedModel: string): ResolvedModel {
   const isThinking = isThinkingCapableModel(resolvedModel);
 
   if (!tier) {
-    if (resolvedModel === "gemini-3-flash" && !skipAlias) {
+    if (resolvedModel === "gemini-3-flash") {
       return {
         actualModel: resolvedModel,
-        thinkingLevel: "minimal",
+        thinkingLevel: "low",
         isThinkingModel: true,
         quotaPreference,
         explicitQuota,
