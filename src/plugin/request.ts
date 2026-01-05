@@ -625,7 +625,12 @@ export function prepareAntigravityRequest(
   const streaming = rawAction === STREAM_ACTION;
   const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
   const baseEndpoint = endpointOverride ?? defaultEndpoint;
-  const transformedUrl = `${baseEndpoint}/v1internal:${rawAction}${streaming ? "?alt=sse" : ""}`;
+  // Code Assist API uses /v1internal:action format
+  // Consumer API uses /v1beta/models/{model}:action format
+  const apiPath = headerStyle === "gemini-cli" 
+    ? `/v1beta/models/${effectiveModel}:${rawAction}` 
+    : `/v1internal:${rawAction}`;
+  const transformedUrl = `${baseEndpoint}${apiPath}${streaming ? "?alt=sse" : ""}`;
     
   const isClaude = isClaudeModel(resolved.actualModel);
   const isClaudeThinking = isClaudeThinkingModel(resolved.actualModel);
@@ -1246,24 +1251,34 @@ export function prepareAntigravityRequest(
         const effectiveProjectId = projectId?.trim() || generateSyntheticProjectId();
         resolvedProjectId = effectiveProjectId;
 
-        const wrappedBody = {
-          project: effectiveProjectId,
-          model: effectiveModel,
-          request: requestPayload,
-        };
-
-        // Add additional Antigravity fields
-        Object.assign(wrappedBody, {
-          userAgent: "antigravity",
-          requestId: "agent-" + crypto.randomUUID(),
-        });
-        if (wrappedBody.request && typeof wrappedBody.request === 'object') {
-          // Use stable session ID for signature caching across multi-turn conversations
+        // Consumer API (gemini-cli) uses raw request payload
+        // Code Assist API (antigravity) uses wrapped format with project/model/request
+        if (headerStyle === "gemini-cli") {
+          // Consumer API: send request payload directly without wrapper
           sessionId = signatureSessionKey;
-          (wrappedBody.request as any).sessionId = signatureSessionKey;
-        }
+          (requestPayload as any).sessionId = signatureSessionKey;
+          body = JSON.stringify(requestPayload);
+        } else {
+          // Code Assist API: wrap with project/model/request
+          const wrappedBody = {
+            project: effectiveProjectId,
+            model: effectiveModel,
+            request: requestPayload,
+          };
 
-        body = JSON.stringify(wrappedBody);
+          // Add additional Antigravity fields
+          Object.assign(wrappedBody, {
+            userAgent: "antigravity",
+            requestId: "agent-" + crypto.randomUUID(),
+          });
+          if (wrappedBody.request && typeof wrappedBody.request === 'object') {
+            // Use stable session ID for signature caching across multi-turn conversations
+            sessionId = signatureSessionKey;
+            (wrappedBody.request as any).sessionId = signatureSessionKey;
+          }
+
+          body = JSON.stringify(wrappedBody);
+        }
       }
     } catch (error) {
       throw error;
