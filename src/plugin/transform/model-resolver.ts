@@ -20,10 +20,10 @@ export const THINKING_TIER_BUDGETS = {
 
 /**
  * Gemini 3 uses thinkingLevel strings instead of numeric budgets.
- * Flash supports: low, medium, high
- * Pro supports: low, high
+ * Flash supports: minimal, low, medium, high
+ * Pro supports: low, high (no minimal/medium)
  */
-export const GEMINI_3_THINKING_LEVELS = ["low", "medium", "high"] as const;
+export const GEMINI_3_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const;
 
 /**
  * Model aliases - maps user-friendly names to API model names.
@@ -195,8 +195,8 @@ export function resolveModelWithTier(requestedModel: string): ResolvedModel {
   if (!tier) {
     // Gemini 3 models without explicit tier get a default thinkingLevel
     if (isEffectiveGemini3) {
-      // Flash defaults to "minimal", Pro defaults to "medium" (matches OpenAI's default reasoningEffort)
-      const defaultLevel = isFlash ? "minimal" : "medium";
+      // Flash defaults to "minimal", Pro defaults to "high" (per Google's API docs)
+      const defaultLevel = isFlash ? "minimal" : "high";
       return {
         actualModel: resolvedModel,
         thinkingLevel: defaultLevel,

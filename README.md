@@ -112,6 +112,7 @@ Create `~/.config/opencode/opencode.json`:
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
+            "minimal": { "thinkingLevel": "minimal" },
             "low": { "thinkingLevel": "low" },
             "medium": { "thinkingLevel": "medium" },
             "high": { "thinkingLevel": "high" }
@@ -185,7 +186,7 @@ Models with `antigravity-` prefix use Antigravity quota. **Thinking models suppo
 | Model | Variants | Description |
 |-------|----------|-------------|
 | `google/antigravity-gemini-3-pro` | low, high | Gemini 3 Pro with configurable thinking |
-| `google/antigravity-gemini-3-flash` | low, medium, high | Gemini 3 Flash with configurable thinking |
+| `google/antigravity-gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with configurable thinking |
 | `google/antigravity-claude-sonnet-4-5` | - | Claude Sonnet 4.5 (no thinking) |
 | `google/antigravity-claude-sonnet-4-5-thinking` | low, medium, max | Claude Sonnet with configurable thinking |
 | `google/antigravity-claude-opus-4-5-thinking` | low, medium, max | Claude Opus with configurable thinking |
@@ -226,7 +227,6 @@ Models with `-preview` suffix use Gemini CLI quota:
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
             "low": { "thinkingLevel": "low" },
-            "medium": { "thinkingLevel": "medium" },
             "high": { "thinkingLevel": "high" }
           }
         },
@@ -235,6 +235,7 @@ Models with `-preview` suffix use Gemini CLI quota:
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
+            "minimal": { "thinkingLevel": "minimal" },
             "low": { "thinkingLevel": "low" },
             "medium": { "thinkingLevel": "medium" },
             "high": { "thinkingLevel": "high" }
@@ -330,13 +331,16 @@ The plugin accepts different variant formats depending on the model family:
 
 ### Gemini 3 Thinking Levels
 
-Gemini 3 models use string-based thinking levels:
+Gemini 3 models use string-based thinking levels. Available levels differ by model:
 
-| Level | Description |
-|-------|-------------|
-| `low` | Minimal thinking |
-| `medium` | Balanced thinking |
-| `high` | Maximum thinking |
+| Level | Flash | Pro | Description |
+|-------|-------|-----|-------------|
+| `minimal` | Yes | No | Minimal thinking, lowest latency (Flash default) |
+| `low` | Yes | Yes | Light thinking |
+| `medium` | Yes | No | Balanced thinking |
+| `high` | Yes | Yes | Maximum thinking (Pro default) |
+
+> **Note:** The API will reject invalid levels (e.g., `"minimal"` on Pro). Configure variants accordingly.
 
 ### Legacy Budget Format (Deprecated)
 
