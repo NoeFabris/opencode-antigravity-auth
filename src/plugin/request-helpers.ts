@@ -495,9 +495,9 @@ function flattenTypeArrays(schema: any, nullableFields?: Map<string, string[]>, 
       newProps[propKey] = processed;
 
       // Track nullable fields for required array cleanup
-      if (processed && typeof processed === "object" && 
-          typeof processed.description === "string" && 
-          processed.description.includes("nullable")) {
+      if (processed && typeof processed === "object" &&
+        typeof processed.description === "string" &&
+        processed.description.includes("nullable")) {
         const objectPath = currentPath || "";
         const existing = localNullableFields.get(objectPath) || [];
         existing.push(propKey);
@@ -581,7 +581,7 @@ function cleanupRequiredFields(schema: any): any {
 
   // Clean up required array if properties exist
   if (Array.isArray(result.required) && result.properties && typeof result.properties === "object") {
-    const validRequired = result.required.filter((req: string) => 
+    const validRequired = result.required.filter((req: string) =>
       Object.prototype.hasOwnProperty.call(result.properties, req)
     );
     if (validRequired.length === 0) {
@@ -1132,9 +1132,9 @@ export function filterUnsignedThinkingBlocks(
 
     if (Array.isArray((content as any).content)) {
       const isAssistantRole = (content as any).role === "assistant";
-      const isLastAssistantContent = idx === lastAssistantIdx || 
+      const isLastAssistantContent = idx === lastAssistantIdx ||
         (isAssistantRole && idx === findLastAssistantIndex(contents, "assistant"));
-      
+
       const filteredContent = filterContentArray(
         (content as any).content,
         sessionId,
@@ -1173,7 +1173,7 @@ export function filterMessagesThinkingBlocks(
     if (Array.isArray((message as any).content)) {
       const isAssistantRole = (message as any).role === "assistant";
       const isLastAssistant = isAssistantRole && idx === lastAssistantIdx;
-      
+
       const filteredContent = filterContentArray(
         (message as any).content,
         sessionId,
@@ -1542,30 +1542,30 @@ export function isEmptyResponseBody(text: string): boolean {
 
   try {
     const parsed = JSON.parse(text);
-    
+
     // Check for empty candidates (Gemini/Antigravity format)
     if (parsed.candidates !== undefined) {
       if (!Array.isArray(parsed.candidates) || parsed.candidates.length === 0) {
         return true;
       }
-      
+
       // Check if first candidate has empty content
       const firstCandidate = parsed.candidates[0];
       if (!firstCandidate) {
         return true;
       }
-      
+
       // Check for empty parts in content
       const content = firstCandidate.content;
       if (!content || typeof content !== "object") {
         return true;
       }
-      
+
       const parts = content.parts;
       if (!Array.isArray(parts) || parts.length === 0) {
         return true;
       }
-      
+
       // Check if all parts are empty (no text, no functionCall)
       const hasContent = parts.some((part: any) => {
         if (!part || typeof part !== "object") return false;
@@ -1574,35 +1574,35 @@ export function isEmptyResponseBody(text: string): boolean {
         if (part.thought === true && typeof part.text === "string") return true;
         return false;
       });
-      
+
       if (!hasContent) {
         return true;
       }
     }
-    
+
     // Check for empty choices (OpenAI format - shouldn't occur but handle it)
     if (parsed.choices !== undefined) {
       if (!Array.isArray(parsed.choices) || parsed.choices.length === 0) {
         return true;
       }
-      
+
       const firstChoice = parsed.choices[0];
       if (!firstChoice) {
         return true;
       }
-      
+
       // Check for empty message/delta
       const message = firstChoice.message || firstChoice.delta;
       if (!message) {
         return true;
       }
-      
+
       // Check if message has content or tool_calls
       if (!message.content && !message.tool_calls && !message.reasoning_content) {
         return true;
       }
     }
-    
+
     // Check response wrapper (Antigravity envelope)
     if (parsed.response !== undefined) {
       const response = parsed.response;
@@ -1611,7 +1611,7 @@ export function isEmptyResponseBody(text: string): boolean {
       }
       return isEmptyResponseBody(JSON.stringify(response));
     }
-    
+
     return false;
   } catch {
     // JSON parse error - treat as empty
@@ -1655,7 +1655,7 @@ export function isMeaningfulSseLine(line: string): boolean {
   }
 
   const data = line.slice(6).trim();
-  
+
   if (data === "[DONE]") {
     return false;
   }
@@ -1666,7 +1666,7 @@ export function isMeaningfulSseLine(line: string): boolean {
 
   try {
     const parsed = JSON.parse(data);
-    
+
     // Check for candidates with content
     if (parsed.candidates && Array.isArray(parsed.candidates)) {
       for (const candidate of parsed.candidates) {
@@ -1679,12 +1679,12 @@ export function isMeaningfulSseLine(line: string): boolean {
         }
       }
     }
-    
+
     // Check response wrapper
     if (parsed.response?.candidates) {
       return isMeaningfulSseLine(`data: ${JSON.stringify(parsed.response)}`);
     }
-    
+
     return false;
   } catch {
     return false;
@@ -1827,24 +1827,24 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
   }
 
   const newContents: any[] = [];
-  
+
   // Track pending tool call groups that need responses
   const pendingGroups: Array<{
     ids: string[];
     funcNames: string[];
     insertAfterIdx: number;
   }> = [];
-  
+
   // Collected orphan responses (by ID)
   const collectedResponses = new Map<string, any>();
-  
+
   for (const content of contents) {
     const role = content.role;
     const parts = content.parts || [];
-    
+
     // Check if this is a tool response message
     const responseParts = parts.filter((p: any) => p?.functionResponse);
-    
+
     if (responseParts.length > 0) {
       // Collect responses by ID (skip duplicates)
       for (const resp of responseParts) {
@@ -1853,7 +1853,7 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
           collectedResponses.set(respId, resp);
         }
       }
-      
+
       // Try to satisfy the most recent pending group
       for (let i = pendingGroups.length - 1; i >= 0; i--) {
         const group = pendingGroups[i]!;
@@ -1871,19 +1871,19 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
       }
       continue; // Don't add the original response message
     }
-    
+
     if (role === "model") {
       // Check for function calls in this model message
       const funcCalls = parts.filter((p: any) => p?.functionCall);
       newContents.push(content);
-      
+
       if (funcCalls.length > 0) {
         const callIds = funcCalls
           .map((fc: any) => fc.functionCall?.id || "")
           .filter(Boolean);
         const funcNames = funcCalls
           .map((fc: any) => fc.functionCall?.name || "");
-        
+
         if (callIds.length > 0) {
           pendingGroups.push({
             ids: callIds,
@@ -1896,18 +1896,18 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
       newContents.push(content);
     }
   }
-  
+
   // Handle remaining pending groups with orphan recovery
   // Process in reverse order so insertions don't shift indices
   pendingGroups.sort((a, b) => b.insertAfterIdx - a.insertAfterIdx);
-  
+
   for (const group of pendingGroups) {
     const groupResponses: any[] = [];
-    
+
     for (let i = 0; i < group.ids.length; i++) {
       const expectedId = group.ids[i]!;
       const expectedName = group.funcNames[i] || "";
-      
+
       if (collectedResponses.has(expectedId)) {
         // Direct ID match - ideal case
         groupResponses.push(collectedResponses.get(expectedId));
@@ -1915,7 +1915,7 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
       } else if (collectedResponses.size > 0) {
         // Need to find an orphan response
         let matchedId: string | null = null;
-        
+
         // Pass 1: Match by function name
         for (const [orphanId, orphanResp] of collectedResponses) {
           const orphanName = orphanResp.functionResponse?.name || "";
@@ -1924,7 +1924,7 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
             break;
           }
         }
-        
+
         // Pass 2: Match "unknown_function" orphans
         if (!matchedId) {
           for (const [orphanId, orphanResp] of collectedResponses) {
@@ -1934,28 +1934,28 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
             }
           }
         }
-        
+
         // Pass 3: Take first available
         if (!matchedId) {
           matchedId = collectedResponses.keys().next().value ?? null;
         }
-        
+
         if (matchedId) {
           const orphanResp = collectedResponses.get(matchedId)!;
           collectedResponses.delete(matchedId);
-          
+
           // Fix the ID and name to match expected
           orphanResp.functionResponse.id = expectedId;
           if (orphanResp.functionResponse.name === "unknown_function" && expectedName) {
             orphanResp.functionResponse.name = expectedName;
           }
-          
+
           log.debug("Auto-repaired tool ID mismatch", {
             mappedFrom: matchedId,
             mappedTo: expectedId,
             functionName: expectedName,
           });
-          
+
           groupResponses.push(orphanResp);
         }
       } else {
@@ -1966,23 +1966,23 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
             response: {
               result: {
                 error: "Tool response was lost during context processing. " +
-                       "This is a recovered placeholder.",
+                  "This is a recovered placeholder.",
                 recovered: true,
               },
             },
             id: expectedId,
           },
         };
-        
+
         log.debug("Created placeholder response for missing tool", {
           id: expectedId,
           name: expectedName,
         });
-        
+
         groupResponses.push(placeholder);
       }
     }
-    
+
     if (groupResponses.length > 0) {
       // Insert at correct position (after the model message that made the calls)
       newContents.splice(group.insertAfterIdx + 1, 0, {
@@ -1991,7 +1991,7 @@ export function fixToolResponseGrouping(contents: any[]): any[] {
       });
     }
   }
-  
+
   return newContents;
 }
 
@@ -2010,10 +2010,10 @@ export function detectToolIdMismatches(contents: any[]): {
 } {
   const expectedIds: string[] = [];
   const foundIds: string[] = [];
-  
+
   for (const content of contents) {
     const parts = content.parts || [];
-    
+
     for (const part of parts) {
       if (part?.functionCall?.id) {
         expectedIds.push(part.functionCall.id);
@@ -2023,13 +2023,13 @@ export function detectToolIdMismatches(contents: any[]): {
       }
     }
   }
-  
+
   const expectedSet = new Set(expectedIds);
   const foundSet = new Set(foundIds);
-  
+
   const missingIds = expectedIds.filter(id => !foundSet.has(id));
   const orphanIds = foundIds.filter(id => !expectedSet.has(id));
-  
+
   return {
     hasMismatches: missingIds.length > 0 || orphanIds.length > 0,
     expectedIds,
@@ -2327,7 +2327,7 @@ export function injectParameterSignatures(
       });
 
       const sigStr = promptTemplate.replace("{params}", paramList.join(", "));
-      
+
       return {
         ...decl,
         description: (decl.description || "") + sigStr,
@@ -2554,10 +2554,10 @@ export function createSyntheticErrorResponse(
 ): Response {
   // Generate a unique message ID
   const messageId = `msg_synthetic_${Date.now()}`;
-  
+
   // Build Claude SSE events that represent a complete message with error text
   const events: string[] = [];
-  
+
   // 1. message_start event
   events.push(`event: message_start
 data: ${JSON.stringify({
@@ -2633,5 +2633,32 @@ data: ${JSON.stringify({ type: "message_stop" })}
       "X-Antigravity-Error-Type": "prompt_too_long",
     },
   });
+}
+
+// Fresh account provisioning error detection
+// When new google accounts try to use antigravity they sometimes get denied
+// because google hasnt set them up yet. this helps catch that case
+
+const CLOUD_AI_COMPANION_PERMISSION = "cloudaicompanion.companions.generateChat";
+
+/**
+ * Checks if this is one of those annoying "permission denied" errors that 
+ * happens when someone's google account is brand new and hasnt been provisioned yet
+ */
+export function isCloudAICompanionPermissionDenied(bodyText: string): boolean {
+  if (!bodyText || typeof bodyText !== "string") {
+    return false;
+  }
+  return bodyText.includes(CLOUD_AI_COMPANION_PERMISSION) &&
+    bodyText.toLowerCase().includes("denied");
+}
+
+/**
+ * Friendly error message so users know whats going on and dont panic
+ */
+export function getProvisioningErrorMessage(): string {
+  return "Account not yet provisioned for Antigravity. " +
+    "This typically resolves within 5-15 minutes for fresh accounts. " +
+    "Try using gemini-2.5-flash first, then retry Claude models.";
 }
 

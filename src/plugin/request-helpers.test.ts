@@ -21,6 +21,8 @@ import {
   injectToolHardeningInstruction,
   cleanJSONSchemaForAntigravity,
   createSyntheticErrorResponse,
+  isCloudAICompanionPermissionDenied,
+  getProvisioningErrorMessage,
 } from "./request-helpers";
 
 describe("sanitizeThinkingPart (covered via filtering)", () => {
@@ -1234,7 +1236,7 @@ describe("injectToolHardeningInstruction", () => {
   it("injects system instruction when none exists", () => {
     const payload: Record<string, unknown> = {};
     injectToolHardeningInstruction(payload, "CRITICAL TOOL USAGE INSTRUCTIONS: Test");
-    
+
     expect(payload.systemInstruction).toBeDefined();
     const instruction = payload.systemInstruction as any;
     expect(instruction.parts[0].text).toBe("CRITICAL TOOL USAGE INSTRUCTIONS: Test");
@@ -1247,7 +1249,7 @@ describe("injectToolHardeningInstruction", () => {
       },
     };
     injectToolHardeningInstruction(payload, "CRITICAL TOOL USAGE INSTRUCTIONS: New");
-    
+
     const instruction = payload.systemInstruction as any;
     expect(instruction.parts).toHaveLength(2);
     expect(instruction.parts[0].text).toBe("CRITICAL TOOL USAGE INSTRUCTIONS: New");
@@ -1261,7 +1263,7 @@ describe("injectToolHardeningInstruction", () => {
       },
     };
     injectToolHardeningInstruction(payload, "CRITICAL TOOL USAGE INSTRUCTIONS: New");
-    
+
     const instruction = payload.systemInstruction as any;
     expect(instruction.parts).toHaveLength(1);
     expect(instruction.parts[0].text).toBe("CRITICAL TOOL USAGE INSTRUCTIONS: Already here");
@@ -1272,7 +1274,7 @@ describe("injectToolHardeningInstruction", () => {
       systemInstruction: "Existing string instruction",
     };
     injectToolHardeningInstruction(payload, "CRITICAL TOOL USAGE INSTRUCTIONS: Test");
-    
+
     const instruction = payload.systemInstruction as any;
     expect(instruction.parts).toHaveLength(2);
     expect(instruction.parts[0].text).toBe("CRITICAL TOOL USAGE INSTRUCTIONS: Test");
@@ -1527,5 +1529,60 @@ describe("createSyntheticErrorResponse", () => {
     const messageDelta = events.find((e) => e.type === "message_delta");
 
     expect(messageDelta?.delta?.stop_reason).toBe("end_turn");
+  });
+});
+
+// tests for the fresh account error detection stuff
+
+describe("isCloudAICompanionPermissionDenied", () => {
+  it("returns true for Cloud AI Companion permission denied errors", () => {
+    const body = `Permission 'cloudaicompanion.companions.generateChat' denied on resource '//cloudaicompanion.googleapis.com/projects/my-project/locations/global' (or it may not exist).`;
+    expect(isCloudAICompanionPermissionDenied(body)).toBe(true);
+  });
+
+  it("returns true for lowercase 'denied' in error message", () => {
+    const body = `access denied for cloudaicompanion.companions.generateChat permission`;
+    expect(isCloudAICompanionPermissionDenied(body)).toBe(true);
+  });
+
+  it("returns false for other 403 errors", () => {
+    const body = `Access denied: insufficient permissions for this resource`;
+    expect(isCloudAICompanionPermissionDenied(body)).toBe(false);
+  });
+
+  it("returns false for quota exhausted errors", () => {
+    const body = `Resource has been exhausted (e.g. check quota).`;
+    expect(isCloudAICompanionPermissionDenied(body)).toBe(false);
+  });
+
+  it("returns false for empty body", () => {
+    expect(isCloudAICompanionPermissionDenied("")).toBe(false);
+  });
+
+  it("returns false for null/undefined inputs", () => {
+    expect(isCloudAICompanionPermissionDenied(null as any)).toBe(false);
+    expect(isCloudAICompanionPermissionDenied(undefined as any)).toBe(false);
+  });
+
+  it("returns false for non-string inputs", () => {
+    expect(isCloudAICompanionPermissionDenied(123 as any)).toBe(false);
+    expect(isCloudAICompanionPermissionDenied({} as any)).toBe(false);
+  });
+});
+
+describe("getProvisioningErrorMessage", () => {
+  it("returns a user-friendly message mentioning provisioning", () => {
+    const msg = getProvisioningErrorMessage();
+    expect(msg).toContain("provisioned");
+  });
+
+  it("mentions the expected wait time", () => {
+    const msg = getProvisioningErrorMessage();
+    expect(msg).toContain("5-15 minutes");
+  });
+
+  it("suggests trying Gemini CLI models first", () => {
+    const msg = getProvisioningErrorMessage();
+    expect(msg).toContain("gemini-2.5-flash");
   });
 });
