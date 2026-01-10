@@ -43,6 +43,9 @@ export interface FetchAvailableModelsResponse {
 export async function refreshAccessTokenStandalone(
   refreshToken: string
 ): Promise<{ accessToken: string; expiresIn: number } | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
@@ -55,7 +58,10 @@ export async function refreshAccessTokenStandalone(
         client_id: ANTIGRAVITY_CLIENT_ID,
         client_secret: ANTIGRAVITY_CLIENT_SECRET,
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
@@ -73,6 +79,11 @@ export async function refreshAccessTokenStandalone(
       expiresIn: payload.expires_in,
     };
   } catch (error) {
+    clearTimeout(timeout);
+    if ((error as Error).name === "AbortError") {
+      log.warn("Token refresh timeout");
+      return null;
+    }
     log.error("Token refresh error", { error: String(error) });
     return null;
   }
@@ -91,10 +102,11 @@ export async function fetchAvailableModels(
   };
 
   for (const endpoint of ANTIGRAVITY_ENDPOINT_FALLBACKS) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
     try {
       const url = `${endpoint}/v1internal:fetchAvailableModels`;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
       const response = await fetch(url, {
         method: "POST",
@@ -102,8 +114,6 @@ export async function fetchAvailableModels(
         body: JSON.stringify({}),
         signal: controller.signal,
       });
-
-      clearTimeout(timeout);
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
@@ -123,6 +133,8 @@ export async function fetchAvailableModels(
           error: String(error),
         });
       }
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -177,7 +189,7 @@ export async function getModelQuotas(
  * Format duration in milliseconds to human-readable string.
  */
 export function formatDuration(ms: number): string {
-  if (ms < 0) return "0s";
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
   
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -207,17 +219,15 @@ export function formatQuotaPercent(fraction: number | null): string {
 export function formatResetTime(resetTime: string | null): string {
   if (!resetTime) return "-";
   
-  try {
-    const resetDate = new Date(resetTime);
-    const now = Date.now();
-    const diffMs = resetDate.getTime() - now;
-    
-    if (diffMs <= 0) return "resetting...";
-    
-    return `${formatDuration(diffMs)} (${resetDate.toLocaleTimeString()})`;
-  } catch {
-    return resetTime;
-  }
+  const resetDate = new Date(resetTime);
+  if (isNaN(resetDate.getTime())) return resetTime;
+  
+  const now = Date.now();
+  const diffMs = resetDate.getTime() - now;
+  
+  if (diffMs <= 0) return "resetting...";
+  
+  return `${formatDuration(diffMs)} (${resetDate.toLocaleTimeString()})`;
 }
 
 export interface AccountQuotaResult {
@@ -299,7 +309,7 @@ export function generateQuotaTable(results: AccountQuotaResult[]): string {
   lines.push("");
 
   if (results.length === 0) {
-    lines.push("No accounts configured. Run 'npx opencode login antigravity' to add accounts.");
+    lines.push("No accounts configured. Run 'opencode auth login' to add accounts.");
     return lines.join("\n");
   }
 

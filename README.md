@@ -366,7 +366,7 @@ npx opencode-antigravity-auth quota
 ```
 
 Output:
-```
+```text
 Antigravity Quota Status
 ========================
 

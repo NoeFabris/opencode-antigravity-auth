@@ -38,7 +38,7 @@
     ],
     "scripts": {
         "build": "tsc -p tsconfig.build.json && npm run build:cli",
-        "build:cli": "esbuild src/cli.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/cli.cjs",
+        "build:cli": "esbuild src/cli.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/cli.cjs --banner:js='#!/usr/bin/env node'",
         "build:schema": "npx tsx script/build-schema.ts",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",

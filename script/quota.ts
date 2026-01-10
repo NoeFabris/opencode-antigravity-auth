@@ -1,5 +1,3 @@
-#!/usr/bin/env npx tsx
-
 /**
  * Antigravity Quota CLI
  * 
