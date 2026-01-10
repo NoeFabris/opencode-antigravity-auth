@@ -357,6 +357,51 @@ Legacy tier-suffixed models still work:
 
 However, **we recommend using variants** for a cleaner model picker and more flexibility.
 
+## Check Quota Status
+
+Check your remaining quota across all accounts:
+
+```bash
+npx opencode-antigravity-auth quota
+```
+
+Output:
+```
+Antigravity Quota Status
+========================
+
+Account                  Claude              Gemini (3-pro)      
+─────────────────────────────────────────────────────────────────
+user1                    71% (4h 30m)        94% (4h 25m)        
+user2                    100% (5h 0m)        82% (2h 45m)        
+
+Updated: 5:00:00 PM
+```
+
+Options:
+- `--full` - Show all models breakdown
+- `--json` - Output as JSON
+
+<details>
+<summary><b>Add /antquota command to OpenCode</b></summary>
+
+Create `~/.config/opencode/command/antquota.md`:
+
+```markdown
+---
+description: Show Antigravity quota status
+subtask: true
+---
+
+Display only the command output below. Do not analyze, summarize, or comment on it.
+
+!`npx opencode-antigravity-auth quota`
+```
+
+Now you can type `/antquota` in OpenCode to check quota status.
+
+</details>
+
 ## Multi-Account Setup
 
 Add multiple Google accounts for higher combined quotas. The plugin automatically rotates between accounts when one is rate-limited.
