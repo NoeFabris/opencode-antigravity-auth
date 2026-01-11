@@ -540,13 +540,13 @@ describe("transform/gemini", () => {
 
     it("returns default 1:1 aspect ratio when no env var set", () => {
       delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
-      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      const config = buildImageGenerationConfig();
       expect(config).toEqual({ aspectRatio: "1:1" });
     });
 
     it("uses OPENCODE_IMAGE_ASPECT_RATIO env var when set to valid value", () => {
       process.env.OPENCODE_IMAGE_ASPECT_RATIO = "16:9";
-      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      const config = buildImageGenerationConfig();
       expect(config).toEqual({ aspectRatio: "16:9" });
     });
 
@@ -554,20 +554,20 @@ describe("transform/gemini", () => {
       const validRatios = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
       for (const ratio of validRatios) {
         process.env.OPENCODE_IMAGE_ASPECT_RATIO = ratio;
-        const config = buildImageGenerationConfig("gemini-3-pro-image");
+        const config = buildImageGenerationConfig();
         expect(config.aspectRatio).toBe(ratio);
       }
     });
 
     it("falls back to 1:1 for invalid aspect ratio", () => {
       process.env.OPENCODE_IMAGE_ASPECT_RATIO = "invalid";
-      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      const config = buildImageGenerationConfig();
       expect(config).toEqual({ aspectRatio: "1:1" });
     });
 
     it("falls back to 1:1 for unsupported aspect ratio", () => {
       process.env.OPENCODE_IMAGE_ASPECT_RATIO = "5:3";
-      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      const config = buildImageGenerationConfig();
       expect(config).toEqual({ aspectRatio: "1:1" });
     });
   });

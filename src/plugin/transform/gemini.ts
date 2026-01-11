@@ -173,13 +173,15 @@ const VALID_ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9
  * 
  * Note: Resolution setting is not currently supported by the Antigravity API.
  */
-export function buildImageGenerationConfig(model: string): ImageConfig {
+export function buildImageGenerationConfig(): ImageConfig {
   // Read aspect ratio from environment or default to 1:1
   const aspectRatio = process.env.OPENCODE_IMAGE_ASPECT_RATIO || "1:1";
   
   if (VALID_ASPECT_RATIOS.includes(aspectRatio)) {
     return { aspectRatio };
   }
+  
+  console.warn(`[gemini] Invalid aspect ratio "${aspectRatio}". Using default "1:1". Valid values: ${VALID_ASPECT_RATIOS.join(", ")}`);
   
   // Default to 1:1 square aspect ratio
   return { aspectRatio: "1:1" };

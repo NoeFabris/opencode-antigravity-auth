@@ -781,7 +781,7 @@ export function prepareAntigravityRequest(
 
         // For image models, add imageConfig instead of thinkingConfig
         if (isImageModel) {
-          const imageConfig = buildImageGenerationConfig(effectiveModel);
+          const imageConfig = buildImageGenerationConfig();
           const generationConfig = (rawGenerationConfig ?? {}) as Record<string, unknown>;
           generationConfig.imageConfig = imageConfig;
           // Remove any thinkingConfig that might have been set
@@ -795,11 +795,11 @@ export function prepareAntigravityRequest(
           // Add safety settings for image generation (permissive to allow creative content)
           if (!requestPayload.safetySettings) {
             requestPayload.safetySettings = [
-              { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
-              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
-              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
-              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
-              { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "OFF" },
+              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+              { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_ONLY_HIGH" },
             ];
           }
           
