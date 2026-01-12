@@ -1,0 +1,1 @@
+{"version":3,"file":"signature-store.d.ts","sourceRoot":"","sources":["../../../../src/plugin/stores/signature-store.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,cAAc,EAAkB,aAAa,EAAE,MAAM,yBAAyB,CAAC;AAE7F,wBAAgB,oBAAoB,IAAI,cAAc,CAarD;AAED,wBAAgB,mBAAmB,IAAI,aAAa,CAUnD;AAED,eAAO,MAAM,qBAAqB,gBAAyB,CAAC"}
