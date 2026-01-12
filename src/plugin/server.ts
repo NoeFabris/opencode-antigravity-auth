@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { readFileSync, existsSync } from "node:fs";
 
 import { ANTIGRAVITY_REDIRECT_URI } from "../constants";
 
@@ -22,6 +23,115 @@ export interface OAuthListener {
 
 const redirectUri = new URL(ANTIGRAVITY_REDIRECT_URI);
 const callbackPath = redirectUri.pathname || "/";
+
+/**
+ * Detect if running in OrbStack Docker with --network host mode.
+ * OrbStack's host networking only forwards ports bound to 127.0.0.1 to macOS.
+ */
+function isOrbStackDockerHost(): boolean {
+  // Check if we're in Docker
+  if (!existsSync("/.dockerenv")) {
+    return false;
+  }
+  
+  // Check for OrbStack-specific indicators
+  // OrbStack sets specific environment variables or has identifiable characteristics
+  try {
+    // OrbStack containers often have /run/.containerenv or specific mount patterns
+    // Also check if /proc/version contains orbstack
+    if (existsSync("/proc/version")) {
+      const version = readFileSync("/proc/version", "utf8").toLowerCase();
+      if (version.includes("orbstack")) {
+        return true;
+      }
+    }
+    
+    // Check hostname pattern (OrbStack uses specific patterns)
+    const hostname = process.env.HOSTNAME || "";
+    if (hostname.includes("orbstack") || hostname.includes("orb")) {
+      return true;
+    }
+    
+    // Check for OrbStack's network host mode by looking at resolv.conf
+    // OrbStack with --network host has specific DNS configuration
+    if (existsSync("/etc/resolv.conf")) {
+      const resolv = readFileSync("/etc/resolv.conf", "utf8");
+      if (resolv.includes("orb.local") || resolv.includes("orbstack")) {
+        return true;
+      }
+    }
+    
+    // Fallback: Check if running on macOS/Darwin host via Docker
+    // This is a heuristic - if in Docker on Linux but /proc/version shows darwin-like patterns
+    if (process.platform === "linux" && existsSync("/.dockerenv")) {
+      // Most OrbStack containers will have been caught above
+      // For safety, also check common OrbStack mount patterns
+      if (existsSync("/run/host-services")) {
+        return true;
+      }
+    }
+  } catch {
+    // Ignore errors, fall through to default
+  }
+  
+  return false;
+}
+
+/**
+ * Detect WSL (Windows Subsystem for Linux) environment.
+ */
+function isWSL(): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    const release = readFileSync("/proc/version", "utf8").toLowerCase();
+    return release.includes("microsoft") || release.includes("wsl");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detect remote/SSH environment where localhost may not be accessible from browser.
+ */
+function isRemoteEnvironment(): boolean {
+  if (process.env.SSH_CLIENT || process.env.SSH_TTY || process.env.SSH_CONNECTION) {
+    return true;
+  }
+  if (process.env.REMOTE_CONTAINERS || process.env.CODESPACES) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Determine the best bind address for the OAuth callback server.
+ * 
+ * Priority:
+ * 1. OPENCODE_ANTIGRAVITY_OAUTH_BIND environment variable (user override)
+ * 2. OrbStack Docker with --network host: 127.0.0.1 (required for port forwarding)
+ * 3. WSL/SSH/Remote: 0.0.0.0 (needed for cross-network access)
+ * 4. Default: 127.0.0.1 (most secure for local development)
+ */
+function getBindAddress(): string {
+  // Allow user override via environment variable
+  const envBind = process.env.OPENCODE_ANTIGRAVITY_OAUTH_BIND;
+  if (envBind) {
+    return envBind;
+  }
+  
+  // OrbStack Docker needs 127.0.0.1 for --network host port forwarding
+  if (isOrbStackDockerHost()) {
+    return "127.0.0.1";
+  }
+  
+  // WSL and remote environments need 0.0.0.0 to be reachable
+  if (isWSL() || isRemoteEnvironment()) {
+    return "0.0.0.0";
+  }
+  
+  // Default to 127.0.0.1 for security (local-only access)
+  return "127.0.0.1";
+}
 
 /**
  * Starts a lightweight HTTP server that listens for the Antigravity OAuth redirect
@@ -211,6 +321,8 @@ const successResponse = `<!DOCTYPE html>
     });
   });
 
+  const bindAddress = getBindAddress();
+  
   await new Promise<void>((resolve, reject) => {
     const handleError = (error: NodeJS.ErrnoException) => {
       server.off("error", handleError);
@@ -225,7 +337,7 @@ const successResponse = `<!DOCTYPE html>
       reject(error);
     };
     server.once("error", handleError);
-    server.listen(port, () => {
+    server.listen(port, bindAddress, () => {
       server.off("error", handleError);
       resolve();
     });
@@ -252,4 +364,3 @@ const successResponse = `<!DOCTYPE html>
       }),
   };
 }
-
