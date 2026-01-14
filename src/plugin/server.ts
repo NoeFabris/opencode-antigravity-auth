@@ -33,8 +33,8 @@ export async function startOAuthListener(
   const port = redirectUri.port
     ? Number.parseInt(redirectUri.port, 10)
     : redirectUri.protocol === "https:"
-    ? 443
-    : 80;
+      ? 443
+      : 80;
   const origin = `${redirectUri.protocol}//${redirectUri.host}`;
 
   let settled = false;
@@ -56,7 +56,7 @@ export async function startOAuthListener(
     };
   });
 
-const successResponse = `<!DOCTYPE html>
+  const successResponse = `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -225,7 +225,7 @@ const successResponse = `<!DOCTYPE html>
       reject(error);
     };
     server.once("error", handleError);
-    server.listen(port, () => {
+    server.listen(port, "localhost", () => {
       server.off("error", handleError);
       resolve();
     });
