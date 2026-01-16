@@ -248,11 +248,11 @@ describe("Cross-Model Session Integration", () => {
       const sanitized = result.payload as typeof payload;
       const content = sanitized.extra_body!.messages![0]!.content;
       const thinkingBlock = content.find(
-        (c: Record<string, unknown>) => c.type === "thinking"
+        (c: Record<string, unknown>) => c.thought === true
       ) as Record<string, unknown>;
 
       expect(thinkingBlock.signature).toBeUndefined();
-      expect(thinkingBlock.thinking).toBe("Analyzing the request...");
+      expect(thinkingBlock.text).toBe("Analyzing the request...");
 
       const toolBlock = content.find(
         (c: Record<string, unknown>) => c.type === "tool_use"
@@ -289,7 +289,8 @@ describe("Cross-Model Session Integration", () => {
       >;
 
       expect(redactedBlock.signature).toBeUndefined();
-      expect(redactedBlock.type).toBe("redacted_thinking");
+      expect(redactedBlock.type).toBeUndefined();
+      expect(redactedBlock.thought).toBe(true);
     });
   });
 

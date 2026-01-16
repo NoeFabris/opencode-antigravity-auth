@@ -124,7 +124,7 @@ describe("cross-model-sanitizer", () => {
   });
 
   describe("stripClaudeThinkingFields", () => {
-    it("removes signature from thinking blocks", () => {
+    it("converts thinking blocks to Gemini format", () => {
       const part = {
         type: "thinking",
         thinking: "Analyzing...",
@@ -132,11 +132,14 @@ describe("cross-model-sanitizer", () => {
       };
       const result = stripClaudeThinkingFields(part);
       expect(result.part.signature).toBeUndefined();
+      expect(result.part.type).toBeUndefined();
+      expect(result.part.thinking).toBeUndefined();
+      expect(result.part.thought).toBe(true);
+      expect(result.part.text).toBe("Analyzing...");
       expect(result.stripped).toBe(1);
-      expect(result.part.thinking).toBe("Analyzing...");
     });
 
-    it("removes signature from redacted_thinking blocks", () => {
+    it("converts redacted_thinking blocks to Gemini format", () => {
       const part = {
         type: "redacted_thinking",
         data: "encrypted",
@@ -144,6 +147,8 @@ describe("cross-model-sanitizer", () => {
       };
       const result = stripClaudeThinkingFields(part);
       expect(result.part.signature).toBeUndefined();
+      expect(result.part.type).toBeUndefined();
+      expect(result.part.thought).toBe(true);
       expect(result.stripped).toBe(1);
     });
 
@@ -581,7 +586,9 @@ describe("cross-model-sanitizer", () => {
 
       const assistantContent = (result.payload as any).messages[1].content;
       expect(assistantContent[0].signature).toBeUndefined();
-      expect(assistantContent[0].thinking).toContain("list the files");
+      expect(assistantContent[0].type).toBeUndefined();
+      expect(assistantContent[0].thought).toBe(true);
+      expect(assistantContent[0].text).toContain("list the files");
       expect(assistantContent[1].name).toBe("bash");
     });
   });

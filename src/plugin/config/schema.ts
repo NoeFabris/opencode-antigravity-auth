@@ -82,9 +82,9 @@ export const AntigravityConfigSchema = z.object({
    * When true: Full context preserved, but may encounter signature errors.
    * 
    * Env override: OPENCODE_ANTIGRAVITY_KEEP_THINKING=1
-   * @default false
+   * @default true
    */
-  keep_thinking: z.boolean().default(false),
+  keep_thinking: z.boolean().default(true),
   
   // =========================================================================
   // Session Recovery
@@ -328,7 +328,7 @@ export type SignatureCacheConfig = z.infer<typeof SignatureCacheConfigSchema>;
 export const DEFAULT_CONFIG: AntigravityConfig = {
   quiet_mode: false,
   debug: false,
-  keep_thinking: false,
+  keep_thinking: true,
   session_recovery: true,
   auto_resume: true,
   resume_text: "continue",

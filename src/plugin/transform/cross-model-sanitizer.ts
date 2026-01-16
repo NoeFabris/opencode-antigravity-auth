@@ -83,13 +83,19 @@ export function stripClaudeThinkingFields(
 ): { part: Record<string, unknown>; stripped: number } {
   let stripped = 0;
 
-  if (part.type === "thinking" || part.type === "redacted_thinking") {
-    for (const field of CLAUDE_SIGNATURE_FIELDS) {
-      if (field in part) {
-        delete part[field];
-        stripped++;
-      }
-    }
+  // Claude/OpenCode: { type: "thinking"|"reasoning", thinking: "...", signature: "..." } -> Gemini: { thought: true, text: "..." }
+  if (part.type === "thinking" || part.type === "redacted_thinking" || part.type === "reasoning") {
+    const thinkingContent = typeof part.thinking === "string" ? part.thinking : "";
+    
+    delete part.type;
+    delete part.thinking;
+    delete part.signature;
+    stripped++;
+    
+    part.thought = true;
+    part.text = thinkingContent;
+    
+    return { part, stripped };
   }
 
   if ("signature" in part && typeof part.signature === "string") {

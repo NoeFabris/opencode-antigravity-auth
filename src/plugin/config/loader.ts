@@ -240,5 +240,5 @@ export function initRuntimeConfig(config: AntigravityConfig): void {
 }
 
 export function getKeepThinking(): boolean {
-  return runtimeConfig?.keep_thinking ?? false;
+  return runtimeConfig?.keep_thinking ?? true;
 }

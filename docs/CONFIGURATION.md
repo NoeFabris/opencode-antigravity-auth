@@ -1,7 +1,5 @@
 # Configuration
 
-Full configuration reference for the Antigravity Auth plugin.
-
 Create `~/.config/opencode/antigravity.json` (or `.opencode/antigravity.json` in project root):
 
 ```json
@@ -10,31 +8,199 @@ Create `~/.config/opencode/antigravity.json` (or `.opencode/antigravity.json` in
 }
 ```
 
----
-
-## General Settings
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `quiet_mode` | `false` | Suppress toast notifications (except recovery) |
-| `debug` | `false` | Enable debug logging to file |
-| `log_dir` | OS default | Custom directory for debug logs |
-| `auto_update` | `true` | Enable automatic plugin updates |
-| `keep_thinking` | `false` | ⚠️ **Experimental.** Preserve Claude's thinking blocks via signature caching. Required for conversation continuity when using thinking models. See [Signature Cache](#signature-cache). |
+Most settings have sensible defaults. Only configure what you need.
 
 ---
 
-## Session Recovery
+## Quick Start
+
+**Minimal config (recommended for most users):**
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json"
+}
+```
+
+**With web search enabled:**
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "web_search": { "default_mode": "auto" }
+}
+```
+
+---
+
+## Model Behavior
+
+Settings that affect how the model thinks and responds.
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `keep_thinking` | `true` | Preserve Claude's thinking blocks across turns. Makes model smarter/more coherent. |
 | `session_recovery` | `true` | Auto-recover from tool_result_missing errors |
 | `auto_resume` | `true` | Auto-send resume prompt after recovery |
 | `resume_text` | `"continue"` | Text to send when auto-resuming |
+| `web_search.default_mode` | `"off"` | Gemini Google Search grounding: `"auto"` or `"off"` |
+| `web_search.grounding_threshold` | `0.3` | How often to search (0=always, 1=never). Only in `auto` mode. |
+
+### About `keep_thinking`
+
+When `true` (default), Claude's thinking blocks are preserved in conversation history:
+- **Pros:** Model remembers its reasoning, more coherent across turns
+- **Cons:** Slightly larger context
+
+When `false`, thinking is stripped:
+- **Pros:** Smaller context
+- **Cons:** Model may be less coherent, forgets previous reasoning
 
 ---
 
-## Error Recovery
+## Account Rotation
+
+Settings for managing multiple Google accounts.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `account_selection_strategy` | `"hybrid"` | How to select accounts |
+| `switch_on_first_rate_limit` | `true` | Switch account immediately on first 429 |
+| `pid_offset_enabled` | `false` | Distribute sessions across accounts (for parallel agents) |
+| `quota_fallback` | `false` | **Gemini only.** Try alternate quota pool before switching accounts |
+
+### Strategy Guide
+
+| Your Setup | Recommended Strategy | Why |
+|------------|---------------------|-----|
+| **1 account** | `"sticky"` | No rotation needed, preserve prompt cache |
+| **2-3 accounts** | `"hybrid"` (default) | Smart rotation with health scoring |
+| **4+ accounts** | `"round-robin"` | Maximum throughput |
+| **Parallel agents** | `"round-robin"` + `pid_offset_enabled: true` | Distribute across accounts |
+
+### Available Strategies
+
+| Strategy | Behavior | Best For |
+|----------|----------|----------|
+| `sticky` | Same account until rate-limited | Single account, prompt cache |
+| `round-robin` | Rotate on every request | Maximum throughput |
+| `hybrid` | Health score + token bucket + LRU | Smart distribution (default) |
+
+---
+
+## App Behavior
+
+Settings for plugin behavior.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `quiet_mode` | `false` | Hide toast notifications (except recovery) |
+| `debug` | `false` | Enable debug logging |
+| `log_dir` | OS default | Custom directory for debug logs |
+| `auto_update` | `true` | Enable automatic plugin updates |
+
+### Debug Logging
+
+```bash
+# Via environment variable (temporary)
+OPENCODE_ANTIGRAVITY_DEBUG=1 opencode   # Basic logging
+OPENCODE_ANTIGRAVITY_DEBUG=2 opencode   # Verbose logging
+
+# Via config (persistent)
+{ "debug": true }
+```
+
+Logs are written to `~/.config/opencode/antigravity-logs/` (or `log_dir` if set).
+
+---
+
+## Recommended Configs
+
+Copy-paste ready configs with all recommended settings enabled.
+
+### 1 Account
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "account_selection_strategy": "sticky",
+  "web_search": { "default_mode": "auto" }
+}
+```
+
+**Why these settings:**
+- `sticky` — No rotation needed, preserves Anthropic prompt cache
+- `web_search: auto` — Gemini can search when needed
+
+### 2-3 Accounts
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "account_selection_strategy": "hybrid",
+  "web_search": { "default_mode": "auto" }
+}
+```
+
+**Why these settings:**
+- `hybrid` — Smart rotation using health scores, avoids bad accounts
+- `web_search: auto` — Gemini can search when needed
+
+### 3+ Accounts (Power Users / Parallel Agents)
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "account_selection_strategy": "round-robin",
+  "switch_on_first_rate_limit": true,
+  "pid_offset_enabled": true,
+  "web_search": { "default_mode": "auto" }
+}
+```
+
+**Why these settings:**
+- `round-robin` — Maximum throughput, rotates every request
+- `switch_on_first_rate_limit` — Immediately switch on 429 (default: true)
+- `pid_offset_enabled` — Different sessions use different starting accounts
+- `web_search: auto` — Gemini can search when needed
+
+---
+
+## What's Enabled by Default
+
+These settings are already `true` by default — you don't need to set them:
+
+| Setting | Default | What it does |
+|---------|---------|--------------|
+| `keep_thinking` | `true` | Smarter Claude (preserves reasoning) |
+| `session_recovery` | `true` | Auto-recover from errors |
+| `auto_resume` | `true` | Auto-continue after recovery |
+| `auto_update` | `true` | Keep plugin updated |
+| `switch_on_first_rate_limit` | `true` | Fast account switching |
+
+---
+
+## Environment Overrides
+
+All options can be set via environment variables:
+
+```bash
+OPENCODE_ANTIGRAVITY_QUIET=1                              # quiet_mode
+OPENCODE_ANTIGRAVITY_DEBUG=1                              # debug (1=basic, 2=verbose)
+OPENCODE_ANTIGRAVITY_LOG_DIR=/path                        # log_dir
+OPENCODE_ANTIGRAVITY_KEEP_THINKING=1                      # keep_thinking
+OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY=round-robin
+OPENCODE_ANTIGRAVITY_PID_OFFSET_ENABLED=1
+```
+
+---
+
+## Advanced Settings
+
+> These settings are for edge cases. Most users don't need to change them.
+
+<details>
+<summary><b>Error Recovery (internal)</b></summary>
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -42,81 +208,56 @@ Create `~/.config/opencode/antigravity.json` (or `.opencode/antigravity.json` in
 | `empty_response_retry_delay_ms` | `2000` | Delay between retries |
 | `tool_id_recovery` | `true` | Fix mismatched tool IDs from context compaction |
 | `claude_tool_hardening` | `true` | Prevent tool parameter hallucination |
+| `max_rate_limit_wait_seconds` | `300` | Max wait time when rate limited (0=unlimited) |
 
----
+</details>
 
-## Signature Cache
-
-> ⚠️ **Experimental Feature** — Signature caching is experimental and may have edge cases. Please report issues.
-
-When `keep_thinking` is enabled, the plugin caches thinking block signatures to preserve conversation continuity across requests.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `signature_cache.enabled` | `true` | Enable disk caching of thinking block signatures |
-| `signature_cache.memory_ttl_seconds` | `3600` | In-memory cache TTL (1 hour) |
-| `signature_cache.disk_ttl_seconds` | `172800` | Disk cache TTL (48 hours) |
-| `signature_cache.write_interval_seconds` | `60` | Background write interval |
-
----
-
-## Token Management
+<details>
+<summary><b>Token Management (internal)</b></summary>
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `proactive_token_refresh` | `true` | Refresh tokens before expiry |
 | `proactive_refresh_buffer_seconds` | `1800` | Refresh 30 min before expiry |
-| `max_rate_limit_wait_seconds` | `300` | Max wait time when rate limited (0=unlimited) |
-| `quota_fallback` | `false` | **Gemini only.** When rate-limited on primary quota pool, try alternate pool before switching accounts. See [Dual Quota Pools](MULTI-ACCOUNT.md#dual-quota-pools). |
-| `switch_on_first_rate_limit` | `true` | Switch account immediately on first 429 (after 1s) |
+| `proactive_refresh_check_interval_seconds` | `300` | Check interval |
 
----
+</details>
 
-## Account Selection
+<details>
+<summary><b>Signature Cache (internal)</b></summary>
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `account_selection_strategy` | `"hybrid"` | Strategy for distributing requests across accounts |
-| `pid_offset_enabled` | `false` | Use PID-based offset for multi-session distribution |
-
-### Available Strategies
-
-| Strategy | Behavior | Best For |
-|----------|----------|----------|
-| `sticky` | Same account until rate-limited | Prompt cache preservation |
-| `round-robin` | Rotate to next account on every request | Maximum throughput |
-| `hybrid` | Deterministic selection based on health score + token bucket + LRU | Best overall distribution |
-
-### Error Handling
-
-| Error Type | Behavior |
-|------------|----------|
-| `MODEL_CAPACITY_EXHAUSTED` | Wait (escalating 5s→60s) and retry same account |
-| `QUOTA_EXCEEDED` | Switch to next available account immediately |
-
-This prevents unnecessary account switching when server-side capacity issues affect all accounts equally.
-
----
-
-## Health Score
-
-Advanced rate-limiting behavior using a health score per account.
+Used when `keep_thinking: true`. Most users don't need to configure this.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `health_score.initial` | `70` | Starting health score for new accounts |
-| `health_score.success_reward` | `1` | Points added on successful request |
+| `signature_cache.enabled` | `true` | Enable disk caching |
+| `signature_cache.memory_ttl_seconds` | `3600` | In-memory cache TTL (1 hour) |
+| `signature_cache.disk_ttl_seconds` | `172800` | Disk cache TTL (48 hours) |
+| `signature_cache.write_interval_seconds` | `60` | Background write interval |
+
+</details>
+
+<details>
+<summary><b>Health Score Tuning (internal)</b></summary>
+
+Used by `hybrid` strategy. Most users don't need to configure this.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `health_score.initial` | `70` | Starting health score |
+| `health_score.success_reward` | `1` | Points added on success |
 | `health_score.rate_limit_penalty` | `-10` | Points removed on rate limit |
 | `health_score.failure_penalty` | `-20` | Points removed on failure |
 | `health_score.recovery_rate_per_hour` | `2` | Points recovered per hour |
 | `health_score.min_usable` | `50` | Minimum score to use account |
 | `health_score.max_score` | `100` | Maximum health score |
 
----
+</details>
 
-## Token Bucket
+<details>
+<summary><b>Token Bucket Tuning (internal)</b></summary>
 
-Rate limiting using token bucket algorithm.
+Used by `hybrid` strategy. Most users don't need to configure this.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -124,81 +265,4 @@ Rate limiting using token bucket algorithm.
 | `token_bucket.regeneration_rate_per_minute` | `6` | Tokens regenerated per minute |
 | `token_bucket.initial_tokens` | `50` | Starting tokens |
 
----
-
-## Web Search (Google Search Grounding)
-
-Enable Google Search grounding for Gemini models.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `web_search.default_mode` | `"off"` | `"auto"` or `"off"` |
-| `web_search.grounding_threshold` | `0.3` | Dynamic retrieval threshold (0.0-1.0). Higher = search less often. Only applies in `auto` mode. |
-
----
-
-## Environment Overrides
-
-All options can be set via environment variables
-
-```bash
-OPENCODE_ANTIGRAVITY_QUIET=1                              # quiet_mode
-OPENCODE_ANTIGRAVITY_DEBUG=1                              # debug (1=basic, 2=verbose)
-OPENCODE_ANTIGRAVITY_LOG_DIR=/path                        # log_dir
-OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY=round-robin  # account_selection_strategy
-OPENCODE_ANTIGRAVITY_PID_OFFSET_ENABLED=1                 # pid_offset_enabled
-```
-
----
-
-## Full Example
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
-  "quiet_mode": false,
-  "debug": false,
-  "log_dir": "/custom/log/path",
-  "auto_update": true,
-  "keep_thinking": false,
-  "session_recovery": true,
-  "auto_resume": true,
-  "resume_text": "continue",
-  "empty_response_max_attempts": 4,
-  "empty_response_retry_delay_ms": 2000,
-  "tool_id_recovery": true,
-  "claude_tool_hardening": true,
-  "proactive_token_refresh": true,
-  "proactive_refresh_buffer_seconds": 1800,
-  "proactive_refresh_check_interval_seconds": 300,
-  "max_rate_limit_wait_seconds": 300,
-  "quota_fallback": false,
-  "account_selection_strategy": "hybrid",
-  "pid_offset_enabled": false,
-  "switch_on_first_rate_limit": true,
-  "signature_cache": {
-    "enabled": true,
-    "memory_ttl_seconds": 3600,
-    "disk_ttl_seconds": 172800,
-    "write_interval_seconds": 60
-  },
-  "health_score": {
-    "initial": 70,
-    "success_reward": 1,
-    "rate_limit_penalty": -10,
-    "failure_penalty": -20,
-    "recovery_rate_per_hour": 2,
-    "min_usable": 50,
-    "max_score": 100
-  },
-  "token_bucket": {
-    "max_tokens": 50,
-    "regeneration_rate_per_minute": 6,
-    "initial_tokens": 50
-  },
-  "web_search": {
-    "default_mode": "off",
-    "grounding_threshold": 0.3
-  }
-}
-```
+</details>

@@ -258,14 +258,47 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
 
 ## Configuration
 
-Create `~/.config/opencode/antigravity.json` for advanced settings:
+Create `~/.config/opencode/antigravity.json` for optional settings:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
-  "quiet_mode": false,
-  "debug": false
+  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json"
 }
+```
+
+Most users don't need to configure anything — defaults work well.
+
+### Model Behavior
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `keep_thinking` | `true` | Preserve Claude's thinking across turns (smarter model) |
+| `session_recovery` | `true` | Auto-recover from tool errors |
+| `web_search.default_mode` | `"off"` | Gemini Google Search: `"auto"` or `"off"` |
+
+### Account Rotation
+
+| Your Setup | Recommended Config |
+|------------|-------------------|
+| **1 account** | `"account_selection_strategy": "sticky"` |
+| **2-5 accounts** | Default (`"hybrid"`) works great |
+| **5+ accounts** | `"account_selection_strategy": "round-robin"` |
+| **Parallel agents** | Add `"pid_offset_enabled": true` |
+
+### App Behavior
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `quiet_mode` | `false` | Hide toast notifications |
+| `debug` | `false` | Enable debug logging |
+| `auto_update` | `true` | Auto-update plugin |
+
+For all options, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+**Environment variables:**
+```bash
+OPENCODE_ANTIGRAVITY_DEBUG=1 opencode   # Enable debug logging
+OPENCODE_ANTIGRAVITY_DEBUG=2 opencode   # Verbose logging
 ```
 
 | Option | Default | What it does |

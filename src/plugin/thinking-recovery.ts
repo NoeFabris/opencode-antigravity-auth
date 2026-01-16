@@ -9,6 +9,8 @@
  * we abandon the corrupted turn and let Claude generate fresh thinking.
  */
 
+import { debugLogToFile } from "./debug";
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -43,7 +45,8 @@ function isThinkingPart(part: any): boolean {
   return (
     part.thought === true ||
     part.type === "thinking" ||
-    part.type === "redacted_thinking"
+    part.type === "redacted_thinking" ||
+    part.type === "reasoning" // OpenCode/Vercel AI SDK format
   );
 }
 
@@ -73,20 +76,28 @@ function isToolResultMessage(msg: any): boolean {
 /**
  * Checks if a message contains thinking/reasoning content.
  */
-function messageHasThinking(msg: any): boolean {
+function messageHasThinking(msg: any, msgIndex?: number): boolean {
   if (!msg || typeof msg !== "object") return false;
 
   // Gemini format: parts array
   if (Array.isArray(msg.parts)) {
-    return msg.parts.some(isThinkingPart);
+    const hasThinking = msg.parts.some(isThinkingPart);
+    if (msgIndex !== undefined) {
+      debugLogToFile(`[ThinkingRecovery] messageHasThinking (Gemini) msgIndex=${msgIndex} role=${msg.role} partsCount=${msg.parts.length} hasThinking=${hasThinking} partTypes=${JSON.stringify(msg.parts.map((p: any) => ({ thought: p?.thought, type: p?.type, hasFunctionCall: "functionCall" in (p || {}), hasFunctionResponse: "functionResponse" in (p || {}), hasText: "text" in (p || {}) })))}`);
+    }
+    return hasThinking;
   }
 
   // Anthropic format: content array
   if (Array.isArray(msg.content)) {
-    return msg.content.some(
+    const hasThinking = msg.content.some(
       (block: any) =>
-        block?.type === "thinking" || block?.type === "redacted_thinking",
+        block?.type === "thinking" || block?.type === "redacted_thinking" || block?.type === "reasoning",
     );
+    if (msgIndex !== undefined) {
+      debugLogToFile(`[ThinkingRecovery] messageHasThinking (Anthropic) msgIndex=${msgIndex} role=${msg.role} contentCount=${msg.content.length} hasThinking=${hasThinking} blockTypes=${JSON.stringify(msg.content.map((b: any) => b?.type))}`);
+    }
+    return hasThinking;
   }
 
   return false;
@@ -151,13 +162,15 @@ export function analyzeConversationState(contents: any[]): ConversationState {
     const role = msg?.role;
 
     if (role === "model" || role === "assistant") {
-      const hasThinking = messageHasThinking(msg);
+      const hasThinking = messageHasThinking(msg, i);
       const hasToolCalls = messageHasToolCalls(msg);
 
       // Track if this is the turn start
       if (i > lastRealUserIdx && state.turnStartIdx === -1) {
         state.turnStartIdx = i;
         state.turnHasThinking = hasThinking;
+      } else if (i > lastRealUserIdx && hasThinking) {
+        state.turnHasThinking = true;
       }
 
       state.lastModelIdx = i;
@@ -174,6 +187,9 @@ export function analyzeConversationState(contents: any[]): ConversationState {
       state.inToolLoop = true;
     }
   }
+
+  // Debug logging for thinking recovery analysis
+  debugLogToFile(`[ThinkingRecovery] analyzeConversationState: inToolLoop=${state.inToolLoop} turnStartIdx=${state.turnStartIdx} turnHasThinking=${state.turnHasThinking} lastModelIdx=${state.lastModelIdx} lastModelHasThinking=${state.lastModelHasThinking} lastModelHasToolCalls=${state.lastModelHasToolCalls} messageCount=${contents.length} lastRealUserIdx=${lastRealUserIdx}`);
 
   return state;
 }
@@ -206,7 +222,7 @@ function stripAllThinkingBlocks(contents: any[]): any[] {
     if (Array.isArray(content.content)) {
       const filteredContent = content.content.filter(
         (block: any) =>
-          block?.type !== "thinking" && block?.type !== "redacted_thinking",
+          block?.type !== "thinking" && block?.type !== "redacted_thinking" && block?.type !== "reasoning",
       );
       if (filteredContent.length === 0 && content.content.length > 0) {
         return content;
@@ -345,7 +361,7 @@ export function looksLikeCompactedThinkingTurn(msg: any): boolean {
     (p: any) =>
       p &&
       typeof p === "object" &&
-      (p.thought === true || p.type === "thinking" || p.type === "redacted_thinking"),
+      (p.thought === true || p.type === "thinking" || p.type === "redacted_thinking" || p.type === "reasoning"),
   );
 
   if (hasThinking) return false;

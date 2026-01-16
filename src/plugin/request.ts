@@ -20,6 +20,7 @@ import {
   DEBUG_MESSAGE_PREFIX,
   isDebugEnabled,
   logAntigravityDebugResponse,
+  debugLogToFile,
   type AntigravityDebugContext,
 } from "./debug";
 import { createLogger } from "./logger";
@@ -67,6 +68,7 @@ import {
   type ThinkingTier,
 } from "./transform";
 import { detectErrorType } from "./recovery";
+import { getKeepThinking } from "./config/loader";
 
 const log = createLogger("request");
 
@@ -429,7 +431,7 @@ function ensureMessageThinkingSignature(block: any, sessionId: string): any {
     return block;
   }
 
-  if (block.type !== "thinking" && block.type !== "redacted_thinking") {
+  if (block.type !== "thinking" && block.type !== "redacted_thinking" && block.type !== "reasoning") {
     return block;
   }
 
@@ -488,7 +490,7 @@ function hasSignedThinkingInMessages(messages: any[]): boolean {
       (block) =>
         block &&
         typeof block === "object" &&
-        (block.type === "thinking" || block.type === "redacted_thinking") &&
+        (block.type === "thinking" || block.type === "redacted_thinking" || block.type === "reasoning") &&
         typeof block.signature === "string" &&
         block.signature.length >= MIN_SIGNATURE_LENGTH,
     );
@@ -512,10 +514,10 @@ function ensureThinkingBeforeToolUseInMessages(messages: any[], signatureSession
     }
 
     const thinkingBlocks = blocks
-      .filter((b) => b && typeof b === "object" && (b.type === "thinking" || b.type === "redacted_thinking"))
+      .filter((b) => b && typeof b === "object" && (b.type === "thinking" || b.type === "redacted_thinking" || b.type === "reasoning"))
       .map((b) => ensureMessageThinkingSignature(b, signatureSessionKey));
 
-    const otherBlocks = blocks.filter((b) => !(b && typeof b === "object" && (b.type === "thinking" || b.type === "redacted_thinking")));
+    const otherBlocks = blocks.filter((b) => !(b && typeof b === "object" && (b.type === "thinking" || b.type === "redacted_thinking" || b.type === "reasoning")));
     const hasSignedThinking = thinkingBlocks.some((b) => typeof b.signature === "string" && b.signature.length >= MIN_SIGNATURE_LENGTH);
 
     if (hasSignedThinking) {
@@ -1264,13 +1266,17 @@ export function prepareAntigravityRequest(
         if (isClaudeThinking && Array.isArray(requestPayload.contents)) {
           const conversationState = analyzeConversationState(requestPayload.contents);
 
+          const needsRecovery = needsThinkingRecovery(conversationState);
+          const keepThinking = getKeepThinking();
+          debugLogToFile(`[ThinkingRecovery] check: isClaudeThinking=${isClaudeThinking} forceThinkingRecovery=${forceThinkingRecovery} needsRecovery=${needsRecovery} keepThinking=${keepThinking} inToolLoop=${conversationState.inToolLoop} turnHasThinking=${conversationState.turnHasThinking} turnStartIdx=${conversationState.turnStartIdx} lastModelIdx=${conversationState.lastModelIdx} messageCount=${requestPayload.contents.length}`);
+
           // Force recovery if API returned thinking_block_order error (retry case)
-          // or if proactive check detects we need recovery
-          if (forceThinkingRecovery || needsThinkingRecovery(conversationState)) {
-            // Set message for toast notification (shown in plugin.ts, respects quiet mode)
-            thinkingRecoveryMessage = forceThinkingRecovery
-              ? "Thinking recovery: retrying with fresh turn (API error)"
-              : "Thinking recovery: restarting turn (corrupted context)";
+          // Proactive check runs when keep_thinking=true (preserving context requires valid thinking)
+          if (forceThinkingRecovery || (keepThinking && needsRecovery)) {
+            // Only show toast for reactive recovery (API error), not proactive
+            if (forceThinkingRecovery) {
+              thinkingRecoveryMessage = "Thinking recovery: retrying with fresh turn (API error)";
+            }
 
             requestPayload.contents = closeToolLoopForThinking(requestPayload.contents);
 
