@@ -80,8 +80,8 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 ### Step-by-Step Instructions
 
 1. Edit the OpenCode configuration file:
-   - Linux/Mac: `~/.config/opencode/opencode.json`
-   - Windows: `%APPDATA%\opencode\opencode.json`
+   - Linux/Mac/Windows: `~/.config/opencode/opencode.json`
+   > **Note**: On Windows, `~` resolves to your User Home directory (e.g., `C:\Users\YourName`).
 
 2. Add the plugin to the `plugins` array
 
