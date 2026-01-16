@@ -2227,7 +2227,7 @@ export function fixClaudeToolPairing(messages: any[]): any[] {
     if (msg.role === "assistant" && Array.isArray(msg.content)) {
       for (const block of msg.content) {
         if (block.type === "tool_use" && block.id) {
-          toolUseMap.set(block.id, { name: block.name || "unknown", msgIndex: i });
+          toolUseMap.set(block.id, { name: block.name || `tool-${toolUseMap.size}`, msgIndex: i });
         }
       }
     }

@@ -361,6 +361,10 @@ export interface GeminiTransformOptions {
 export interface GeminiTransformResult {
   toolDebugMissing: number;
   toolDebugSummaries: string[];
+  /** Number of function declarations after wrapping */
+  wrappedFunctionCount: number;
+  /** Number of passthrough tools (googleSearchRetrieval, codeExecution) */
+  passthroughToolCount: number;
 }
 
 /**
@@ -421,9 +425,18 @@ export function applyGeminiTransforms(
   // 4. Wrap tools in functionDeclarations format (fixes #203, #206)
   // Antigravity strict protobuf validation rejects wrapper-level 'parameters' field
   // Must be: [{ functionDeclarations: [{ name, description, parameters }] }]
-  wrapToolsAsFunctionDeclarations(payload);
+  const wrapResult = wrapToolsAsFunctionDeclarations(payload);
   
-  return result;
+  return {
+    ...result,
+    wrappedFunctionCount: wrapResult.wrappedFunctionCount,
+    passthroughToolCount: wrapResult.passthroughToolCount,
+  };
+}
+
+export interface WrapToolsResult {
+  wrappedFunctionCount: number;
+  passthroughToolCount: number;
 }
 
 /**
@@ -438,9 +451,9 @@ export function applyGeminiTransforms(
  * The wrapper-level 'parameters' field causes:
  *   "Unknown name 'parameters' at 'request.tools[0]'"
  */
-export function wrapToolsAsFunctionDeclarations(payload: RequestPayload): void {
+export function wrapToolsAsFunctionDeclarations(payload: RequestPayload): WrapToolsResult {
   if (!Array.isArray(payload.tools) || payload.tools.length === 0) {
-    return;
+    return { wrappedFunctionCount: 0, passthroughToolCount: 0 };
   }
   
   const functionDeclarations: Array<{
@@ -452,17 +465,20 @@ export function wrapToolsAsFunctionDeclarations(payload: RequestPayload): void {
   const passthroughTools: unknown[] = [];
   
   for (const tool of payload.tools as Array<Record<string, unknown>>) {
-    if (tool.googleSearchRetrieval || tool.codeExecution || tool.functionDeclarations) {
+    if (tool.googleSearchRetrieval || tool.codeExecution) {
+      passthroughTools.push(tool);
+      continue;
+    }
+    
+    if (tool.functionDeclarations) {
       if (Array.isArray(tool.functionDeclarations)) {
         for (const decl of tool.functionDeclarations as Array<Record<string, unknown>>) {
           functionDeclarations.push({
-            name: String(decl.name || "unknown"),
+            name: String(decl.name || `tool-${functionDeclarations.length}`),
             description: String(decl.description || ""),
             parameters: (decl.parameters as Record<string, unknown>) || { type: "OBJECT", properties: {} },
           });
         }
-      } else {
-        passthroughTools.push(tool);
       }
       continue;
     }
@@ -512,4 +528,9 @@ export function wrapToolsAsFunctionDeclarations(payload: RequestPayload): void {
   finalTools.push(...passthroughTools);
   
   payload.tools = finalTools;
+  
+  return {
+    wrappedFunctionCount: functionDeclarations.length,
+    passthroughToolCount: passthroughTools.length,
+  };
 }
