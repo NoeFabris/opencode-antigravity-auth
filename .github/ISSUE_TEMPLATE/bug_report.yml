@@ -7,10 +7,15 @@ body:
       value: |
         ## Before opening an issue
 
+        > ⚠️ **PLEASE READ THE TROUBLESHOOTING GUIDE FIRST**
+        > 
+        > Most issues (rate limits, hanging prompts, auth errors) are covered in our troubleshooting guide.
+        > **Your issue may already have a solution!**
+
         **Please write a descriptive title above** (e.g., "Auth fails with invalid_grant after token refresh")
 
         Check the following resources first:
-        - [Troubleshoot section](https://github.com/NoeFabris/opencode-antigravity-auth#troubleshoot) - common issues and solutions
+        - **[📋 Troubleshooting Guide](https://github.com/NoeFabris/opencode-antigravity-auth/blob/main/docs/TROUBLESHOOTING.md)** - common issues and solutions
         - [Existing issues](https://github.com/NoeFabris/opencode-antigravity-auth/issues?q=is%3Aissue) - your issue may already be reported
 
         **Issues without debug logs will be closed.**
@@ -22,7 +27,7 @@ body:
       options:
         - label: I have searched existing issues for duplicates
           required: true
-        - label: I have read the [Troubleshoot section](https://github.com/NoeFabris/opencode-antigravity-auth#troubleshoot)
+        - label: I have read the [📋 Troubleshooting Guide](https://github.com/NoeFabris/opencode-antigravity-auth/blob/main/docs/TROUBLESHOOTING.md)
           required: true
         - label: I have read the [README](https://github.com/NoeFabris/opencode-antigravity-auth#readme) installation instructions
           required: true

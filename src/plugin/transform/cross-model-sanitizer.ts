@@ -83,9 +83,16 @@ export function stripClaudeThinkingFields(
 ): { part: Record<string, unknown>; stripped: number } {
   let stripped = 0;
 
-  // Claude/OpenCode: { type: "thinking"|"reasoning", thinking: "...", signature: "..." } -> Gemini: { thought: true, text: "..." }
+  // Claude: { type: "thinking"|"redacted_thinking", thinking: "...", signature: "..." }
+  // OpenCode/Vercel AI SDK: { type: "reasoning", text: "..." }
+  // -> Gemini: { thought: true, text: "..." }
   if (part.type === "thinking" || part.type === "redacted_thinking" || part.type === "reasoning") {
-    const thinkingContent = typeof part.thinking === "string" ? part.thinking : "";
+    // "reasoning" blocks use "text" field, "thinking" blocks use "thinking" field
+    const thinkingContent = typeof part.thinking === "string" 
+      ? part.thinking 
+      : typeof part.text === "string" 
+        ? part.text 
+        : "";
     
     delete part.type;
     delete part.thinking;
