@@ -128,13 +128,6 @@ function applyEnvOverrides(config: AntigravityConfig): AntigravityConfig {
     // OPENCODE_ANTIGRAVITY_LOG_DIR=/path/to/logs
     log_dir: env.OPENCODE_ANTIGRAVITY_LOG_DIR || config.log_dir,
 
-    // OPENCODE_ANTIGRAVITY_KEEP_THINKING=1
-    keep_thinking:
-      env.OPENCODE_ANTIGRAVITY_KEEP_THINKING === "1" ||
-      env.OPENCODE_ANTIGRAVITY_KEEP_THINKING === "true"
-        ? true
-        : config.keep_thinking,
-
     // OPENCODE_ANTIGRAVITY_SESSION_RECOVERY=0 to disable
     session_recovery:
       env.OPENCODE_ANTIGRAVITY_SESSION_RECOVERY === "0" ||
@@ -238,4 +231,14 @@ export function configExists(path: string): boolean {
  */
 export function getDefaultLogsDir(): string {
   return join(getConfigDir(), "antigravity-logs");
+}
+
+let runtimeConfig: AntigravityConfig | null = null;
+
+export function initRuntimeConfig(config: AntigravityConfig): void {
+  runtimeConfig = config;
+}
+
+export function getKeepThinking(): boolean {
+  return runtimeConfig?.keep_thinking ?? false;
 }

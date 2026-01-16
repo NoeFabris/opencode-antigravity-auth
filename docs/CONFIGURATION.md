@@ -139,13 +139,12 @@ Enable Google Search grounding for Gemini models.
 
 ## Environment Overrides
 
-All options can be set via environment variables:
+All options can be set via environment variables
 
 ```bash
 OPENCODE_ANTIGRAVITY_QUIET=1                              # quiet_mode
 OPENCODE_ANTIGRAVITY_DEBUG=1                              # debug (1=basic, 2=verbose)
 OPENCODE_ANTIGRAVITY_LOG_DIR=/path                        # log_dir
-OPENCODE_ANTIGRAVITY_KEEP_THINKING=1                      # keep_thinking
 OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY=round-robin  # account_selection_strategy
 OPENCODE_ANTIGRAVITY_PID_OFFSET_ENABLED=1                 # pid_offset_enabled
 ```

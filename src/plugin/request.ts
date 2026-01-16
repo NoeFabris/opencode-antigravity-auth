@@ -6,6 +6,7 @@ import {
   GEMINI_CLI_ENDPOINT,
   EMPTY_SCHEMA_PLACEHOLDER_NAME,
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
+  SKIP_THOUGHT_SIGNATURE,
   type HeaderStyle,
 } from "../constants";
 import { cacheSignature, getCachedSignature } from "./cache";
@@ -523,7 +524,17 @@ function ensureThinkingBeforeToolUseInMessages(messages: any[], signatureSession
 
     const lastThinking = defaultSignatureStore.get(signatureSessionKey);
     if (!lastThinking) {
-      return message;
+      // No cached signature available - use sentinel to bypass validation
+      // This handles cache miss scenarios (restart, session mismatch, expiry)
+      const existingThinking = thinkingBlocks[0];
+      const thinkingText = existingThinking?.thinking || existingThinking?.text || "";
+      log.debug("Injecting sentinel signature (cache miss)", { signatureSessionKey });
+      const sentinelBlock = {
+        type: "thinking",
+        thinking: thinkingText,
+        signature: SKIP_THOUGHT_SIGNATURE,
+      };
+      return { ...message, content: [sentinelBlock, ...otherBlocks] };
     }
 
     const injected = {

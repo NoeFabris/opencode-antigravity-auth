@@ -26,4 +26,6 @@ export {
   getProjectConfigPath,
   getDefaultLogsDir,
   configExists,
+  initRuntimeConfig,
+  getKeepThinking,
 } from "./loader";

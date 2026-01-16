@@ -206,7 +206,6 @@ Contains OAuth refresh tokens - treat as sensitive.
 |----------|---------|
 | `OPENCODE_ANTIGRAVITY_DEBUG` | `1` or `2` for debug logging |
 | `OPENCODE_ANTIGRAVITY_QUIET` | Suppress toast notifications |
-| `OPENCODE_ANTIGRAVITY_KEEP_THINKING` | Preserve thinking blocks (risky) |
 
 ### Config File
 
@@ -216,7 +215,8 @@ Location: `~/.config/opencode/antigravity.json`
 {
   "session_recovery": true,
   "auto_resume": true,
-  "resume_text": "continue"
+  "resume_text": "continue",
+  "keep_thinking": false
 }
 ```
 

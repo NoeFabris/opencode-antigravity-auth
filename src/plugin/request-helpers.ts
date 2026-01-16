@@ -1,8 +1,9 @@
-import { KEEP_THINKING_BLOCKS } from "../constants.js";
+import { getKeepThinking } from "./config";
 import { createLogger } from "./logger";
 import {
   EMPTY_SCHEMA_PLACEHOLDER_NAME,
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
+  SKIP_THOUGHT_SIGNATURE,
 } from "../constants";
 import { processImageData } from "./image-saver";
 import type { GoogleSearchConfig } from "./transform/types";
@@ -1101,8 +1102,8 @@ function filterContentArray(
   isLastAssistantMessage: boolean = false,
 ): any[] {
   // For Claude models, strip thinking blocks by default for reliability
-  // User can opt-in to keep thinking via OPENCODE_ANTIGRAVITY_KEEP_THINKING=1
-  if (isClaudeModel && !KEEP_THINKING_BLOCKS) {
+  // User can opt-in to keep thinking via config: { "keep_thinking": true }
+  if (isClaudeModel && !getKeepThinking()) {
     return stripAllThinkingBlocks(contentArray);
   }
 
@@ -1127,11 +1128,26 @@ function filterContentArray(
       continue;
     }
 
-    // CRITICAL: For the LAST assistant message, thinking blocks MUST remain byte-for-byte
-    // identical to what the API returned. Anthropic rejects any modification.
-    // Pass through unchanged - do NOT sanitize or reconstruct.
+    // For the LAST assistant message with thinking blocks:
+    // - If signature is valid (length >= 50), pass through unchanged
+    // - If signature is invalid/missing, inject sentinel to bypass validation
     if (isLastAssistantMessage && (isThinking || hasSignature)) {
-      filtered.push(item);
+      const existingSignature = item.signature || item.thoughtSignature;
+      const hasValidSignature = typeof existingSignature === "string" && existingSignature.length >= 50;
+      
+      if (hasValidSignature) {
+        filtered.push(item);
+      } else {
+        // Invalid or missing signature - inject sentinel
+        const thinkingText = getThinkingText(item) || "";
+        log.debug("Injecting sentinel signature for invalid last-message thinking block");
+        const sentinelPart = {
+          type: item.type || "thinking",
+          thinking: thinkingText,
+          signature: SKIP_THOUGHT_SIGNATURE,
+        };
+        filtered.push(sentinelPart);
+      }
       continue;
     }
 

@@ -89,21 +89,6 @@ export type HeaderStyle = "antigravity" | "gemini-cli";
  */
 export const ANTIGRAVITY_PROVIDER_ID = "google";
 
-/**
- * Whether to preserve thinking blocks for Claude models.
- * 
- * This value is now controlled via config (see plugin/config/schema.ts).
- * The default is false for reliability. Set to true via:
- * - Config file: { "keep_thinking": true }
- * - Env var: OPENCODE_ANTIGRAVITY_KEEP_THINKING=1
- * 
- * @deprecated Use config.keep_thinking from loadConfig() instead.
- *             This export is kept for backward compatibility but reads from env.
- */
-export const KEEP_THINKING_BLOCKS =
-  process.env.OPENCODE_ANTIGRAVITY_KEEP_THINKING === "1" ||
-  process.env.OPENCODE_ANTIGRAVITY_KEEP_THINKING === "true";
-
 // ============================================================================
 // TOOL HALLUCINATION PREVENTION (Ported from LLM-API-Key-Proxy)
 // ============================================================================
@@ -136,6 +121,21 @@ export const CLAUDE_DESCRIPTION_PROMPT = "\n\n⚠️ STRICT PARAMETERS: {params}
 
 export const EMPTY_SCHEMA_PLACEHOLDER_NAME = "_placeholder";
 export const EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION = "Placeholder. Always pass true.";
+
+/**
+ * Sentinel value to bypass thought signature validation.
+ * 
+ * When a thinking block has an invalid or missing signature (e.g., cache miss,
+ * session mismatch, plugin restart), this sentinel can be injected to skip
+ * validation instead of failing with "Invalid signature in thinking block".
+ * 
+ * This is an officially supported Google API feature, used by:
+ * - gemini-cli: https://github.com/google-gemini/gemini-cli
+ * - Google .NET SDK: PredictionServiceChatClient.cs
+ * 
+ * @see https://ai.google.dev/gemini-api/docs/thought-signatures
+ */
+export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
 
 // ============================================================================
 // ANTIGRAVITY SYSTEM INSTRUCTION (Ported from CLIProxyAPI v6.6.89)
