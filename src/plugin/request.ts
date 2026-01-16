@@ -1141,13 +1141,30 @@ export function prepareAntigravityRequest(
               return newTool;
             });
 
-            // Gemini 3 API requires: [{functionDeclarations: [{name, description, parameters}, ...]}]
+            // Gemini 3 API requires: [{ functionDeclarations: [{ name, description, parameters }, ...] }]
+            // Note: the wrapper object must only contain `functionDeclarations` (no stray fields like `parameters`).
             const normalizedTools = requestPayload.tools as any[];
-            const geminiDeclarations = normalizedTools.map((tool: any) => ({
-              name: tool.name || tool.function?.name,
-              description: tool.description || tool.function?.description,
-              parameters: tool.parameters || tool.input_schema || tool.function?.parameters || tool.function?.input_schema,
-            }));
+
+            const geminiDeclarations = normalizedTools.map((tool: any) => {
+              const schema =
+                tool.parameters ||
+                tool.input_schema ||
+                tool.inputSchema ||
+                tool.function?.parameters ||
+                tool.function?.input_schema ||
+                tool.function?.inputSchema ||
+                tool.custom?.parameters ||
+                tool.custom?.input_schema ||
+                tool.custom?.inputSchema ||
+                tool.custom?.parametersJsonSchema;
+
+              return {
+                name: tool.name || tool.function?.name || tool.custom?.name,
+                description: tool.description || tool.function?.description || tool.custom?.description,
+                parameters: schema,
+              };
+            });
+
             requestPayload.tools = [{ functionDeclarations: geminiDeclarations }];
           }
 

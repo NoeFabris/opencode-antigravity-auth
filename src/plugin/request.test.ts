@@ -651,6 +651,109 @@ describe("request.ts", () => {
       expect(result.requestedModel).toBe("gemini-2.5-flash");
     });
 
+    it("uses parameters (not inputSchema) for Antigravity gemini tool declarations", () => {
+      const result = prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3-flash:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contents: [],
+            tools: [
+              {
+                name: "read",
+                description: "Read file",
+                input_schema: {
+                  type: "object",
+                  properties: { path: { type: "string" } },
+                  required: ["path"],
+                },
+              },
+            ],
+          }),
+        },
+        mockAccessToken,
+        mockProjectId,
+      );
+
+      const body = JSON.parse((result.init as any).body);
+      const tools = body.request.tools;
+      expect(Array.isArray(tools)).toBe(true);
+
+      // Critical: Antigravity rejects wrapper-level `parameters`
+      expect(tools[0].parameters).toBeUndefined();
+
+      // Antigravity expects `parameters` inside each function declaration
+      expect(tools[0].functionDeclarations[0].parameters).toBeDefined();
+
+      // Explicitly ensure we do not send inputSchema
+      expect(tools[0].functionDeclarations[0].inputSchema).toBeUndefined();
+    });
+
+    it("uses parameters for Gemini CLI tool declarations", () => {
+      const result = prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contents: [],
+            tools: [
+              {
+                name: "read",
+                description: "Read file",
+                input_schema: {
+                  type: "object",
+                  properties: { path: { type: "string" } },
+                  required: ["path"],
+                },
+              },
+            ],
+          }),
+        },
+        mockAccessToken,
+        mockProjectId,
+        undefined,
+        "gemini-cli",
+      );
+
+      const body = JSON.parse((result.init as any).body);
+      const tools = body.request.tools;
+      expect(Array.isArray(tools)).toBe(true);
+      expect(tools[0].functionDeclarations[0].parameters).toBeDefined();
+    });
+
+    it("preserves schema for custom-only Gemini tools", () => {
+      const result = prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3-flash:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contents: [],
+            tools: [
+              {
+                custom: {
+                  name: "read",
+                  description: "Read file",
+                  input_schema: {
+                    type: "object",
+                    properties: { path: { type: "string" } },
+                    required: ["path"],
+                  },
+                },
+              },
+            ],
+          }),
+        },
+        mockAccessToken,
+        mockProjectId,
+      );
+
+      const body = JSON.parse((result.init as any).body);
+      const tools = body.request.tools;
+      expect(Array.isArray(tools)).toBe(true);
+      expect(tools[0].functionDeclarations[0].parameters).toBeDefined();
+      expect(tools[0].functionDeclarations[0].parameters.properties.path.type).toBe("string");
+    });
+
     it("handles empty body gracefully", () => {
       const result = prepareAntigravityRequest(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
