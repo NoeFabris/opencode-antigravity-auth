@@ -182,9 +182,9 @@ function resolveConversationKey(requestPayload: Record<string, unknown>): string
 
   const systemSeed = extractTextFromContent(
     (anyPayload.systemInstruction as any)?.parts
-      ?? anyPayload.systemInstruction
-      ?? anyPayload.system
-      ?? anyPayload.system_instruction,
+    ?? anyPayload.systemInstruction
+    ?? anyPayload.system
+    ?? anyPayload.system_instruction,
   );
   const messageSeed = Array.isArray(anyPayload.messages)
     ? extractConversationSeedFromMessages(anyPayload.messages)
@@ -649,10 +649,10 @@ export function prepareAntigravityRequest(
   const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
   const baseEndpoint = endpointOverride ?? defaultEndpoint;
   const transformedUrl = `${baseEndpoint}/v1internal:${rawAction}${streaming ? "?alt=sse" : ""}`;
-    
+
   const isClaude = isClaudeModel(resolved.actualModel);
   const isClaudeThinking = isClaudeThinkingModel(resolved.actualModel);
-  
+
   // Tier-based thinking configuration from model resolver (can be overridden by variant config)
   let tierThinkingBudget = resolved.thinkingBudget;
   let tierThinkingLevel = resolved.thinkingLevel;
@@ -748,7 +748,7 @@ export function prepareAntigravityRequest(
           requestPayload.providerOptions as Record<string, unknown> | undefined
         );
         const isGemini3 = effectiveModel.toLowerCase().includes("gemini-3");
-        
+
         if (variantConfig?.thinkingLevel && isGemini3) {
           // Gemini 3 native format - use thinkingLevel directly
           tierThinkingLevel = variantConfig.thinkingLevel;
@@ -757,7 +757,7 @@ export function prepareAntigravityRequest(
           if (isGemini3) {
             // Legacy format for Gemini 3 - convert with deprecation warning
             log.warn("[Deprecated] Using thinkingBudget for Gemini 3 model. Use thinkingLevel instead.");
-            tierThinkingLevel = variantConfig.thinkingBudget <= 8192 ? "low" 
+            tierThinkingLevel = variantConfig.thinkingBudget <= 8192 ? "low"
               : variantConfig.thinkingBudget <= 16384 ? "medium" : "high";
             tierThinkingBudget = undefined;
           } else {
@@ -806,7 +806,7 @@ export function prepareAntigravityRequest(
             generationConfig.candidateCount = 1;
           }
           requestPayload.generationConfig = generationConfig;
-          
+
           // Add safety settings for image generation (permissive to allow creative content)
           if (!requestPayload.safetySettings) {
             requestPayload.safetySettings = [
@@ -817,11 +817,11 @@ export function prepareAntigravityRequest(
               { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_ONLY_HIGH" },
             ];
           }
-          
+
           // Image models don't support tools - remove them entirely
           delete requestPayload.tools;
           delete requestPayload.toolConfig;
-          
+
           // Replace system instruction with a simple image generation prompt
           // Image models should not receive agentic coding assistant instructions
           requestPayload.systemInstruction = {
@@ -829,69 +829,69 @@ export function prepareAntigravityRequest(
           };
         } else {
           const finalThinkingConfig = resolveThinkingConfig(
-          effectiveUserThinkingConfig,
-          isClaudeSonnetNonThinking ? false : (resolved.isThinkingModel ?? isThinkingCapableModel(effectiveModel)),
-          isClaude,
-          hasAssistantHistory,
-        );
+            effectiveUserThinkingConfig,
+            isClaudeSonnetNonThinking ? false : (resolved.isThinkingModel ?? isThinkingCapableModel(effectiveModel)),
+            isClaude,
+            hasAssistantHistory,
+          );
 
-        const normalizedThinking = normalizeThinkingConfig(finalThinkingConfig);
-        if (normalizedThinking) {
-          // Use tier-based thinking budget if specified via model suffix, otherwise fall back to user config
-          const thinkingBudget = tierThinkingBudget ?? normalizedThinking.thinkingBudget;
-          
-          // Build thinking config based on model type
-          let thinkingConfig: Record<string, unknown>;
-          
-          if (isClaudeThinking) {
-            // Claude uses snake_case keys
-            thinkingConfig = {
-              include_thoughts: normalizedThinking.includeThoughts ?? true,
-              ...(typeof thinkingBudget === "number" && thinkingBudget > 0
-                ? { thinking_budget: thinkingBudget }
-                : {}),
-            };
-          } else if (tierThinkingLevel) {
-            // Gemini 3 uses thinkingLevel string (low/medium/high)
-            thinkingConfig = {
-              includeThoughts: normalizedThinking.includeThoughts,
-              thinkingLevel: tierThinkingLevel,
-            };
-          } else {
-            // Gemini 2.5 and others use numeric budget
-            thinkingConfig = {
-              includeThoughts: normalizedThinking.includeThoughts,
-              ...(typeof thinkingBudget === "number" && thinkingBudget > 0 ? { thinkingBudget } : {}),
-            };
-          }
+          const normalizedThinking = normalizeThinkingConfig(finalThinkingConfig);
+          if (normalizedThinking) {
+            // Use tier-based thinking budget if specified via model suffix, otherwise fall back to user config
+            const thinkingBudget = tierThinkingBudget ?? normalizedThinking.thinkingBudget;
 
-          if (rawGenerationConfig) {
-            rawGenerationConfig.thinkingConfig = thinkingConfig;
+            // Build thinking config based on model type
+            let thinkingConfig: Record<string, unknown>;
 
-            if (isClaudeThinking && typeof thinkingBudget === "number" && thinkingBudget > 0) {
-              const currentMax = (rawGenerationConfig.maxOutputTokens ?? rawGenerationConfig.max_output_tokens) as number | undefined;
-              if (!currentMax || currentMax <= thinkingBudget) {
-                rawGenerationConfig.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
-                if (rawGenerationConfig.max_output_tokens !== undefined) {
-                  delete rawGenerationConfig.max_output_tokens;
+            if (isClaudeThinking) {
+              // Claude uses snake_case keys
+              thinkingConfig = {
+                include_thoughts: normalizedThinking.includeThoughts ?? true,
+                ...(typeof thinkingBudget === "number" && thinkingBudget > 0
+                  ? { thinking_budget: thinkingBudget }
+                  : {}),
+              };
+            } else if (tierThinkingLevel) {
+              // Gemini 3 uses thinkingLevel string (low/medium/high)
+              thinkingConfig = {
+                includeThoughts: normalizedThinking.includeThoughts,
+                thinkingLevel: tierThinkingLevel,
+              };
+            } else {
+              // Gemini 2.5 and others use numeric budget
+              thinkingConfig = {
+                includeThoughts: normalizedThinking.includeThoughts,
+                ...(typeof thinkingBudget === "number" && thinkingBudget > 0 ? { thinkingBudget } : {}),
+              };
+            }
+
+            if (rawGenerationConfig) {
+              rawGenerationConfig.thinkingConfig = thinkingConfig;
+
+              if (isClaudeThinking && typeof thinkingBudget === "number" && thinkingBudget > 0) {
+                const currentMax = (rawGenerationConfig.maxOutputTokens ?? rawGenerationConfig.max_output_tokens) as number | undefined;
+                if (!currentMax || currentMax <= thinkingBudget) {
+                  rawGenerationConfig.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
+                  if (rawGenerationConfig.max_output_tokens !== undefined) {
+                    delete rawGenerationConfig.max_output_tokens;
+                  }
                 }
               }
-            }
 
+              requestPayload.generationConfig = rawGenerationConfig;
+            } else {
+              const generationConfig: Record<string, unknown> = { thinkingConfig };
+
+              if (isClaudeThinking && typeof thinkingBudget === "number" && thinkingBudget > 0) {
+                generationConfig.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
+              }
+
+              requestPayload.generationConfig = generationConfig;
+            }
+          } else if (rawGenerationConfig?.thinkingConfig) {
+            delete rawGenerationConfig.thinkingConfig;
             requestPayload.generationConfig = rawGenerationConfig;
-          } else {
-            const generationConfig: Record<string, unknown> = { thinkingConfig };
-
-            if (isClaudeThinking && typeof thinkingBudget === "number" && thinkingBudget > 0) {
-              generationConfig.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
-            }
-
-            requestPayload.generationConfig = generationConfig;
           }
-        } else if (rawGenerationConfig?.thinkingConfig) {
-          delete rawGenerationConfig.thinkingConfig;
-          requestPayload.generationConfig = rawGenerationConfig;
-        }
         } // End of else block for non-image models
 
         // Clean up thinking fields from extra_body
@@ -977,51 +977,30 @@ export function prepareAntigravityRequest(
             const passthroughTools: any[] = [];
 
             const normalizeSchema = (schema: any) => {
-              const createPlaceholderSchema = (base: any = {}) => ({
-                ...base,
-                type: "object",
-                properties: {
-                  [EMPTY_SCHEMA_PLACEHOLDER_NAME]: {
-                    type: "boolean",
-                    description: EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
-                  },
-                },
-                required: [EMPTY_SCHEMA_PLACEHOLDER_NAME],
-              });
-
               if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
                 toolDebugMissing += 1;
-                return createPlaceholderSchema();
+                return { type: "object", properties: {}, additionalProperties: false };
               }
 
               const cleaned = cleanJSONSchemaForAntigravity(schema);
 
               if (!cleaned || typeof cleaned !== "object" || Array.isArray(cleaned)) {
                 toolDebugMissing += 1;
-                return createPlaceholderSchema();
+                return { type: "object", properties: {}, additionalProperties: false };
               }
 
               // Claude VALIDATED mode requires tool parameters to be an object schema
               // with at least one property.
-              const hasProperties =
-                cleaned.properties &&
-                typeof cleaned.properties === "object" &&
-                Object.keys(cleaned.properties).length > 0;
+              const properties = cleaned.properties || {};
+              const realPropNames = Object.keys(properties).filter(
+                (k) => k !== EMPTY_SCHEMA_PLACEHOLDER_NAME && k !== "_placeholder"
+              );
 
-              cleaned.type = "object";
-
-              if (!hasProperties) {
-                cleaned.properties = {
-                  [EMPTY_SCHEMA_PLACEHOLDER_NAME]: {
-                    type: "boolean",
-                    description: EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
-                  },
-                };
-                cleaned.required = Array.isArray(cleaned.required)
-                  ? Array.from(new Set([...cleaned.required, EMPTY_SCHEMA_PLACEHOLDER_NAME]))
-                  : [EMPTY_SCHEMA_PLACEHOLDER_NAME];
+              if (realPropNames.length === 0) {
+                return { type: "object", properties: {}, additionalProperties: false };
               }
 
+              cleaned.type = "object";
               return cleaned;
             };
 
@@ -1044,6 +1023,8 @@ export function prepareAntigravityRequest(
                   tool.custom?.parametersJsonSchema ||
                   tool.custom?.input_schema;
 
+                const normalizedSchema = normalizeSchema(schema);
+
                 let name =
                   decl?.name ||
                   tool.name ||
@@ -1064,7 +1045,7 @@ export function prepareAntigravityRequest(
                 functionDeclarations.push({
                   name,
                   description: String(description || ""),
-                  parameters: normalizeSchema(schema),
+                  parameters: normalizedSchema,
                 });
 
                 toolDebugSummaries.push(
@@ -1101,9 +1082,9 @@ export function prepareAntigravityRequest(
           } else {
             // Gemini-specific tool normalization and feature injection
             // Resolve Google Search config: Variant takes precedence over global default
-            const effectiveSearchConfig: GoogleSearchConfig | undefined = 
+            const effectiveSearchConfig: GoogleSearchConfig | undefined =
               variantConfig?.googleSearch ?? options?.googleSearch;
-              
+
             const geminiResult = applyGeminiTransforms(requestPayload, {
               model: effectiveModel,
               normalizedThinking: undefined, // Thinking config already applied above (lines 816-880)
@@ -1111,7 +1092,7 @@ export function prepareAntigravityRequest(
               tierThinkingLevel: tierThinkingLevel as ThinkingTier | undefined,
               googleSearch: effectiveSearchConfig,
             });
-            
+
             toolDebugMissing = geminiResult.toolDebugMissing;
             toolDebugSummaries.push(...geminiResult.toolDebugSummaries);
           }
