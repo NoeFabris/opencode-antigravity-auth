@@ -7,7 +7,7 @@ import { AntigravityConfigSchema } from "../src/plugin/config/schema.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outputPath = join(__dirname, "../assets/antigravity.schema.json");
 
-const jsonSchema = zodToJsonSchema(AntigravityConfigSchema, {
+const jsonSchema = zodToJsonSchema(AntigravityConfigSchema as any, {
   name: "AntigravityConfig",
   $refStrategy: "none",
 }) as Record<string, unknown>;
