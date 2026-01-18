@@ -80,24 +80,25 @@ const ANTIGRAVITY_ONLY_MODELS = /^(claude|gpt)/i;
 const IMAGE_GENERATION_MODELS = /image|imagen/i;
 
 /**
- * Legacy Gemini 3 model names that should route to Antigravity quota.
+ * Gemini 3 model names that should route to Antigravity quota.
  *
- * Backward compatibility: Since Gemini CLI now uses -preview suffix
- * (gemini-3-pro-preview, gemini-3-flash-preview), old model names
- * without -preview can safely route to Antigravity quota.
+ * Routes ALL Gemini 3 variants (including -preview) to Antigravity quota
+ * for consistent quota consumption across the entire Gemini 3 family.
  *
  * Matches:
- * - gemini-3-pro-low, gemini-3-pro-high
+ * - gemini-3-pro, gemini-3-pro-low, gemini-3-pro-high
+ * - gemini-3-pro-preview, gemini-3-pro-preview-low, gemini-3-pro-preview-high
  * - gemini-3-flash, gemini-3-flash-low, gemini-3-flash-medium, gemini-3-flash-high
+ * - gemini-3-flash-preview, gemini-3-flash-preview-low, etc.
  *
  * Does NOT match:
- * - gemini-3-pro-preview (Gemini CLI)
- * - gemini-3-flash-preview (Gemini CLI)
  * - antigravity-gemini-3-* (already handled by prefix)
  *
- * WARNING: This may break if Google/Opencode removes the -preview suffix.
+ * Rationale: OpenCode's title agent uses gemini-3-flash-preview internally.
+ * Without this fix, title agent calls would consume Gemini CLI quota instead
+ * of Antigravity quota, causing unexpected quota exhaustion.
  */
-const LEGACY_ANTIGRAVITY_GEMINI3 = /^gemini-3-(pro-(low|high)|flash(-low|-medium|-high)?)$/i;
+const LEGACY_ANTIGRAVITY_GEMINI3 = /^gemini-3-(pro|flash)(-preview)?(-low|-medium|-high)?$/i;
 
 /**
  * Models that support thinking tier suffixes.
