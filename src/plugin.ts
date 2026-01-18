@@ -63,6 +63,30 @@ const warmupSucceededSessionIds = new Set<string>();
 
 const log = createLogger("plugin");
 
+const SAVE_THROTTLE_MS = 2000;
+let lastSaveTime = 0;
+let pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function throttledSaveToDisk(accountManager: AccountManager): void {
+  const now = Date.now();
+  if (now - lastSaveTime < SAVE_THROTTLE_MS) {
+    if (!pendingSaveTimer) {
+      pendingSaveTimer = setTimeout(() => {
+        pendingSaveTimer = null;
+        lastSaveTime = Date.now();
+        accountManager.saveToDisk().catch((err) => {
+          log.error("Throttled save failed", { error: String(err) });
+        });
+      }, SAVE_THROTTLE_MS - (now - lastSaveTime));
+    }
+    return;
+  }
+  lastSaveTime = now;
+  accountManager.saveToDisk().catch((err) => {
+    log.error("Save to disk failed", { error: String(err) });
+  });
+}
+
 function trackWarmupAttempt(sessionId: string): boolean {
   if (warmupSucceededSessionIds.has(sessionId)) {
     return false;
@@ -986,11 +1010,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 resetAccountFailureState(account.index);
                 accountManager.updateFromAuth(account, refreshed);
                 authRecord = refreshed;
-                try {
-                  await accountManager.saveToDisk();
-                } catch (error) {
-                  log.error("Failed to persist refreshed auth", { error: String(error) });
-                }
+                throttledSaveToDisk(accountManager);
               } catch (error) {
                 if (error instanceof AntigravityTokenRefreshError && error.code === "invalid_grant") {
                   const removed = accountManager.removeAccount(account);
@@ -1062,11 +1082,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             if (projectContext.auth !== authRecord) {
               accountManager.updateFromAuth(account, projectContext.auth);
               authRecord = projectContext.auth;
-              try {
-                await accountManager.saveToDisk();
-              } catch (error) {
-                log.error("Failed to persist project context", { error: String(error) });
-              }
+              throttledSaveToDisk(accountManager);
             }
 
             const runThinkingWarmup = async (

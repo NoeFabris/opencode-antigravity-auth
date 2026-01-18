@@ -15,6 +15,13 @@ import { createLogger } from "./logger";
 const log = createLogger("storage");
 
 /**
+ * Sentinel value returned by withFileLock when another session holds the lock.
+ * This allows concurrent sessions to gracefully skip persistence instead of
+ * throwing errors, as the session holding the lock will persist the shared state.
+ */
+export const LOCK_HELD_BY_OTHER = Symbol("LOCK_HELD_BY_OTHER");
+
+/**
  * Files/directories that should be gitignored in the config directory.
  * These contain sensitive data or machine-specific state.
  */
@@ -239,12 +246,19 @@ async function ensureFileExists(path: string): Promise<void> {
   }
 }
 
-async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T | typeof LOCK_HELD_BY_OTHER> {
   await ensureFileExists(path);
   let release: (() => Promise<void>) | null = null;
   try {
     release = await lockfile.lock(path, LOCK_OPTIONS);
     return await fn();
+  } catch (error) {
+    const errorMsg = String(error);
+    if (errorMsg.includes("Lock file is already being held") || errorMsg.includes("ELOCKED")) {
+      log.debug("Lock held by another session, skipping this save");
+      return LOCK_HELD_BY_OTHER;
+    }
+    throw error;
   } finally {
     if (release) {
       try {
@@ -517,13 +531,13 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   }
 }
 
-export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
+export async function saveAccounts(storage: AccountStorageV3): Promise<boolean> {
   const path = getStoragePath();
   const configDir = dirname(path);
   await fs.mkdir(configDir, { recursive: true });
   await ensureGitignore(configDir);
 
-  await withFileLock(path, async () => {
+  const result = await withFileLock(path, async () => {
     const existing = await loadAccountsUnsafe();
     const merged = existing ? mergeAccountStorage(existing, storage) : storage;
 
@@ -532,7 +546,13 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
 
     await fs.writeFile(tempPath, content, "utf-8");
     await fs.rename(tempPath, path);
+    return true;
   });
+
+  if (result === LOCK_HELD_BY_OTHER) {
+    return false;
+  }
+  return true;
 }
 
 async function loadAccountsUnsafe(): Promise<AccountStorageV3 | null> {
