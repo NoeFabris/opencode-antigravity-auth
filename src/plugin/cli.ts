@@ -66,3 +66,50 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
     rl.close();
   }
 }
+
+export type LoginAuthMethod = "oauth" | "refresh_token";
+
+/**
+ * Prompts user to choose authentication method.
+ * Returns "oauth" for standard OAuth flow, "refresh_token" for direct token input.
+ */
+export async function promptAuthMethod(): Promise<LoginAuthMethod> {
+  const rl = createInterface({ input, output });
+  try {
+    console.log("\nAuthentication method:");
+    console.log("  1. OAuth with Google (browser login)");
+    console.log("  2. Direct refresh token input");
+    console.log("");
+
+    while (true) {
+      const answer = await rl.question("Choose method [1/2]: ");
+      const normalized = answer.trim();
+
+      if (normalized === "1" || normalized === "oauth") {
+        return "oauth";
+      }
+      if (normalized === "2" || normalized === "refresh_token" || normalized === "token") {
+        return "refresh_token";
+      }
+
+      console.log("Please enter '1' for OAuth or '2' for refresh token.");
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Prompts user for a Google refresh token.
+ */
+export async function promptRefreshToken(): Promise<string> {
+  const rl = createInterface({ input, output });
+  try {
+    console.log("\nEnter your Google refresh token.");
+    console.log("(The token should be obtained from a previous OAuth flow)\n");
+    const answer = await rl.question("Refresh token: ");
+    return answer.trim();
+  } finally {
+    rl.close();
+  }
+}

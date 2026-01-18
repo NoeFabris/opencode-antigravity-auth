@@ -1,9 +1,9 @@
 import { exec } from "node:child_process";
 import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_PROVIDER_ID, type HeaderStyle } from "./constants";
-import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
+import { authorizeAntigravity, exchangeAntigravity, validateRefreshToken } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import { promptAddAnotherAccount, promptLoginMode, promptProjectId, promptAuthMethod, promptRefreshToken } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
   startAntigravityDebugRequest, 
@@ -1670,6 +1670,100 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
 
             while (accounts.length < MAX_OAUTH_ACCOUNTS) {
+              console.log(`\n=== Antigravity Authentication (Account ${accounts.length + 1}) ===`);
+
+              // Prompt for authentication method
+              const authMethod = await promptAuthMethod();
+
+              if (authMethod === "refresh_token") {
+                // Direct refresh token flow
+                const refreshToken = await promptRefreshToken();
+                if (!refreshToken) {
+                  console.log("No refresh token provided, skipping...");
+                  continue;
+                }
+
+                const projectId = await promptProjectId();
+                console.log("\nValidating refresh token...");
+
+                const result = await validateRefreshToken(refreshToken, projectId);
+
+                if (result.type === "failed") {
+                  console.log(`\n❌ Refresh token validation failed: ${result.error}`);
+                  if (accounts.length === 0) {
+                    return {
+                      url: "",
+                      instructions: `Authentication failed: ${result.error}`,
+                      method: "auto",
+                      callback: async () => result,
+                    };
+                  }
+                  console.log("Skipping this account...\n");
+                  continue;
+                }
+
+                // Check if account already exists by email or by raw refresh token
+                const existingStorage = await loadAccounts();
+                const inputTokenParts = parseRefreshParts(result.refresh);
+                const existingAccount = existingStorage?.accounts.find(acc => {
+                  if (acc.email && result.email && acc.email === result.email) {
+                    return true;
+                  }
+                  // Compare raw refresh tokens (without projectId suffix)
+                  const storedParts = parseRefreshParts(acc.refreshToken);
+                  return storedParts.refreshToken === inputTokenParts.refreshToken;
+                });
+
+                if (existingAccount) {
+                  console.log(`\n⚠️ Account already exists: ${result.email || "unknown"}`);
+                  console.log("Skipping this account...\n");
+                  continue;
+                }
+
+                console.log(`\n✓ Token validated successfully${result.email ? ` (${result.email})` : ""}`);
+                accounts.push(result);
+
+                // Show toast for successful account authentication
+                try {
+                  await client.tui.showToast({
+                    body: {
+                      message: `Account ${accounts.length} authenticated${result.email ? ` (${result.email})` : ""}`,
+                      variant: "success",
+                    },
+                  });
+                } catch {
+                  // TUI may not be available in CLI mode
+                }
+
+                try {
+                  const isFirstAccount = accounts.length === 1;
+                  await persistAccountPool([result], isFirstAccount && startFresh);
+                } catch {
+                  // ignore
+                }
+
+                if (accounts.length >= MAX_OAUTH_ACCOUNTS) {
+                  break;
+                }
+
+                let currentAccountCount = accounts.length;
+                try {
+                  const currentStorage = await loadAccounts();
+                  if (currentStorage) {
+                    currentAccountCount = currentStorage.accounts.length;
+                  }
+                } catch {
+                  // Fall back to accounts.length if we can't read storage
+                }
+
+                const addAnother = await promptAddAnotherAccount(currentAccountCount);
+                if (!addAnother) {
+                  break;
+                }
+                continue;
+              }
+
+              // Standard OAuth flow
               console.log(`\n=== Antigravity OAuth (Account ${accounts.length + 1}) ===`);
 
               const projectId = await promptProjectId();
@@ -1976,6 +2070,85 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   await client.tui.showToast({
                     body: {
                       message: toastMessage,
+                      variant: "success",
+                    },
+                  });
+                } catch {
+                  // TUI may not be available
+                }
+              }
+
+              return result;
+            },
+          };
+        },
+      },
+      {
+        label: "Direct Refresh Token Input",
+        type: "oauth",
+        authorize: async () => {
+          // Cross-platform path hint
+          const pathHint = process.platform === "win32"
+            ? "%APPDATA%\\opencode\\antigravity-accounts.json"
+            : "~/.config/opencode/antigravity-accounts.json";
+
+          return {
+            url: "https://accounts.google.com/o/oauth2/v2/auth?note=paste_your_refresh_token_below",
+            instructions: `Paste your Google refresh token below (format: 1//0eXXX...)\n\nYou can find existing tokens in: ${pathHint}`,
+            method: "code",
+            callback: async (tokenInput: string): Promise<AntigravityTokenExchangeResult> => {
+              const refreshToken = tokenInput.trim();
+              if (!refreshToken) {
+                return { type: "failed", error: "No refresh token provided" };
+              }
+
+              // Check if it looks like a refresh token
+              if (!refreshToken.startsWith("1//")) {
+                return { type: "failed", error: "Invalid refresh token format. Token should start with '1//'" };
+              }
+
+              const result = await validateRefreshToken(refreshToken, "");
+
+              if (result.type === "success") {
+                // Check if account already exists by email or by raw refresh token
+                const existingStorage = await loadAccounts();
+                const inputTokenParts = parseRefreshParts(result.refresh);
+                const existingAccount = existingStorage?.accounts.find(acc => {
+                  if (acc.email && result.email && acc.email === result.email) {
+                    return true;
+                  }
+                  // Compare raw refresh tokens (without projectId suffix)
+                  const storedParts = parseRefreshParts(acc.refreshToken);
+                  return storedParts.refreshToken === inputTokenParts.refreshToken;
+                });
+
+                if (existingAccount) {
+                  try {
+                    await client.tui.showToast({
+                      body: {
+                        message: `Account already exists${result.email ? ` (${result.email})` : ""}`,
+                        variant: "info",
+                      },
+                    });
+                  } catch {
+                    // TUI may not be available
+                  }
+                  return { type: "failed", error: `Account already exists: ${result.email || "unknown"}` };
+                }
+
+                try {
+                  await persistAccountPool([result], false);
+                } catch {
+                  // ignore
+                }
+
+                const newStorage = await loadAccounts();
+                const totalAccounts = newStorage?.accounts.length ?? 1;
+
+                try {
+                  await client.tui.showToast({
+                    body: {
+                      message: `Account added${result.email ? ` (${result.email})` : ""} - ${totalAccounts} total`,
                       variant: "success",
                     },
                   });
