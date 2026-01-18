@@ -196,6 +196,93 @@ async function fetchProjectID(accessToken: string): Promise<string> {
 }
 
 /**
+ * Validate a refresh token by exchanging it for an access token and fetching user info.
+ * This allows users to add accounts using a pre-existing refresh token.
+ */
+export async function validateRefreshToken(
+  refreshToken: string,
+  projectId: string = "",
+): Promise<AntigravityTokenExchangeResult> {
+  try {
+    const startTime = Date.now();
+
+    // Exchange refresh token for access token
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: ANTIGRAVITY_CLIENT_ID,
+        client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      let errorMessage = "Invalid refresh token";
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error_description) {
+          errorMessage = errorJson.error_description;
+        } else if (errorJson.error) {
+          errorMessage = errorJson.error;
+        }
+      } catch {
+        if (errorText) {
+          errorMessage = errorText;
+        }
+      }
+      return { type: "failed", error: errorMessage };
+    }
+
+    const tokenPayload = (await tokenResponse.json()) as {
+      access_token: string;
+      expires_in: number;
+    };
+
+    // Fetch user info to get email
+    const userInfoResponse = await fetch(
+      "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
+      {
+        headers: {
+          Authorization: `Bearer ${tokenPayload.access_token}`,
+        },
+      },
+    );
+
+    const userInfo = userInfoResponse.ok
+      ? ((await userInfoResponse.json()) as AntigravityUserInfo)
+      : {};
+
+    // Fetch project ID if not provided
+    let effectiveProjectId = projectId;
+    if (!effectiveProjectId) {
+      effectiveProjectId = await fetchProjectID(tokenPayload.access_token);
+    }
+
+    // Store refresh token with project ID (same format as OAuth flow)
+    const storedRefresh = `${refreshToken}|${effectiveProjectId || ""}`;
+
+    return {
+      type: "success",
+      refresh: storedRefresh,
+      access: tokenPayload.access_token,
+      expires: calculateTokenExpiry(startTime, tokenPayload.expires_in),
+      email: userInfo.email,
+      projectId: effectiveProjectId || "",
+    };
+  } catch (error) {
+    return {
+      type: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
  * Exchange an authorization code for Antigravity CLI access and refresh tokens.
  */
 export async function exchangeAntigravity(
