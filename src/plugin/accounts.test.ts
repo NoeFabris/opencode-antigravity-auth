@@ -1138,6 +1138,35 @@ describe("AccountManager", () => {
   });
 
   describe("Rate Limit Reason Classification", () => {
+    it("getMinWaitTimeForFamily respects strict header style", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(0));
+
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const account = manager.getCurrentOrNextForFamily("gemini");
+
+      manager.markRateLimited(account!, 30000, "gemini", "antigravity", "gemini-3-pro-image");
+
+      expect(
+        manager.getMinWaitTimeForFamily(
+          "gemini",
+          "gemini-3-pro-image",
+          "antigravity",
+          true,
+        ),
+      ).toBe(30000);
+
+      expect(manager.getMinWaitTimeForFamily("gemini", "gemini-3-pro-image")).toBe(0);
+    });
+
     describe("parseRateLimitReason", () => {
       it("parses QUOTA_EXHAUSTED from reason field", () => {
         expect(parseRateLimitReason("QUOTA_EXHAUSTED")).toBe("QUOTA_EXHAUSTED");

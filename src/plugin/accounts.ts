@@ -612,10 +612,17 @@ export class AccountManager {
     };
   }
 
-  getMinWaitTimeForFamily(family: ModelFamily, model?: string | null): number {
+  getMinWaitTimeForFamily(
+    family: ModelFamily,
+    model?: string | null,
+    headerStyle?: HeaderStyle,
+    strict?: boolean,
+  ): number {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
-      return !isRateLimitedForFamily(a, family, model);
+      return strict && headerStyle
+        ? !isRateLimitedForHeaderStyle(a, family, headerStyle, model)
+        : !isRateLimitedForFamily(a, family, model);
     });
     if (available.length > 0) {
       return 0;
@@ -625,6 +632,10 @@ export class AccountManager {
     for (const a of this.accounts) {
       if (family === "claude") {
         const t = a.rateLimitResetTimes.claude;
+        if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));
+      } else if (strict && headerStyle) {
+        const key = getQuotaKey(family, headerStyle, model);
+        const t = a.rateLimitResetTimes[key];
         if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));
       } else {
         // For Gemini, account becomes available when EITHER pool expires for this model/family

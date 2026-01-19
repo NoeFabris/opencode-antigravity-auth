@@ -72,6 +72,24 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
   });
+
+  describe("Image models", () => {
+    it("marks antigravity-gemini-3-pro-image as explicit quota", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3-pro-image");
+      expect(result.actualModel).toBe("gemini-3-pro-image");
+      expect(result.isImageModel).toBe(true);
+      expect(result.explicitQuota).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("marks gemini-3-pro-image as explicit quota", () => {
+      const result = resolveModelWithTier("gemini-3-pro-image");
+      expect(result.actualModel).toBe("gemini-3-pro-image");
+      expect(result.isImageModel).toBe(true);
+      expect(result.explicitQuota).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+  });
 });
 
 describe("resolveModelWithVariant", () => {

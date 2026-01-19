@@ -187,7 +187,7 @@ export function resolveModelWithTier(requestedModel: string): ResolvedModel {
   
   // Image models always route to Antigravity
   const quotaPreference = isAntigravity || isAntigravityOnly || isLegacyAntigravity || isImageModel ? "antigravity" : "gemini-cli";
-  const explicitQuota = isAntigravity;
+  const explicitQuota = isAntigravity || isImageModel;
 
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
   const skipAlias = isAntigravity && isGemini3;

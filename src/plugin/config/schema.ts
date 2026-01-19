@@ -255,12 +255,28 @@ export const AntigravityConfigSchema = z.object({
   pid_offset_enabled: z.boolean().default(false),
    
    /**
-    * Switch to another account immediately on first rate limit (after 1s delay).
-    * When disabled, retries same account first, then switches on second rate limit.
+     * Switch to another account immediately on first rate limit (after 1s delay).
+     * When disabled, retries same account first, then switches on second rate limit.
+     * 
+     * @default true
+     */
+    switch_on_first_rate_limit: z.boolean().default(true),
+   
+   /**
+    * Default retry delay in seconds when API doesn't return a retry-after header.
+    * Lower values allow faster retries but may trigger more 429 errors.
     * 
-    * @default true
+    * @default 60
     */
-   switch_on_first_rate_limit: z.boolean().default(true),
+   default_retry_after_seconds: z.number().min(1).max(300).default(60),
+   
+   /**
+    * Maximum backoff delay in seconds for exponential retry.
+    * This caps how long the exponential backoff can grow.
+    * 
+    * @default 60
+    */
+   max_backoff_seconds: z.number().min(5).max(300).default(60),
    
    // =========================================================================
    // Health Score (used by hybrid strategy)
@@ -344,6 +360,8 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   account_selection_strategy: 'hybrid',
   pid_offset_enabled: false,
   switch_on_first_rate_limit: true,
+  default_retry_after_seconds: 60,
+  max_backoff_seconds: 60,
   auto_update: true,
   signature_cache: {
     enabled: true,
