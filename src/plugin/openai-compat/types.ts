@@ -120,9 +120,22 @@ export interface OpenAIStreamChoice {
 export interface OpenAIStreamDelta {
   role?: 'assistant';
   content?: string | null;
-  tool_calls?: Partial<OpenAIToolCall>[];
+  tool_calls?: OpenAIStreamToolCall[];
   // Extended thinking (Claude-specific)
   thinking?: string;
+}
+
+/**
+ * Streaming tool call with index for delta updates
+ */
+export interface OpenAIStreamToolCall {
+  index: number;
+  id?: string;
+  type?: 'function';
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
 }
 
 // ============================================================================
