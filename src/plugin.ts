@@ -3,7 +3,7 @@ import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_PROVIDER_ID, type HeaderSty
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import { promptAddAnotherAccount, promptLoginMode, promptManageAccounts, promptProjectId } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
   startAntigravityDebugRequest, 
@@ -31,8 +31,9 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts } from "./plugin/storage";
+import { clearAccounts, loadAccounts, saveAccounts, type AccountMetadataV3 } from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs } from "./plugin/accounts";
+import { checkAccountsQuota, type AccountQuotaResult, type QuotaGroup, type QuotaGroupSummary, type QuotaSummary } from "./plugin/quota";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
 import { createSessionRecoveryHook, getRecoverySuccessToast } from "./plugin/recovery";
@@ -53,10 +54,114 @@ const MAX_OAUTH_ACCOUNTS = 10;
 const MAX_WARMUP_SESSIONS = 1000;
 const MAX_WARMUP_RETRIES = 2;
 const CAPACITY_BACKOFF_TIERS_MS = [5000, 10000, 20000, 30000, 60000];
+const QUOTA_GROUP_LABELS: Record<QuotaGroup, string> = {
+  claude: "Claude",
+  "gemini-pro": "Gemini 3 Pro",
+  "gemini-flash": "Gemini 3 Flash",
+};
 
 function getCapacityBackoffDelay(consecutiveFailures: number): number {
   const index = Math.min(consecutiveFailures, CAPACITY_BACKOFF_TIERS_MS.length - 1);
   return CAPACITY_BACKOFF_TIERS_MS[Math.max(0, index)] ?? 5000;
+}
+
+function formatDurationMs(durationMs: number): string {
+  if (durationMs <= 0) {
+    return "now";
+  }
+  const totalSeconds = Math.round(durationMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (parts.length === 0) {
+    parts.push(`${seconds}s`);
+  }
+  return parts.slice(0, 2).join(" ");
+}
+
+function formatResetTime(resetTime?: string): string | null {
+  if (!resetTime) {
+    return null;
+  }
+  const resetTimestamp = Date.parse(resetTime);
+  if (!Number.isFinite(resetTimestamp)) {
+    return null;
+  }
+  return formatDurationMs(resetTimestamp - Date.now());
+}
+
+function formatQuotaGroupLine(label: string, summary: QuotaGroupSummary): string {
+  const remaining = summary.remainingFraction;
+  let status = "UNKNOWN";
+  const details: string[] = [];
+
+  if (typeof remaining === "number" && Number.isFinite(remaining)) {
+    status = remaining <= 0 ? "LIMITED" : "OK";
+    details.push(`remaining ${Math.round(remaining * 100)}%`);
+  }
+
+  const reset = formatResetTime(summary.resetTime);
+  if (reset) {
+    details.push(`resets in ${reset}`);
+  }
+
+  const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
+  return `${label}: ${status}${suffix}`;
+}
+
+function printQuotaSummary(summary: QuotaSummary | undefined, includeClaude: boolean): void {
+  if (!summary) {
+    console.log("     No quota data");
+    return;
+  }
+  if (summary.error) {
+    console.log(`     ERROR (${summary.error})`);
+    return;
+  }
+  const groupOrder: QuotaGroup[] = includeClaude
+    ? ["claude", "gemini-pro", "gemini-flash"]
+    : ["gemini-pro", "gemini-flash"];
+
+  const lines = groupOrder
+    .map((group) => {
+      const groupSummary = summary.groups[group];
+      if (!groupSummary || groupSummary.modelCount === 0) {
+        return null;
+      }
+      return `       ${formatQuotaGroupLine(QUOTA_GROUP_LABELS[group], groupSummary)}`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (lines.length === 0) {
+    console.log("     No quota data");
+    return;
+  }
+
+  console.log("     Quota:");
+  for (const line of lines) {
+    console.log(line);
+  }
+}
+
+function applyQuotaAccountUpdates(
+  accounts: AccountMetadataV3[],
+  results: AccountQuotaResult[],
+): AccountMetadataV3[] {
+  const updates = new Map<number, AccountMetadataV3>();
+  for (const result of results) {
+    if (result.updatedAccount) {
+      updates.set(result.index, result.updatedAccount);
+    }
+  }
+  if (updates.size === 0) {
+    return accounts;
+  }
+  return accounts.map((account, index) => updates.get(index) ?? account);
 }
 const warmupAttemptedSessionIds = new Set<string>();
 const warmupSucceededSessionIds = new Set<string>();
@@ -304,6 +409,7 @@ async function persistAccountPool(
         managedProjectId: parts.managedProjectId,
         addedAt: now,
         lastUsed: now,
+        enabled: true,
       });
       continue;
     }
@@ -772,7 +878,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
       // Note: AccountManager now ensures the current auth is always included in accounts
 
       const accountManager = await AccountManager.loadFromDisk(auth);
-      if (accountManager.getAccountCount() > 0) {
+      if (accountManager.getTotalAccountCount() > 0) {
         accountManager.requestSaveToDisk();
       }
 
@@ -822,7 +928,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
           }
 
           if (accountManager.getAccountCount() === 0) {
-            throw new Error("No Antigravity accounts configured. Run `opencode auth login`.");
+            throw new Error("No enabled Antigravity accounts configured. Run `opencode auth login`.");
           }
 
           const urlString = toUrlString(input);
@@ -878,7 +984,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
           
           const hasOtherAccountWithAntigravity = (currentAccount: any): boolean => {
             if (family !== "gemini") return false;
-            const otherAccounts = accountManager.getAccounts().filter(acc => acc.index !== currentAccount.index);
+            const otherAccounts = accountManager.getEnabledAccounts().filter(acc => acc.index !== currentAccount.index);
             return otherAccounts.some(acc => 
               !accountManager.isRateLimitedForHeaderStyle(acc, family, "antigravity", model)
             );
@@ -1003,7 +1109,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     }
                   }
 
-                  if (accountManager.getAccountCount() === 0) {
+                  if (accountManager.getTotalAccountCount() === 0) {
                     try {
                       await client.auth.set({
                         path: { id: providerId },
@@ -1652,16 +1758,98 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             // Check for existing accounts and prompt user for login mode
             let startFresh = true;
-            const existingStorage = await loadAccounts();
+            let existingStorage = await loadAccounts();
             if (existingStorage && existingStorage.accounts.length > 0) {
-              const existingAccounts = existingStorage.accounts.map((acc, idx) => ({
+              let existingAccounts = existingStorage.accounts.map((acc, idx) => ({
                 email: acc.email,
                 index: idx,
+                enabled: acc.enabled !== false,
               }));
-              
-              const loginMode = await promptLoginMode(existingAccounts);
+
+              let loginMode = await promptLoginMode(existingAccounts);
+              while (loginMode === "manage" || loginMode === "check") {
+                if (loginMode === "check") {
+                  console.log(`\nChecking quotas for ${existingAccounts.length} account(s)...\n`);
+                  const results = await checkAccountsQuota(existingStorage.accounts, client);
+
+                  const updatedAccounts = applyQuotaAccountUpdates(existingStorage.accounts, results);
+                  if (updatedAccounts !== existingStorage.accounts) {
+                    existingStorage = {
+                      ...existingStorage,
+                      accounts: updatedAccounts,
+                    };
+                    try {
+                      await saveAccounts(existingStorage);
+                    } catch {
+                    }
+                  }
+
+                  for (const result of results) {
+                    const label = result.email || `Account ${result.index + 1}`;
+                    const disabledTag = result.disabled ? " (disabled)" : "";
+                    console.log(`  ${result.index + 1}. ${label}${disabledTag}`);
+
+                    if (result.status === "error") {
+                      console.log(`     Error: ${result.error ?? "Unknown error"}`);
+                      continue;
+                    }
+
+                    printQuotaSummary(result.quota, true);
+                  }
+
+                  console.log("");
+                } else {
+                  const toggles = await promptManageAccounts(existingAccounts);
+                  if (toggles.length > 0) {
+                    existingStorage = {
+                      ...existingStorage,
+                      accounts: existingStorage.accounts.map((account, idx) => {
+                        if (!toggles.includes(idx)) {
+                          return account;
+                        }
+                        const currentlyEnabled = account.enabled !== false;
+                        return {
+                          ...account,
+                          enabled: !currentlyEnabled,
+                        };
+                      }),
+                    };
+                    try {
+                      await saveAccounts(existingStorage);
+                    } catch {
+                    }
+
+                    const refreshedStorage = await loadAccounts();
+                    if (refreshedStorage) {
+                      existingStorage = refreshedStorage;
+                    }
+                    existingAccounts = existingStorage.accounts.map((acc, idx) => ({
+                      email: acc.email,
+                      index: idx,
+                      enabled: acc.enabled !== false,
+                    }));
+                    const enabledCount = existingAccounts.filter((acc) => acc.enabled !== false).length;
+                    if (enabledCount === 0) {
+                      console.log("\nAll accounts are disabled. Enable at least one to continue.\n");
+                    }
+                  }
+                }
+
+                const refreshedStorage = await loadAccounts();
+                if (refreshedStorage) {
+                  existingStorage = refreshedStorage;
+                }
+                existingAccounts = existingStorage.accounts.map((acc, idx) => ({
+                  email: acc.email,
+                  index: idx,
+                  enabled: acc.enabled !== false,
+                }));
+
+                loginMode = await promptLoginMode(existingAccounts);
+              }
+
               startFresh = loginMode === "fresh";
-              
+
               if (startFresh) {
                 console.log("\nStarting fresh - existing accounts will be replaced.\n");
               } else {

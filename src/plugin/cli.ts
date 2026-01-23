@@ -28,11 +28,12 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
   }
 }
 
-export type LoginMode = "add" | "fresh";
+export type LoginMode = "add" | "fresh" | "manage" | "check";
 
 export interface ExistingAccountInfo {
   email?: string;
   index: number;
+  enabled?: boolean;
 }
 
 /**
@@ -45,12 +46,15 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
     console.log(`\n${existingAccounts.length} account(s) saved:`);
     for (const acc of existingAccounts) {
       const label = acc.email || `Account ${acc.index + 1}`;
-      console.log(`  ${acc.index + 1}. ${label}`);
+      const status = acc.enabled === false ? "disabled" : "enabled";
+      console.log(`  ${acc.index + 1}. ${label} (${status})`);
     }
     console.log("");
 
     while (true) {
-      const answer = await rl.question("(a)dd new account(s) or (f)resh start? [a/f]: ");
+      const answer = await rl.question(
+        "(a)dd new account(s), (f)resh start, (m)anage accounts, or (c)heck quotas? [a/f/m/c]: ",
+      );
       const normalized = answer.trim().toLowerCase();
 
       if (normalized === "a" || normalized === "add") {
@@ -59,8 +63,68 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
       if (normalized === "f" || normalized === "fresh") {
         return "fresh";
       }
+      if (normalized === "m" || normalized === "manage") {
+        return "manage";
+      }
+      if (normalized === "c" || normalized === "check") {
+        return "check";
+      }
 
-      console.log("Please enter 'a' to add accounts or 'f' to start fresh.");
+      console.log(
+        "Please enter 'a' to add accounts, 'f' to start fresh, 'm' to manage accounts, or 'c' to check quotas.",
+      );
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+export async function promptManageAccounts(existingAccounts: ExistingAccountInfo[]): Promise<number[]> {
+  const rl = createInterface({ input, output });
+  try {
+    while (true) {
+      console.log("\nManage accounts (toggle enabled/disabled):");
+      for (const acc of existingAccounts) {
+        const label = acc.email || `Account ${acc.index + 1}`;
+        const status = acc.enabled === false ? "disabled" : "enabled";
+        console.log(`  ${acc.index + 1}. ${label} (${status})`);
+      }
+      console.log("");
+
+      const answer = await rl.question("Toggle accounts by number (comma-separated), or press Enter to continue: ");
+      const trimmed = answer.trim();
+      if (!trimmed) {
+        return [];
+      }
+
+      const rawTokens = trimmed
+        .split(/[\s,]+/)
+        .map((token) => token.trim())
+        .filter(Boolean);
+
+      const indices = new Set<number>();
+      let invalid = false;
+
+      for (const token of rawTokens) {
+        const parsed = Number.parseInt(token, 10);
+        if (!Number.isFinite(parsed)) {
+          invalid = true;
+          break;
+        }
+        const index = parsed - 1;
+        if (index < 0 || index >= existingAccounts.length) {
+          invalid = true;
+          break;
+        }
+        indices.add(index);
+      }
+
+      if (invalid || indices.size === 0) {
+        console.log("Please enter valid account numbers (e.g., 1,2).\n");
+        continue;
+      }
+
+      return Array.from(indices.values());
     }
   } finally {
     rl.close();
