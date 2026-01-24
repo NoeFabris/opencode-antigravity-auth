@@ -10,8 +10,8 @@ body:
         **Please write a descriptive title above** (e.g., "Add support for custom retry strategies")
 
         Check if this feature has already been requested:
-        - [Existing feature requests](https://github.com/NoeFabris/opencode-antigravity-auth/issues?q=is%3Aissue+label%3Aenhancement)
-        - [Discussions](https://github.com/NoeFabris/opencode-antigravity-auth/discussions)
+        - [Existing feature requests](https://github.com/shay-wong/opencode-antigravity-auth/issues?q=is%3Aissue+label%3Aenhancement)
+        - [Discussions](https://github.com/shay-wong/opencode-antigravity-auth/discussions)
 
   - type: checkboxes
     id: prerequisites
@@ -20,7 +20,7 @@ body:
       options:
         - label: I have searched existing issues and feature requests for duplicates
           required: true
-        - label: I have read the [README](https://github.com/NoeFabris/opencode-antigravity-auth#readme)
+        - label: I have read the [README](https://github.com/shay-wong/opencode-antigravity-auth#readme)
           required: true
 
   - type: textarea
