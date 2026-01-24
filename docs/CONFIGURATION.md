@@ -4,7 +4,7 @@ Create `~/.config/opencode/antigravity.json` (or `.opencode/antigravity.json` in
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json"
+  "$schema": "https://raw.githubusercontent.com/shay-wong/opencode-antigravity-auth/main/assets/antigravity.schema.json"
 }
 ```
 
@@ -18,7 +18,7 @@ Most settings have sensible defaults. Only configure what you need.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json"
+  "$schema": "https://raw.githubusercontent.com/shay-wong/opencode-antigravity-auth/main/assets/antigravity.schema.json"
 }
 ```
 
@@ -117,7 +117,7 @@ Copy-paste ready configs with all recommended settings enabled.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "$schema": "https://raw.githubusercontent.com/shay-wong/opencode-antigravity-auth/main/assets/antigravity.schema.json",
   "account_selection_strategy": "sticky"
 }
 ```
@@ -129,7 +129,7 @@ Copy-paste ready configs with all recommended settings enabled.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "$schema": "https://raw.githubusercontent.com/shay-wong/opencode-antigravity-auth/main/assets/antigravity.schema.json",
   "account_selection_strategy": "hybrid"
 }
 ```
@@ -141,7 +141,7 @@ Copy-paste ready configs with all recommended settings enabled.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "$schema": "https://raw.githubusercontent.com/shay-wong/opencode-antigravity-auth/main/assets/antigravity.schema.json",
   "account_selection_strategy": "round-robin",
   "switch_on_first_rate_limit": true,
   "pid_offset_enabled": true

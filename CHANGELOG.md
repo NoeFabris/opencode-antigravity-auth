@@ -27,7 +27,7 @@
   - Root cause: When Claude calls a tool with no parameters, it returns `functionCall` without an `args` field. The response transformation only processed parts where `functionCall.args` was defined, leaving `args` as `undefined`
   - Fix: Changed condition to handle all `functionCall` parts, defaulting `args` to `{}` when missing, ensuring opencode's `state.input` always receives a valid record
 
-- **Auth headers aligned with official Gemini CLI** - Updated authentication headers to match the official Antigravity/Gemini CLI behavior, reducing "account ineligible" errors and potential bans ([#178](https://github.com/NoeFabris/opencode-antigravity-auth/issues/178))
+- **Auth headers aligned with official Gemini CLI** - Updated authentication headers to match the official Antigravity/Gemini CLI behavior, reducing "account ineligible" errors and potential bans ([#178](https://github.com/shay-wong/opencode-antigravity-auth/issues/178))
   - `GEMINI_CLI_HEADERS["User-Agent"]`: `9.15.1` → `10.3.0`
   - `GEMINI_CLI_HEADERS["X-Goog-Api-Client"]`: `gl-node/22.17.0` → `gl-node/22.18.0`
   - `ANTIGRAVITY_HEADERS["User-Agent"]`: Updated to full Chrome/Electron user agent string
@@ -35,7 +35,7 @@
   - Userinfo fetch now includes `User-Agent`, `X-Goog-Api-Client` headers
   - `fetchProjectID` now uses centralized constants instead of hardcoded strings
 
-- **`quiet_mode` now properly suppresses all toast notifications** - Fixed `quiet_mode: true` in `antigravity.json` not suppressing "Status dialog dismissed" and other toast notifications ([#207](https://github.com/NoeFabris/opencode-antigravity-auth/issues/207))
+- **`quiet_mode` now properly suppresses all toast notifications** - Fixed `quiet_mode: true` in `antigravity.json` not suppressing "Status dialog dismissed" and other toast notifications ([#207](https://github.com/shay-wong/opencode-antigravity-auth/issues/207))
   - Root cause: The `showToast` helper function didn't check `quietMode`, and only some call sites had manual `!quietMode &&` guards
   - Fix: Moved `quietMode` check inside `showToast` helper so all toasts are automatically suppressed when `quiet_mode: true`
 
@@ -45,4 +45,4 @@
 
 ## [1.3.0] - Previous Release
 
-See [releases](https://github.com/NoeFabris/opencode-antigravity-auth/releases) for previous versions.
+See [releases](https://github.com/shay-wong/opencode-antigravity-auth/releases) for previous versions.
