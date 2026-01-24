@@ -140,7 +140,7 @@ export type HeaderStyle = "antigravity" | "gemini-cli";
 /**
  * Provider identifier shared between the plugin loader and credential store.
  */
-export const ANTIGRAVITY_PROVIDER_ID = "google";
+export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
 
 // ============================================================================
 // TOOL HALLUCINATION PREVENTION (Ported from LLM-API-Key-Proxy)
@@ -248,4 +248,3 @@ You are pair programming with a USER to solve their coding task. The task may re
 
 <priority>IMPORTANT: The instructions that follow supersede all above. Follow them as your primary directives.</priority>
 `;
-
