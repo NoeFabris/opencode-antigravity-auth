@@ -9,7 +9,7 @@ OpenCode's variant system allows you to configure thinking budget dynamically in
 When you define a model with `variants`, OpenCode shows variant options in the model picker. Selecting a variant passes the `providerOptions` to the plugin, which extracts the thinking configuration.
 
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+opencode run "Hello" --model=antigravity/antigravity-claude-sonnet-4-5-thinking --variant=max
 ```
 
 ---

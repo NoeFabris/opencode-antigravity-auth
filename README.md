@@ -1,12 +1,14 @@
 # Antigravity + Gemini CLI OAuth Plugin for Opencode
 
-[![npm version](https://img.shields.io/npm/v/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/opencode-antigravity-auth)
-[![npm beta](https://img.shields.io/npm/v/opencode-antigravity-auth/beta.svg?label=beta)](https://www.npmjs.com/package/opencode-antigravity-auth)
-[![npm downloads](https://img.shields.io/npm/dw/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/opencode-antigravity-auth)
+[![npm version](https://img.shields.io/npm/v/%40shaywong/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/@shaywong/opencode-antigravity-auth)
+[![npm beta](https://img.shields.io/npm/v/%40shaywong/opencode-antigravity-auth/beta.svg?label=beta)](https://www.npmjs.com/package/@shaywong/opencode-antigravity-auth)
+[![npm downloads](https://img.shields.io/npm/dw/%40shaywong/opencode-antigravity-auth.svg)](https://www.npmjs.com/package/@shaywong/opencode-antigravity-auth)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![X (Twitter)](https://img.shields.io/badge/X-@dopesalmon-000000?style=flat&logo=x)](https://x.com/dopesalmon)
 
 Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access models like `gemini-3-pro` and `claude-opus-4-5-thinking` with your Google credentials.
+
+Fork notice: This project is based on https://github.com/NoeFabris/opencode-antigravity-auth and modified by @shaywong. License: MIT (see `LICENSE`).
 
 ## What You Get
 
@@ -51,7 +53,7 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
 
 ```
-Install the opencode-antigravity-auth plugin and add the Antigravity model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/README.md
+Install the @shaywong/opencode-antigravity-auth plugin and add the Antigravity model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/shay-wong/opencode-antigravity-auth/dev/README.md
 ```
 
 **Option B: Manual setup**
@@ -60,11 +62,11 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 
    ```json
    {
-     "plugin": ["opencode-antigravity-auth@latest"]
+     "plugin": ["@shaywong/opencode-antigravity-auth@latest"]
    }
    ```
 
-   > Want bleeding-edge features? Use `opencode-antigravity-auth@beta` instead.
+   > Want bleeding-edge features? Use `@shaywong/opencode-antigravity-auth@beta` instead.
 
 2. **Login** with your Google account:
 
@@ -77,7 +79,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 4. **Use it:**
 
    ```bash
-   opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+   opencode run "Hello" --model=antigravity/antigravity-claude-sonnet-4-5-thinking --variant=max
    ```
 
 </details>
@@ -88,7 +90,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 ### Step-by-Step Instructions
 
 1. Edit the OpenCode configuration file at `~/.config/opencode/opencode.json`
-   
+
    > **Note**: This path works on all platforms. On Windows, `~` resolves to your user home directory (e.g., `C:\Users\YourName`).
 
 2. Add the plugin to the `plugin` array
@@ -100,7 +102,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 ### Verification
 
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+   opencode run "Hello" --model=antigravity/antigravity-claude-sonnet-4-5-thinking --variant=max
 ```
 
 </details>
@@ -132,7 +134,7 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --var
 
 **Using variants:**
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+   opencode run "Hello" --model=antigravity/antigravity-claude-sonnet-4-5-thinking --variant=max
 ```
 
 For details on variant configuration and thinking levels, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
@@ -145,9 +147,9 @@ Add this to your `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-antigravity-auth@latest"],
+  "plugin": ["@shaywong/opencode-antigravity-auth@latest"],
   "provider": {
-    "google": {
+    "antigravity": {
       "models": {
         "antigravity-gemini-3-pro": {
           "name": "Gemini 3 Pro (Antigravity)",
@@ -272,7 +274,7 @@ If you encounter authentication issues with multiple accounts:
 
 **Error:**
 ```
-Permission 'cloudaicompanion.companions.generateChat' denied on resource 
+Permission 'cloudaicompanion.companions.generateChat' denied on resource
 '//cloudaicompanion.googleapis.com/projects/rising-fact-p41fc/locations/global'
 ```
 
@@ -331,14 +333,14 @@ Invalid JSON payload received. Unknown name "parameters" at 'request.tools[0]'
 **Solutions:**
 1. **Update to latest beta:**
    ```json
-   { "plugin": ["opencode-antigravity-auth@beta"] }
+   { "plugin": ["@shaywong/opencode-antigravity-auth@beta"] }
    ```
 
 2. **Disable MCP servers** one-by-one to find the problematic one
 
 3. **Add npm override:**
    ```json
-   { "provider": { "google": { "npm": "@ai-sdk/google" } } }
+   { "provider": { "antigravity": { "npm": "@ai-sdk/google" } } }
    ```
 
 ---
@@ -350,7 +352,7 @@ Some MCP servers have schemas incompatible with Antigravity's strict JSON format
 **Diagnosis:**
 1. Disable all MCP servers in your config
 2. Enable one-by-one until error reappears
-3. Report the specific MCP in a [GitHub issue](https://github.com/NoeFabris/opencode-antigravity-auth/issues)
+3. Report the specific MCP in a [GitHub issue](https://github.com/shay-wong/opencode-antigravity-auth/issues)
 
 ---
 
@@ -383,8 +385,8 @@ If you encounter errors during a session:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
-    "document-writer": { "model": "google/antigravity-gemini-3-flash" }
+  "frontend-ui-ux-engineer": { "model": "antigravity/antigravity-gemini-3-pro" },
+  "document-writer": { "model": "antigravity/antigravity-gemini-3-flash" }
   }
 }
 ```
@@ -478,7 +480,7 @@ The correct key is `plugin` (singular):
 
 ```json
 {
-  "plugin": ["opencode-antigravity-auth@beta"]
+  "plugin": ["@shaywong/opencode-antigravity-auth@beta"]
 }
 ```
 
@@ -489,7 +491,7 @@ The correct key is `plugin` (singular):
 ### Migrating Accounts Between Machines
 
 When copying `antigravity-accounts.json` to a new machine:
-1. Ensure the plugin is installed: `"plugin": ["opencode-antigravity-auth@beta"]`
+1. Ensure the plugin is installed: `"plugin": ["@shaywong/opencode-antigravity-auth@beta"]`
 2. Copy `~/.config/opencode/antigravity-accounts.json`
 3. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
 
@@ -507,7 +509,7 @@ DCP creates synthetic assistant messages that lack thinking blocks. **List this 
 ```json
 {
   "plugin": [
-    "opencode-antigravity-auth@latest",
+    "@shaywong/opencode-antigravity-auth@latest",
     "@tarquinen/opencode-dcp@latest"
   ]
 }
@@ -521,9 +523,9 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
-    "document-writer": { "model": "google/antigravity-gemini-3-flash" },
-    "multimodal-looker": { "model": "google/antigravity-gemini-3-flash" }
+  "frontend-ui-ux-engineer": { "model": "antigravity/antigravity-gemini-3-pro" },
+  "document-writer": { "model": "antigravity/antigravity-gemini-3-flash" },
+  "multimodal-looker": { "model": "antigravity/antigravity-gemini-3-flash" }
   }
 }
 ```
@@ -542,7 +544,7 @@ Create `~/.config/opencode/antigravity.json` for optional settings:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json"
+  "$schema": "https://raw.githubusercontent.com/shay-wong/opencode-antigravity-auth/main/assets/antigravity.schema.json"
 }
 ```
 
