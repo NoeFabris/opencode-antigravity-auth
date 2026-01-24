@@ -85,8 +85,8 @@ jobs:
           git checkout main
           git pull origin main
           
-          # Update version in README.md (looking for pattern opencode-antigravity-auth@x.y.z)
-          sed -i "s/opencode-antigravity-auth@[0-9]\+\.[0-9]\+\.[0-9]\+/opencode-antigravity-auth@$CURRENT_VERSION/g" README.md
+          # Update version in README.md (looking for pattern @shaywong/opencode-antigravity-auth@x.y.z)
+          sed -i "s/@shaywong\/opencode-antigravity-auth@[0-9]\+\.[0-9]\+\.[0-9]\+/@shaywong\/opencode-antigravity-auth@$CURRENT_VERSION/g" README.md
           
           if ! git diff --quiet README.md; then
             git config user.name "github-actions[bot]"
@@ -156,7 +156,7 @@ jobs:
             echo ""
             printf '%s\n' '```json'
             printf '%s\n' '{'
-            printf '%s\n' "  \"plugins\": [\"opencode-antigravity-auth@${CURRENT_VERSION}\"]"
+            printf '%s\n' "  \"plugins\": [\"@shaywong/opencode-antigravity-auth@${CURRENT_VERSION}\"]"
             printf '%s\n' '}'
             printf '%s\n' '```'
             echo ""

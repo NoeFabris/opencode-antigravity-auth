@@ -42,16 +42,16 @@ jobs:
           TAG="${{ github.event.inputs.tag }}"
 
           echo "Checking if version $VERSION exists on npm..."
-          if ! npm view opencode-antigravity-auth@$VERSION version >/dev/null 2>&1; then
+          if ! npm view @shaywong/opencode-antigravity-auth@$VERSION version >/dev/null 2>&1; then
             echo "ERROR: Version $VERSION does not exist on npm" >&2
             echo "Available versions:" >&2
-            npm view opencode-antigravity-auth versions --json | tail -20 >&2
+            npm view @shaywong/opencode-antigravity-auth versions --json | tail -20 >&2
             exit 1
           fi
 
           echo "Version $VERSION exists on npm"
           echo "Current dist-tags:"
-          npm dist-tag ls opencode-antigravity-auth
+          npm dist-tag ls @shaywong/opencode-antigravity-auth
 
       - name: Update dist-tag
         env:
@@ -62,11 +62,11 @@ jobs:
           TAG="${{ github.event.inputs.tag }}"
 
           echo "Updating @$TAG tag to version $VERSION..."
-          npm dist-tag add opencode-antigravity-auth@$VERSION $TAG
+          npm dist-tag add @shaywong/opencode-antigravity-auth@$VERSION $TAG
 
           echo ""
           echo "Updated dist-tags:"
-          npm dist-tag ls opencode-antigravity-auth
+          npm dist-tag ls @shaywong/opencode-antigravity-auth
 
       - name: Summary
         run: |
@@ -77,5 +77,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Users can now install with:" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "npm install opencode-antigravity-auth@${{ github.event.inputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "npm install @shaywong/opencode-antigravity-auth@${{ github.event.inputs.tag }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

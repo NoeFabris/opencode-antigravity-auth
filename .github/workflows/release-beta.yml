@@ -65,7 +65,7 @@ jobs:
           done
           
           # Also check npm for published beta versions
-          NPM_BETAS=$(npm view opencode-antigravity-auth versions --json 2>/dev/null | grep -oP "\"${BASE_VERSION}-beta\\.\\K[0-9]+" || echo "")
+          NPM_BETAS=$(npm view @shaywong/opencode-antigravity-auth versions --json 2>/dev/null | grep -oP "\"${BASE_VERSION}-beta\\.\\K[0-9]+" || echo "")
           for BETA_NUM in $NPM_BETAS; do
             if [ "$BETA_NUM" -gt "$HIGHEST_BETA" ]; then
               HIGHEST_BETA=$BETA_NUM
@@ -196,7 +196,7 @@ jobs:
             echo ""
             printf '%s\n' '```json'
             printf '%s\n' '{'
-            printf '%s\n' "  \"plugin\": [\"opencode-antigravity-auth@${NEXT_VERSION}\"]"
+            printf '%s\n' "  \"plugin\": [\"@shaywong/opencode-antigravity-auth@${NEXT_VERSION}\"]"
             printf '%s\n' '}'
             printf '%s\n' '```'
             echo ""
@@ -204,7 +204,7 @@ jobs:
             echo ""
             printf '%s\n' '```json'
             printf '%s\n' '{'
-            printf '%s\n' '  "plugin": ["opencode-antigravity-auth@beta"]'
+            printf '%s\n' '  "plugin": ["@shaywong/opencode-antigravity-auth@beta"]'
             printf '%s\n' '}'
             printf '%s\n' '```'
             echo ""
@@ -249,5 +249,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Install:**" >> $GITHUB_STEP_SUMMARY
           echo '```json' >> $GITHUB_STEP_SUMMARY
-          echo '{ "plugin": ["opencode-antigravity-auth@beta"] }' >> $GITHUB_STEP_SUMMARY
+          echo '{ "plugin": ["@shaywong/opencode-antigravity-auth@beta"] }' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

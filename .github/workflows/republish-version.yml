@@ -56,9 +56,9 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
 
           echo "Checking if version $VERSION exists on npm..."
-          if npm view opencode-antigravity-auth@$VERSION version >/dev/null 2>&1; then
+          if npm view @shaywong/opencode-antigravity-auth@$VERSION version >/dev/null 2>&1; then
             echo "Version $VERSION exists, unpublishing..."
-            npm unpublish opencode-antigravity-auth@$VERSION --force
+            npm unpublish @shaywong/opencode-antigravity-auth@$VERSION --force
             echo "Successfully unpublished version $VERSION"
           else
             echo "Version $VERSION does not exist on npm, skipping unpublish"
@@ -124,11 +124,11 @@ jobs:
           echo "Successfully published version $VERSION"
           echo ""
           echo "Updating @latest tag..."
-          npm dist-tag add opencode-antigravity-auth@$VERSION latest
+          npm dist-tag add @shaywong/opencode-antigravity-auth@$VERSION latest
 
           echo ""
           echo "Current dist-tags:"
-          npm dist-tag ls opencode-antigravity-auth
+          npm dist-tag ls @shaywong/opencode-antigravity-auth
 
       - name: Create git tag
         run: |
@@ -173,7 +173,7 @@ jobs:
             echo ""
             printf '%s\n' '```json'
             printf '%s\n' '{'
-            printf '%s\n' "  \"plugins\": [\"opencode-antigravity-auth@${VERSION}\"]"
+            printf '%s\n' "  \"plugins\": [\"@shaywong/opencode-antigravity-auth@${VERSION}\"]"
             printf '%s\n' '}'
             printf '%s\n' '```'
           } >"$BODY_FILE"
@@ -203,7 +203,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Install:**" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "npm install opencode-antigravity-auth@${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "npm install @shaywong/opencode-antigravity-auth@${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "# or" >> $GITHUB_STEP_SUMMARY
-          echo "npm install opencode-antigravity-auth@latest" >> $GITHUB_STEP_SUMMARY
+          echo "npm install @shaywong/opencode-antigravity-auth@latest" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
