@@ -8,7 +8,7 @@ import { ensureGitignoreSync } from "./storage";
 const MAX_BODY_PREVIEW_CHARS = 12000;
 const MAX_BODY_VERBOSE_CHARS = 50000;
 
-export const DEBUG_MESSAGE_PREFIX = "[opencode-antigravity-auth debug]";
+export const DEBUG_MESSAGE_PREFIX = "[@shaywong/opencode-antigravity-auth debug]";
 
 // =============================================================================
 // Debug State (lazily initialized with config)
