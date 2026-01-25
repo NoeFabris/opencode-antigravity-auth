@@ -1268,34 +1268,30 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     bodyInfo,
                   );
 
-                  await logResponseBody(debugContext, response, 429);
-
-                  getHealthTracker().recordRateLimit(account.index);
+                   await logResponseBody(debugContext, response, 429);
 
                   if (isCapacityExhausted) {
+                    // MODEL_CAPACITY_EXHAUSTED is a server-side capacity issue, NOT an account-level rate limit.
+                    // Do NOT mark the account as rate-limited - just wait and retry with the SAME account.
+                    // Switching accounts won't help because all accounts share the same server capacity.
+                    // Also skip recordRateLimit() since this is not an account-level issue.
                     const capacityBackoffMs = calculateBackoffMs(rateLimitReason, account.consecutiveFailures ?? 0, serverRetryMs);
-                    accountManager.markRateLimitedWithReason(account, family, headerStyle, model, rateLimitReason, serverRetryMs);
                     
                     const backoffFormatted = formatWaitTime(capacityBackoffMs);
-                    const failures = account.consecutiveFailures ?? 0;
-                    pushDebug(`capacity exhausted on account ${account.index}, backoff=${capacityBackoffMs}ms (failure #${failures})`);
+                    const failures = (account.consecutiveFailures ?? 0) + 1;
+                    account.consecutiveFailures = failures;
+                    pushDebug(`server capacity exhausted (not account-specific), backoff=${capacityBackoffMs}ms (attempt #${failures})`);
 
-                    // Check if we can switch to another account (respects switch_on_first_rate_limit config)
-                    if (config.switch_on_first_rate_limit && accountCount > 1) {
-                      await showToast(`Server at capacity. Switching account in 1s...`, "warning");
-                      await sleep(FIRST_RETRY_DELAY_MS, abortSignal);
-                      shouldSwitchAccount = true;
-                      break;
-                    }
-
-                    // No other accounts available or config disabled - wait the backoff
+                    // Wait and retry with the SAME account - switching won't help for server capacity issues
                     await showToast(
-                      `Server at capacity. Waiting ${backoffFormatted}... (attempt ${failures})`,
+                      `Server at capacity. Retrying in ${backoffFormatted}... (attempt ${failures})`,
                       "warning",
                     );
                     await sleep(capacityBackoffMs, abortSignal);
                     continue;
                   }
+
+                  getHealthTracker().recordRateLimit(account.index);
                   
                   const accountLabel = account.email || `Account ${account.index + 1}`;
 
@@ -1399,6 +1395,35 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 const quotaKey = headerStyleToQuotaKey(headerStyle, family);
                 resetRateLimitState(account.index, quotaKey);
                 resetAccountFailureState(account.index);
+
+                // Handle 503 Service Unavailable with retry (server is busy but not account-specific)
+                if (response.status === 503) {
+                  // Refund token on server busy
+                  if (tokenConsumed) {
+                    getTokenTracker().refund(account.index);
+                    tokenConsumed = false;
+                  }
+
+                  await logResponseBody(debugContext, response, 503);
+
+                  const failures = (account.consecutiveFailures ?? 0) + 1;
+                  account.consecutiveFailures = failures;
+                  
+                  // Exponential backoff for 503: 5s, 10s, 20s, 40s... max 60s
+                  const SERVER_BUSY_BASE_MS = 5000;
+                  const serverBusyBackoffMs = Math.min(SERVER_BUSY_BASE_MS * Math.pow(2, failures - 1), 60000);
+                  const backoffFormatted = serverBusyBackoffMs >= 1000 ? `${Math.round(serverBusyBackoffMs / 1000)}s` : `${serverBusyBackoffMs}ms`;
+
+                  pushDebug(`503 server busy (not account-specific), backoff=${serverBusyBackoffMs}ms (attempt #${failures})`);
+
+                  // Wait and retry with the SAME account - this is a server-side issue, not account-specific
+                  await showToast(
+                    `Server busy. Retrying in ${backoffFormatted}... (attempt ${failures})`,
+                    "warning",
+                  );
+                  await sleep(serverBusyBackoffMs, abortSignal);
+                  continue;
+                }
 
                 const shouldRetryEndpoint = (
                   response.status === 403 ||
