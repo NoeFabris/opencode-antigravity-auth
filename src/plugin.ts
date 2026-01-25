@@ -1275,6 +1275,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     // Do NOT mark the account as rate-limited - just wait and retry with the SAME account.
                     // Switching accounts won't help because all accounts share the same server capacity.
                     // Also skip recordRateLimit() since this is not an account-level issue.
+                    resetRateLimitState(account.index, quotaKey);
                     const capacityBackoffMs = calculateBackoffMs(rateLimitReason, account.consecutiveFailures ?? 0, serverRetryMs);
                     
                     const backoffFormatted = formatWaitTime(capacityBackoffMs);
@@ -1391,11 +1392,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   }
                 }
 
-                // Success - reset rate limit backoff state for this quota
-                const quotaKey = headerStyleToQuotaKey(headerStyle, family);
-                resetRateLimitState(account.index, quotaKey);
-                resetAccountFailureState(account.index);
-
                 // Handle 503 Service Unavailable with retry (server is busy but not account-specific)
                 if (response.status === 503) {
                   // Refund token on server busy
@@ -1424,6 +1420,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   await sleep(serverBusyBackoffMs, abortSignal);
                   continue;
                 }
+
+                // Success - reset rate limit backoff state for this quota
+                const quotaKey = headerStyleToQuotaKey(headerStyle, family);
+                resetRateLimitState(account.index, quotaKey);
+                resetAccountFailureState(account.index);
 
                 const shouldRetryEndpoint = (
                   response.status === 403 ||
