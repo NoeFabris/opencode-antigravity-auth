@@ -1292,6 +1292,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       "warning",
                     );
                     await sleep(capacityBackoffMs, abortSignal);
+                    i--; // Retry same endpoint
                     continue;
                   }
 
@@ -1427,6 +1428,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     "warning",
                   );
                   await sleep(serverBusyBackoffMs, abortSignal);
+                  i--; // Retry same endpoint
                   continue;
                 }
 
