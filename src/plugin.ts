@@ -52,12 +52,8 @@ import type {
 const MAX_OAUTH_ACCOUNTS = 10;
 const MAX_WARMUP_SESSIONS = 1000;
 const MAX_WARMUP_RETRIES = 2;
-const CAPACITY_BACKOFF_TIERS_MS = [5000, 10000, 20000, 30000, 60000];
+const MAX_SERVER_CAPACITY_RETRIES = 10;
 
-function getCapacityBackoffDelay(consecutiveFailures: number): number {
-  const index = Math.min(consecutiveFailures, CAPACITY_BACKOFF_TIERS_MS.length - 1);
-  return CAPACITY_BACKOFF_TIERS_MS[Math.max(0, index)] ?? 5000;
-}
 const warmupAttemptedSessionIds = new Set<string>();
 const warmupSucceededSessionIds = new Set<string>();
 
@@ -1281,6 +1277,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     const backoffFormatted = formatWaitTime(capacityBackoffMs);
                     const failures = (account.consecutiveFailures ?? 0) + 1;
                     account.consecutiveFailures = failures;
+
+                    if (failures > MAX_SERVER_CAPACITY_RETRIES) {
+                      throw new Error(
+                        `Server capacity exhausted after ${failures} retries. Please try again later.`
+                      );
+                    }
+
                     pushDebug(`server capacity exhausted (not account-specific), backoff=${capacityBackoffMs}ms (attempt #${failures})`);
 
                     // Wait and retry with the SAME account - switching won't help for server capacity issues
@@ -1404,6 +1407,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                   const failures = (account.consecutiveFailures ?? 0) + 1;
                   account.consecutiveFailures = failures;
+
+                  if (failures > MAX_SERVER_CAPACITY_RETRIES) {
+                    throw new Error(
+                      `Server unavailable after ${failures} retries. Please try again later.`
+                    );
+                  }
                   
                   // Exponential backoff for 503: 5s, 10s, 20s, 40s... max 60s
                   const SERVER_BUSY_BASE_MS = 5000;
