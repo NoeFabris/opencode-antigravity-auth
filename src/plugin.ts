@@ -1276,7 +1276,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     // Also skip recordRateLimit() since this is not an account-level issue.
                     resetRateLimitState(account.index, quotaKey);
                     serverCapacityFailures++;
-                    const capacityBackoffMs = calculateBackoffMs(rateLimitReason, serverCapacityFailures, serverRetryMs);
+                    // Honor Retry-After exactly when present, only cap the exponential fallback
+                    const CAPACITY_BASE_MS = 5000;
+                    const exponentialMs = CAPACITY_BASE_MS * Math.pow(2, serverCapacityFailures - 1);
+                    const capacityBackoffMs = serverRetryMs && serverRetryMs > 0
+                      ? serverRetryMs  // Honor server's Retry-After exactly
+                      : Math.min(exponentialMs, 60000);  // Only cap the fallback
                     
                     const backoffFormatted = formatWaitTime(capacityBackoffMs);
 
@@ -1425,10 +1430,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     : retryAfterHeader
                       ? Number.parseInt(retryAfterHeader, 10) * 1000
                       : NaN;
-                  const baseMs = Number.isFinite(parsedRetryAfterMs) && parsedRetryAfterMs > 0
+                  const exponentialMs = SERVER_BUSY_BASE_MS * Math.pow(2, serverCapacityFailures - 1);
+                  const serverBusyBackoffMs = Number.isFinite(parsedRetryAfterMs) && parsedRetryAfterMs > 0
                     ? parsedRetryAfterMs
-                    : SERVER_BUSY_BASE_MS;
-                  const serverBusyBackoffMs = Math.min(baseMs * Math.pow(2, serverCapacityFailures - 1), 60000);
+                    : Math.min(exponentialMs, 60000);
                   const backoffFormatted = serverBusyBackoffMs >= 1000 ? `${Math.round(serverBusyBackoffMs / 1000)}s` : `${serverBusyBackoffMs}ms`;
 
                   pushDebug(`503 server busy (not account-specific), backoff=${serverBusyBackoffMs}ms (attempt #${serverCapacityFailures})`);
