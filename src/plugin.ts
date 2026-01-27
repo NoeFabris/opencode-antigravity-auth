@@ -1275,21 +1275,19 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     // Switching accounts won't help because all accounts share the same server capacity.
                     // Also skip recordRateLimit() since this is not an account-level issue.
                     resetRateLimitState(account.index, quotaKey);
-                    serverCapacityFailures++;
-                    // Honor Retry-After exactly when present, only cap the exponential fallback
-                    const CAPACITY_BASE_MS = 5000;
-                    const exponentialMs = CAPACITY_BASE_MS * Math.pow(2, serverCapacityFailures - 1);
-                    const capacityBackoffMs = serverRetryMs && serverRetryMs > 0
-                      ? serverRetryMs  // Honor server's Retry-After exactly
-                      : Math.min(exponentialMs, 60000);  // Only cap the fallback
-                    
-                    const backoffFormatted = formatWaitTime(capacityBackoffMs);
-
-                    if (serverCapacityFailures > MAX_SERVER_CAPACITY_RETRIES) {
+                    if (serverCapacityFailures >= MAX_SERVER_CAPACITY_RETRIES) {
                       throw new Error(
                         `Server capacity exhausted after ${serverCapacityFailures} retries. Please try again later.`
                       );
                     }
+                    serverCapacityFailures++;
+                    const CAPACITY_BASE_MS = 5000;
+                    const exponentialMs = CAPACITY_BASE_MS * Math.pow(2, serverCapacityFailures - 1);
+                    const capacityBackoffMs = serverRetryMs && serverRetryMs > 0
+                      ? serverRetryMs
+                      : Math.min(exponentialMs, 60000);
+                    
+                    const backoffFormatted = formatWaitTime(capacityBackoffMs);
 
                     pushDebug(`server capacity exhausted (not account-specific), backoff=${capacityBackoffMs}ms (attempt #${serverCapacityFailures})`);
 
@@ -1413,13 +1411,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                   await logResponseBody(debugContext, response, 503);
 
-                  serverCapacityFailures++;
-
-                  if (serverCapacityFailures > MAX_SERVER_CAPACITY_RETRIES) {
+                  if (serverCapacityFailures >= MAX_SERVER_CAPACITY_RETRIES) {
                     throw new Error(
                       `Server unavailable after ${serverCapacityFailures} retries. Please try again later.`
                     );
                   }
+                  serverCapacityFailures++;
                   
                   // Honor Retry-After headers if present, otherwise use exponential backoff
                   const SERVER_BUSY_BASE_MS = 5000;
