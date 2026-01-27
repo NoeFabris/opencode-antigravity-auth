@@ -1601,6 +1601,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   });
                 }
 
+                if (error instanceof Error && (
+                  error.message.startsWith("Server capacity exhausted") ||
+                  error.message.startsWith("Server unavailable")
+                )) {
+                  throw error;
+                }
+
                 if (i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length - 1) {
                   lastError = error instanceof Error ? error : new Error(String(error));
                   continue;
