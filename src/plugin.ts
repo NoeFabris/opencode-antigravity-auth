@@ -348,7 +348,7 @@ async function persistAccountPool(
   });
 }
 
-function retryAfterMsFromResponse(response: Response): number {
+function retryAfterMsFromResponse(response: Response): number | null {
   const retryAfterMsHeader = response.headers.get("retry-after-ms");
   if (retryAfterMsHeader) {
     const parsed = Number.parseInt(retryAfterMsHeader, 10);
@@ -365,7 +365,7 @@ function retryAfterMsFromResponse(response: Response): number {
     }
   }
 
-  return 60_000;
+  return null;
 }
 
 function parseDurationToMs(duration: string): number | null {
