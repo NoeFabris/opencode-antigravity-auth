@@ -1173,6 +1173,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // Track if token was consumed (for hybrid strategy refund on error)
             let tokenConsumed = false;
             
+            // Request-scoped counter for server capacity/503 retries (prevents cross-request leakage)
+            let serverCapacityFailures = 0;
+            
             for (let i = 0; i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length; i++) {
               const currentEndpoint = ANTIGRAVITY_ENDPOINT_FALLBACKS[i];
 
@@ -1272,23 +1275,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     // Switching accounts won't help because all accounts share the same server capacity.
                     // Also skip recordRateLimit() since this is not an account-level issue.
                     resetRateLimitState(account.index, quotaKey);
-                    const capacityBackoffMs = calculateBackoffMs(rateLimitReason, account.consecutiveFailures ?? 0, serverRetryMs);
+                    serverCapacityFailures++;
+                    const capacityBackoffMs = calculateBackoffMs(rateLimitReason, serverCapacityFailures, serverRetryMs);
                     
                     const backoffFormatted = formatWaitTime(capacityBackoffMs);
-                    const failures = (account.consecutiveFailures ?? 0) + 1;
-                    account.consecutiveFailures = failures;
 
-                    if (failures > MAX_SERVER_CAPACITY_RETRIES) {
+                    if (serverCapacityFailures > MAX_SERVER_CAPACITY_RETRIES) {
                       throw new Error(
-                        `Server capacity exhausted after ${failures} retries. Please try again later.`
+                        `Server capacity exhausted after ${serverCapacityFailures} retries. Please try again later.`
                       );
                     }
 
-                    pushDebug(`server capacity exhausted (not account-specific), backoff=${capacityBackoffMs}ms (attempt #${failures})`);
+                    pushDebug(`server capacity exhausted (not account-specific), backoff=${capacityBackoffMs}ms (attempt #${serverCapacityFailures})`);
 
                     // Wait and retry with the SAME account - switching won't help for server capacity issues
                     await showToast(
-                      `Server at capacity. Retrying in ${backoffFormatted}... (attempt ${failures})`,
+                      `Server at capacity. Retrying in ${backoffFormatted}... (attempt ${serverCapacityFailures})`,
                       "warning",
                     );
                     await sleep(capacityBackoffMs, abortSignal);
@@ -1406,25 +1408,34 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                   await logResponseBody(debugContext, response, 503);
 
-                  const failures = (account.consecutiveFailures ?? 0) + 1;
-                  account.consecutiveFailures = failures;
+                  serverCapacityFailures++;
 
-                  if (failures > MAX_SERVER_CAPACITY_RETRIES) {
+                  if (serverCapacityFailures > MAX_SERVER_CAPACITY_RETRIES) {
                     throw new Error(
-                      `Server unavailable after ${failures} retries. Please try again later.`
+                      `Server unavailable after ${serverCapacityFailures} retries. Please try again later.`
                     );
                   }
                   
-                  // Exponential backoff for 503: 5s, 10s, 20s, 40s... max 60s
+                  // Honor Retry-After headers if present, otherwise use exponential backoff
                   const SERVER_BUSY_BASE_MS = 5000;
-                  const serverBusyBackoffMs = Math.min(SERVER_BUSY_BASE_MS * Math.pow(2, failures - 1), 60000);
+                  const retryAfterMsHeader = response.headers.get("retry-after-ms");
+                  const retryAfterHeader = response.headers.get("retry-after");
+                  const parsedRetryAfterMs = retryAfterMsHeader
+                    ? Number.parseInt(retryAfterMsHeader, 10)
+                    : retryAfterHeader
+                      ? Number.parseInt(retryAfterHeader, 10) * 1000
+                      : NaN;
+                  const baseMs = Number.isFinite(parsedRetryAfterMs) && parsedRetryAfterMs > 0
+                    ? parsedRetryAfterMs
+                    : SERVER_BUSY_BASE_MS;
+                  const serverBusyBackoffMs = Math.min(baseMs * Math.pow(2, serverCapacityFailures - 1), 60000);
                   const backoffFormatted = serverBusyBackoffMs >= 1000 ? `${Math.round(serverBusyBackoffMs / 1000)}s` : `${serverBusyBackoffMs}ms`;
 
-                  pushDebug(`503 server busy (not account-specific), backoff=${serverBusyBackoffMs}ms (attempt #${failures})`);
+                  pushDebug(`503 server busy (not account-specific), backoff=${serverBusyBackoffMs}ms (attempt #${serverCapacityFailures})`);
 
                   // Wait and retry with the SAME account - this is a server-side issue, not account-specific
                   await showToast(
-                    `Server busy. Retrying in ${backoffFormatted}... (attempt ${failures})`,
+                    `Server busy. Retrying in ${backoffFormatted}... (attempt ${serverCapacityFailures})`,
                     "warning",
                   );
                   await sleep(serverBusyBackoffMs, abortSignal);
