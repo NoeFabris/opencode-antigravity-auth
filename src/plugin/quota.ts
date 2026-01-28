@@ -4,6 +4,7 @@ import {
   ANTIGRAVITY_PROVIDER_ID,
 } from "../constants";
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./auth";
+import { fetchWithProxy } from "./proxy";
 import { ensureProjectContext } from "./project";
 import { refreshAccessToken } from "./token";
 import { getModelFamily } from "./transform/model-resolver";
@@ -171,11 +172,11 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): Quot
   return { groups, modelCount: totalCount };
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS, proxyUrl?: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetchWithProxy(url, { ...options, signal: controller.signal }, proxyUrl);
   } finally {
     clearTimeout(timeout);
   }
@@ -184,6 +185,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = F
 async function fetchAvailableModels(
   accessToken: string,
   projectId: string,
+  proxyUrl?: string,
 ): Promise<FetchAvailableModelsResponse> {
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   const quotaUserAgent = ANTIGRAVITY_HEADERS["User-Agent"] || "antigravity/windows/amd64";
@@ -198,7 +200,7 @@ async function fetchAvailableModels(
       "User-Agent": quotaUserAgent,
     },
     body: JSON.stringify(body),
-  });
+  }, FETCH_TIMEOUT_MS, proxyUrl);
 
   if (response.ok) {
     return (await response.json()) as FetchAvailableModelsResponse;
@@ -216,6 +218,7 @@ async function fetchAvailableModels(
 async function fetchGeminiCliQuota(
   accessToken: string,
   projectId: string,
+  proxyUrl?: string,
 ): Promise<RetrieveUserQuotaResponse> {
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   // Use Gemini CLI user-agent to get CLI quota buckets (not Antigravity buckets)
@@ -234,7 +237,7 @@ async function fetchGeminiCliQuota(
         "User-Agent": geminiCliUserAgent,
       },
       body: JSON.stringify(body),
-    });
+    }, FETCH_TIMEOUT_MS, proxyUrl);
 
     if (response.ok) {
       const data = (await response.json()) as RetrieveUserQuotaResponse;
@@ -336,9 +339,9 @@ export async function checkAccountsQuota(
       
       // Fetch both Antigravity and Gemini CLI quotas in parallel
       const [antigravityResponse, geminiCliResponse] = await Promise.all([
-        fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
+        fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId, account.proxyUrl)
           .catch((error): FetchAvailableModelsResponse => ({ models: undefined })),
-        fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
+        fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId, account.proxyUrl),
       ]);
 
       // Process Antigravity quota
