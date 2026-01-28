@@ -4,6 +4,7 @@ import {
   ANTIGRAVITY_PROVIDER_ID,
 } from "../constants";
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./auth";
+import { fetchWithProxy } from "./proxy";
 import { ensureProjectContext } from "./project";
 import { refreshAccessToken } from "./token";
 import { getModelFamily } from "./transform/model-resolver";
@@ -147,11 +148,11 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): Quot
   return { groups, modelCount: totalCount };
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS, proxyUrl?: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetchWithProxy(url, { ...options, signal: controller.signal }, proxyUrl);
   } finally {
     clearTimeout(timeout);
   }
@@ -160,6 +161,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = F
 async function fetchAvailableModels(
   accessToken: string,
   projectId: string,
+  proxyUrl?: string,
 ): Promise<FetchAvailableModelsResponse> {
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   const quotaUserAgent = ANTIGRAVITY_HEADERS["User-Agent"] || "antigravity/windows/amd64";
@@ -174,7 +176,7 @@ async function fetchAvailableModels(
       "User-Agent": quotaUserAgent,
     },
     body: JSON.stringify(body),
-  });
+  }, FETCH_TIMEOUT_MS, proxyUrl);
 
   if (response.ok) {
     return (await response.json()) as FetchAvailableModelsResponse;
@@ -240,6 +242,7 @@ export async function checkAccountsQuota(
         const response = await fetchAvailableModels(
           auth.access ?? "",
           projectContext.effectiveProjectId,
+          account.proxyUrl,
         );
         quotaResult = aggregateQuota(response.models);
       } catch (error) {

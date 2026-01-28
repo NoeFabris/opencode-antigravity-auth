@@ -12,6 +12,7 @@ import {
 } from "../constants";
 import { createLogger } from "../plugin/logger";
 import { calculateTokenExpiry } from "../plugin/auth";
+import { fetchWithProxy } from "../plugin/proxy";
 
 const log = createLogger("oauth");
 
@@ -119,10 +120,14 @@ async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeoutMs = FETCH_TIMEOUT_MS,
+  proxyUrl?: string,
 ): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    if (proxyUrl) {
+      return await fetchWithProxy(url, { ...options, signal: controller.signal }, proxyUrl);
+    }
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
@@ -130,6 +135,7 @@ async function fetchWithTimeout(
 }
 
 async function fetchProjectID(accessToken: string): Promise<string> {
+  const proxyUrl = process.env.ANTIGRAVITY_LOGIN_PROXY;
   const errors: string[] = [];
   const loadHeaders: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
@@ -156,7 +162,7 @@ async function fetchProjectID(accessToken: string): Promise<string> {
             pluginType: "GEMINI",
           },
         }),
-      });
+      }, undefined, proxyUrl);
 
       if (!response.ok) {
         const message = await response.text().catch(() => "");
@@ -203,11 +209,12 @@ export async function exchangeAntigravity(
   code: string,
   state: string,
 ): Promise<AntigravityTokenExchangeResult> {
+  const proxyUrl = process.env.ANTIGRAVITY_LOGIN_PROXY;
   try {
     const { verifier, projectId } = decodeState(state);
 
     const startTime = Date.now();
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    const tokenResponse = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
@@ -224,7 +231,7 @@ export async function exchangeAntigravity(
         redirect_uri: ANTIGRAVITY_REDIRECT_URI,
         code_verifier: verifier,
       }),
-    });
+    }, undefined, proxyUrl);
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
@@ -233,7 +240,7 @@ export async function exchangeAntigravity(
 
     const tokenPayload = (await tokenResponse.json()) as AntigravityTokenResponse;
 
-    const userInfoResponse = await fetch(
+    const userInfoResponse = await fetchWithTimeout(
       "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
       {
         headers: {
@@ -242,6 +249,8 @@ export async function exchangeAntigravity(
           "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
         },
       },
+      undefined,
+      proxyUrl
     );
 
     const userInfo = userInfoResponse.ok

@@ -140,6 +140,7 @@ export interface ManagedAccount {
   fingerprint?: import("./fingerprint").Fingerprint;
   /** History of previous fingerprints for this account */
   fingerprintHistory?: FingerprintVersion[];
+  proxyUrl?: string;
 }
 
 function nowMs(): number {

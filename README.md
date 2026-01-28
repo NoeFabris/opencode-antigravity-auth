@@ -238,6 +238,44 @@ For details on load balancing, dual quota pools, and account storage, see [docs/
 
 ---
 
+## Proxy Configuration
+
+Use HTTP/HTTPS proxies for all API traffic (OAuth, token refresh, API calls). Useful for corporate environments or anti-detection setups.
+
+### Quick Start
+
+```bash
+# Login with proxy - automatically saves to account
+ANTIGRAVITY_LOGIN_PROXY=http://proxy.example.com:8080 opencode auth login
+
+# All future API calls from this account use the proxy
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5
+```
+
+### How It Works
+
+1. **OAuth Login**: Set `ANTIGRAVITY_LOGIN_PROXY` during `opencode auth login`
+2. **Auto-Save**: Proxy URL is saved to `~/.config/opencode/antigravity-accounts.json`
+3. **All Traffic**: All API calls (token refresh, project discovery, API requests) use the proxy
+
+### Supported Formats
+
+- `http://proxy.example.com:8080` - Unauthenticated
+- `http://user:pass@proxy.example.com:8080` - Authenticated
+- `https://proxy.example.com:443` - TLS proxy
+
+**Note**: SOCKS5 proxies are NOT supported. Use HTTP/HTTPS only.
+
+### Security Warning
+
+⚠️ Proxy credentials are stored in **plaintext** in `antigravity-accounts.json` (same as OAuth tokens). Use filesystem permissions to protect this file.
+
+### Advanced: Manual Configuration
+
+See [EXAMPLE_PROXY_CONFIG.md](EXAMPLE_PROXY_CONFIG.md) for manual JSON editing and troubleshooting.
+
+---
+
 ## Troubleshoot
 
 > **Quick Reset**: Most issues can be resolved by deleting `~/.config/opencode/antigravity-accounts.json` and running `opencode auth login` again.

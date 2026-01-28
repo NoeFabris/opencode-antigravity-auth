@@ -189,6 +189,7 @@ export interface AccountMetadataV3 {
   cooldownReason?: CooldownReason;
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
+  proxyUrl?: string;  // URL like "http://user:pass@host:port" (SOCKS5 not supported)
 }
 
 export interface AccountStorageV3 {
