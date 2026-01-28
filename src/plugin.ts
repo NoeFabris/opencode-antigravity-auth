@@ -1998,44 +1998,125 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 menuResult = await promptLoginMode(existingAccounts);
 
                 if (menuResult.mode === "check") {
-                  console.log("\nChecking quotas for all accounts...");
+                  console.log("\n📊 Checking quotas for all accounts...\n");
                   const results = await checkAccountsQuota(existingStorage.accounts, client, providerId);
                   let storageUpdated = false;
+                  
                   for (const res of results) {
                     const label = res.email || `Account ${res.index + 1}`;
                     const disabledStr = res.disabled ? " (disabled)" : "";
-                    console.log(`\n${res.index + 1}. ${label}${disabledStr}`);
-                    if (res.status === "error") {
-                      console.log(`   Error: ${res.error}`);
-                      continue;
-                    }
-                    if (!res.quota || Object.keys(res.quota.groups).length === 0) {
-                      console.log("   No quota information available.");
-                      if (res.quota?.error) console.log(`   Error: ${res.quota.error}`);
-                      continue;
-                    }
-                    const printGrp = (name: string, group: any) => {
-                      if (!group) return;
-                      const remaining = typeof group.remainingFraction === 'number' 
-                        ? `${Math.round(group.remainingFraction * 100)}%` 
-                        : 'UNKNOWN';
-                      const resetStr = group.resetTime ? `, resets in ${formatWaitTime(Date.parse(group.resetTime) - Date.now())}` : '';
-                      console.log(`   ${name}: ${remaining}${resetStr}`);
-                    };
-                    printGrp("Claude", res.quota.groups.claude);
-                    printGrp("Gemini 3 Pro", res.quota.groups["gemini-pro"]);
-                    printGrp("Gemini 3 Flash", res.quota.groups["gemini-flash"]);
+                    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+                    console.log(`  ${label}${disabledStr}`);
+                    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
                     
-                    const acc = existingStorage.accounts[res.index];
-                    if (acc && res.quota.groups) {
-                      acc.cachedQuota = res.quota.groups;
-                      acc.cachedQuotaUpdatedAt = Date.now();
-                      storageUpdated = true;
+                    if (res.status === "error") {
+                      console.log(`  ❌ Error: ${res.error}\n`);
+                      continue;
                     }
+
+                    // ANSI color codes
+                    const colors = {
+                      red: '\x1b[31m',
+                      orange: '\x1b[33m',  // Yellow/orange
+                      green: '\x1b[32m',
+                      reset: '\x1b[0m',
+                    };
+
+                    // Get color based on remaining percentage
+                    const getColor = (remaining?: number): string => {
+                      if (typeof remaining !== 'number') return colors.reset;
+                      if (remaining < 0.2) return colors.red;
+                      if (remaining < 0.6) return colors.orange;
+                      return colors.green;
+                    };
+
+                    // Helper to create colored progress bar
+                    const createProgressBar = (remaining?: number, width: number = 20): string => {
+                      if (typeof remaining !== 'number') return '░'.repeat(width) + ' ???';
+                      const filled = Math.round(remaining * width);
+                      const empty = width - filled;
+                      const color = getColor(remaining);
+                      const bar = `${color}${'█'.repeat(filled)}${colors.reset}${'░'.repeat(empty)}`;
+                      const pct = `${color}${Math.round(remaining * 100)}%${colors.reset}`.padStart(4 + color.length + colors.reset.length);
+                      return `${bar} ${pct}`;
+                    };
+
+                    // Helper to format reset time with days support
+                    const formatReset = (resetTime?: string): string => {
+                      if (!resetTime) return '';
+                      const ms = Date.parse(resetTime) - Date.now();
+                      if (ms <= 0) return ' (resetting...)';
+                      
+                      const hours = ms / (1000 * 60 * 60);
+                      if (hours >= 24) {
+                        const days = Math.floor(hours / 24);
+                        const remainingHours = Math.floor(hours % 24);
+                        if (remainingHours > 0) {
+                          return ` (resets in ${days}d ${remainingHours}h)`;
+                        }
+                        return ` (resets in ${days}d)`;
+                      }
+                      return ` (resets in ${formatWaitTime(ms)})`;
+                    };
+
+                    // Display Gemini CLI Quota first (as requested - swap order)
+                    const hasGeminiCli = res.geminiCliQuota && res.geminiCliQuota.models.length > 0;
+                    console.log(`\n  ┌─ Gemini CLI Quota`);
+                    if (!hasGeminiCli) {
+                      const errorMsg = res.geminiCliQuota?.error || "No Gemini CLI quota available";
+                      console.log(`  │  └─ ${errorMsg}`);
+                    } else {
+                      const models = res.geminiCliQuota!.models;
+                      models.forEach((model, idx) => {
+                        const isLast = idx === models.length - 1;
+                        const connector = isLast ? "└─" : "├─";
+                        const bar = createProgressBar(model.remainingFraction);
+                        const reset = formatReset(model.resetTime);
+                        const modelName = model.modelId.padEnd(29);
+                        console.log(`  │  ${connector} ${modelName} ${bar}${reset}`);
+                      });
+                    }
+
+                    // Display Antigravity Quota second
+                    const hasAntigravity = res.quota && Object.keys(res.quota.groups).length > 0;
+                    console.log(`  │`);
+                    console.log(`  └─ Antigravity Quota`);
+                    if (!hasAntigravity) {
+                      const errorMsg = res.quota?.error || "No quota information available";
+                      console.log(`     └─ ${errorMsg}`);
+                    } else {
+                      const groups = res.quota!.groups;
+                      const groupEntries = [
+                        { name: "Claude", data: groups.claude },
+                        { name: "Gemini 3 Pro", data: groups["gemini-pro"] },
+                        { name: "Gemini 3 Flash", data: groups["gemini-flash"] },
+                      ].filter(g => g.data);
+                      
+                      groupEntries.forEach((g, idx) => {
+                        const isLast = idx === groupEntries.length - 1;
+                        const connector = isLast ? "└─" : "├─";
+                        const bar = createProgressBar(g.data!.remainingFraction);
+                        const reset = formatReset(g.data!.resetTime);
+                        const modelName = g.name.padEnd(29);
+                        console.log(`     ${connector} ${modelName} ${bar}${reset}`);
+                      });
+                    }
+                    console.log("");
+
+                    // Cache quota data for soft quota protection
+                    if (res.quota?.groups) {
+                      const acc = existingStorage.accounts[res.index];
+                      if (acc) {
+                        acc.cachedQuota = res.quota.groups;
+                        acc.cachedQuotaUpdatedAt = Date.now();
+                        storageUpdated = true;
+                      }
+                    }
+
                     if (res.updatedAccount) {
                       existingStorage.accounts[res.index] = {
                         ...res.updatedAccount,
-                        cachedQuota: res.quota.groups,
+                        cachedQuota: res.quota?.groups,
                         cachedQuotaUpdatedAt: Date.now(),
                       };
                       storageUpdated = true;
