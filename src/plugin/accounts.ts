@@ -287,6 +287,7 @@ export class AccountManager {
             touchedForQuota: {},
             // Use stored fingerprint or generate new one for rate limit mitigation
             fingerprint: acc.fingerprint ?? generateFingerprint(),
+            proxyUrl: acc.proxyUrl,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -772,6 +773,7 @@ export class AccountManager {
         cooldownReason: a.cooldownReason,
         fingerprint: a.fingerprint,
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
+        proxyUrl: a.proxyUrl,
       })),
       activeIndex: claudeIndex,
       activeIndexByFamily: {
