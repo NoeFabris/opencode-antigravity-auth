@@ -42,7 +42,7 @@ export function getProxyAgent(proxyUrl?: string): ProxyAgent | undefined {
 }
 
 export async function fetchWithProxy(
-  input: RequestInfo | URL,
+  input: string | URL,
   init?: RequestInit,
   proxyUrl?: string,
 ): Promise<Response> {
@@ -54,11 +54,7 @@ export async function fetchWithProxy(
   
   const { fetch: undiciFetch } = await import('undici');
   
-  const url = typeof input === 'string' 
-    ? input 
-    : input instanceof URL 
-      ? input.href 
-      : input.url;
+  const url = typeof input === 'string' ? input : input.href;
   
   // @ts-ignore - undici.fetch dispatcher property not in standard RequestInit
   return undiciFetch(url, { ...init, dispatcher: agent }) as unknown as Promise<Response>;

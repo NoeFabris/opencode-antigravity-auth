@@ -1397,7 +1397,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                const response = await fetchWithProxy(prepared.request, prepared.init, account.proxyUrl);
+                const response = await fetchWithProxy(resolvedUrl, prepared.init, account.proxyUrl);
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
 

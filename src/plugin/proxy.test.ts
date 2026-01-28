@@ -111,21 +111,5 @@ describe('proxy.ts', () => {
         dispatcher: expect.any(Object)
       }));
     });
-
-    it('handles Request object input in fetchWithProxy', async () => {
-      const proxyUrl = 'http://proxy.example.com';
-      const request = new Request('https://api.example.com', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'value' })
-      });
-
-      await fetchWithProxy(request, {}, proxyUrl);
-
-      // New behavior: URL is extracted, init is passed through (not merged from Request)
-      expect(undiciFetch).toHaveBeenCalledWith('https://api.example.com/', expect.objectContaining({
-        dispatcher: expect.any(Object)
-      }));
-    });
   });
 });
