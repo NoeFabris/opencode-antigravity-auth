@@ -272,7 +272,7 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5
 
 ### Advanced: Manual Configuration
 
-See [EXAMPLE_PROXY_CONFIG.md](EXAMPLE_PROXY_CONFIG.md) for manual JSON editing and troubleshooting.
+See [docs/PROXY.md](docs/PROXY.md) for manual JSON editing and troubleshooting.
 
 ---
 
