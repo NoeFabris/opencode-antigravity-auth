@@ -326,6 +326,40 @@ export const AntigravityConfigSchema = z.object({
     */
    request_jitter_max_ms: z.number().min(0).max(5000).default(0),
    
+   /**
+    * Soft quota threshold percentage (1-100).
+    * When an account's quota usage reaches this percentage, skip it during
+    * account selection (same as if it were rate-limited).
+    * 
+    * Example: 90 means skip account when 90% of quota is used (10% remaining).
+    * Set to 100 to disable soft quota protection.
+    * 
+    * @default 90
+    */
+   soft_quota_threshold_percent: z.number().min(1).max(100).default(90),
+   
+   /**
+    * How often to refresh quota data in the background (in minutes).
+    * Quota is refreshed opportunistically after successful API requests.
+    * Set to 0 to disable automatic refresh (manual only via Check quotas).
+    * 
+    * @default 15
+    */
+   quota_refresh_interval_minutes: z.number().min(0).max(60).default(15),
+   
+   /**
+    * How long quota cache is considered fresh for threshold checks (in minutes).
+    * After this time, cache is stale and account is allowed (fail-open).
+    * 
+    * "auto" = derive from refresh interval: max(2 * refresh_interval, 10)
+    * 
+    * @default "auto"
+    */
+   soft_quota_cache_ttl_minutes: z.union([
+     z.literal("auto"),
+     z.number().min(1).max(120)
+   ]).default("auto"),
+   
    // =========================================================================
    // Health Score (used by hybrid strategy)
    // =========================================================================
@@ -393,6 +427,9 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   default_retry_after_seconds: 60,
   max_backoff_seconds: 60,
   request_jitter_max_ms: 0,
+  soft_quota_threshold_percent: 90,
+  quota_refresh_interval_minutes: 15,
+  soft_quota_cache_ttl_minutes: "auto",
   auto_update: true,
   signature_cache: {
     enabled: true,

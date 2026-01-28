@@ -190,6 +190,9 @@ export interface AccountMetadataV3 {
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
   proxyUrl?: string;  // URL like "http://user:pass@host:port" (SOCKS5 not supported)
+  /** Cached soft quota data */
+  cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
+  cachedQuotaUpdatedAt?: number;
 }
 
 export interface AccountStorageV3 {
