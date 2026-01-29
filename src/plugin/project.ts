@@ -129,7 +129,7 @@ export async function loadManagedProject(
     "Content-Type": "application/json",
     Authorization: `Bearer ${accessToken}`,
     "User-Agent": "google-api-nodejs-client/9.15.1",
-    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    "X-Goog-Api-Client": "google-cloud-sdk vscode/1.96.0",
     "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
   };
 
