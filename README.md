@@ -570,7 +570,6 @@ Most users don't need to configure anything — defaults work well.
 |--------|---------|--------------
 | `keep_thinking` | `false` | Preserve Claude's thinking across turns. **Warning:** enabling may degrade model stability. |
 | `session_recovery` | `true` | Auto-recover from tool errors |
-| `web_search.default_mode` | `"off"` | Gemini Google Search: `"auto"` or `"off"` |
 
 ### Account Rotation
 
