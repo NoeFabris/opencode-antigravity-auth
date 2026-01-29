@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import lockfile from "proper-lockfile";
-import type { HeaderStyle } from "../constants";
+import { ANTIGRAVITY_HEADERS, type HeaderStyle } from "../constants";
 import { createLogger } from "./logger";
 
 const log = createLogger("storage");
@@ -198,6 +198,63 @@ export interface AccountStorageV3 {
 }
 
 type AnyAccountStorage = AccountStorageV1 | AccountStorage | AccountStorageV3;
+
+const NORMALIZED_ANTIGRAVITY_USER_AGENT = ANTIGRAVITY_HEADERS["User-Agent"];
+const NORMALIZED_ANTIGRAVITY_VERSION =
+  NORMALIZED_ANTIGRAVITY_USER_AGENT.split(/\s+/)[0] ?? "antigravity/1.104.0";
+const NORMALIZED_ANTIGRAVITY_API_CLIENT = ANTIGRAVITY_HEADERS["X-Goog-Api-Client"];
+
+function normalizeAntigravityUserAgent(value: string): string {
+  const match = value.match(/^(antigravity)\/([0-9.]+)(\s+.+)?$/i);
+  if (!match) {
+    return value;
+  }
+  const suffix = match[3] ?? "";
+  return `${NORMALIZED_ANTIGRAVITY_VERSION}${suffix}`;
+}
+
+function normalizeAccountFingerprint(account: Record<string, unknown>): boolean {
+  const fingerprint = account.fingerprint;
+  if (!fingerprint || typeof fingerprint !== "object") {
+    return false;
+  }
+
+  const fingerprintRecord = fingerprint as Record<string, unknown>;
+  let updated = false;
+
+  const userAgent =
+    typeof fingerprintRecord.userAgent === "string"
+      ? fingerprintRecord.userAgent
+      : undefined;
+  if (userAgent && /antigravity\//i.test(userAgent)) {
+    const normalizedUserAgent = normalizeAntigravityUserAgent(userAgent);
+    if (normalizedUserAgent !== userAgent) {
+      fingerprintRecord.userAgent = normalizedUserAgent;
+      updated = true;
+    }
+  }
+
+  const apiClient =
+    typeof fingerprintRecord.apiClient === "string"
+      ? fingerprintRecord.apiClient
+      : undefined;
+  if (!apiClient || apiClient !== NORMALIZED_ANTIGRAVITY_API_CLIENT) {
+    fingerprintRecord.apiClient = NORMALIZED_ANTIGRAVITY_API_CLIENT;
+    updated = true;
+  }
+
+  return updated;
+}
+
+function normalizeStoredFingerprints(accounts: AccountMetadataV3[]): boolean {
+  let updated = false;
+  for (const account of accounts) {
+    if (account && normalizeAccountFingerprint(account as unknown as Record<string, unknown>)) {
+      updated = true;
+    }
+  }
+  return updated;
+}
 
 function getConfigDir(): string {
   const platform = process.platform;
@@ -500,6 +557,22 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
       activeIndex = Math.max(activeIndex, 0);
     } else {
       activeIndex = 0;
+    }
+
+    const normalized = normalizeStoredFingerprints(deduplicatedAccounts);
+    if (normalized) {
+      try {
+        await saveAccounts({
+          version: 3,
+          accounts: deduplicatedAccounts,
+          activeIndex,
+        });
+        log.info("Normalized stored Antigravity fingerprints");
+      } catch (saveError) {
+        log.warn("Failed to persist fingerprint normalization", {
+          error: String(saveError),
+        });
+      }
     }
 
     return {
