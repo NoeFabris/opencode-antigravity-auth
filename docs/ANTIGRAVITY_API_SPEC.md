@@ -62,8 +62,8 @@ https://www.googleapis.com/auth/experimentsandconfigs
 ```http
 Authorization: Bearer {access_token}
 Content-Type: application/json
-User-Agent: antigravity/1.11.5 windows/amd64
-X-Goog-Api-Client: google-cloud-sdk vscode_cloudshelleditor/0.1
+User-Agent: antigravity/1.104.0 windows/amd64
+X-Goog-Api-Client: google-cloud-sdk vscode/1.96.0
 Client-Metadata: {"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}
 ```
 
