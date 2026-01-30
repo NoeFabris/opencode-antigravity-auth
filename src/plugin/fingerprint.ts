@@ -19,7 +19,7 @@ const OS_VERSIONS: Record<string, string[]> = {
 
 const ARCHITECTURES = ["x64", "arm64"];
 
-const ANTIGRAVITY_VERSIONS = ["1.14.0", "1.14.5", "1.15.0", "1.15.2", "1.15.5", "1.15.8"];
+const ANTIGRAVITY_VERSIONS = ["1.15.8"];
 
 const IDE_TYPES = [
   "IDE_UNSPECIFIED",
