@@ -535,7 +535,11 @@ export class AccountManager {
     if (pidOffsetEnabled && !this.sessionOffsetApplied[family] && this.accounts.length > 1) {
       const pidOffset = process.pid % this.accounts.length;
       const baseIndex = this.currentAccountIndexByFamily[family] ?? 0;
-      this.currentAccountIndexByFamily[family] = (baseIndex + pidOffset) % this.accounts.length;
+      const newIndex = (baseIndex + pidOffset) % this.accounts.length;
+      
+      debugLogToFile(`[Account] Applying PID offset: pid=${process.pid} offset=${pidOffset} family=${family} index=${baseIndex}->${newIndex}`);
+      
+      this.currentAccountIndexByFamily[family] = newIndex;
       this.sessionOffsetApplied[family] = true;
     }
 
@@ -726,6 +730,49 @@ export class AccountManager {
       return "gemini-cli";
     }
     return null;
+  }
+
+  /**
+   * Check if any OTHER account has antigravity quota available for the given family/model.
+   * 
+   * Used to determine whether to switch accounts vs fall back to gemini-cli:
+   * - If true: Switch to another account (preserve antigravity priority)
+   * - If false: All accounts exhausted antigravity, safe to fall back to gemini-cli
+   * 
+   * @param currentAccountIndex - Index of the current account (will be excluded from check)
+   * @param family - Model family ("gemini" or "claude")
+   * @param model - Optional model name for model-specific rate limits
+   * @returns true if any other enabled, non-cooling-down account has antigravity available
+   */
+  hasOtherAccountWithAntigravityAvailable(
+    currentAccountIndex: number,
+    family: ModelFamily,
+    model?: string | null
+  ): boolean {
+    // Claude has no gemini-cli fallback - always return false
+    // (This method is only relevant for Gemini's dual quota pools)
+    if (family === "claude") {
+      return false;
+    }
+
+    return this.accounts.some(acc => {
+      // Skip current account
+      if (acc.index === currentAccountIndex) {
+        return false;
+      }
+      // Skip disabled accounts
+      if (acc.enabled === false) {
+        return false;
+      }
+      // Skip cooling down accounts
+      if (this.isAccountCoolingDown(acc)) {
+        return false;
+      }
+      // Clear expired rate limits before checking
+      clearExpiredRateLimits(acc);
+      // Check if antigravity is available for this account
+      return !isRateLimitedForHeaderStyle(acc, family, "antigravity", model);
+    });
   }
 
   removeAccount(account: ManagedAccount): boolean {

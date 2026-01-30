@@ -5,6 +5,7 @@ import {
 } from "../constants";
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./auth";
 import { fetchWithProxy } from "./proxy";
+import { logQuotaFetch, logQuotaStatus } from "./debug";
 import { ensureProjectContext } from "./project";
 import { refreshAccessToken } from "./token";
 import { getModelFamily } from "./transform/model-resolver";
@@ -315,6 +316,8 @@ export async function checkAccountsQuota(
   providerId = ANTIGRAVITY_PROVIDER_ID,
 ): Promise<AccountQuotaResult[]> {
   const results: AccountQuotaResult[] = [];
+  
+  logQuotaFetch("start", accounts.length);
 
   for (const [index, account] of accounts.entries()) {
     const disabled = account.enabled === false;
@@ -372,6 +375,12 @@ export async function checkAccountsQuota(
         geminiCliQuota: geminiCliQuotaResult,
         updatedAccount,
       });
+      
+      // Log quota status for each family
+      for (const [family, groupQuota] of Object.entries(quotaResult.groups)) {
+        const remainingPercent = (groupQuota.remainingFraction ?? 0) * 100;
+        logQuotaStatus(account.email, index, remainingPercent, family);
+      }
     } catch (error) {
       results.push({
         index,
@@ -380,8 +389,10 @@ export async function checkAccountsQuota(
         disabled,
         error: error instanceof Error ? error.message : String(error),
       });
+      logQuotaFetch("error", undefined, `account=${account.email ?? index} error=${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
+  logQuotaFetch("complete", accounts.length, `ok=${results.filter(r => r.status === "ok").length} errors=${results.filter(r => r.status === "error").length}`);
   return results;
 }

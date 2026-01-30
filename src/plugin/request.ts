@@ -22,6 +22,7 @@ import {
   DEBUG_MESSAGE_PREFIX,
   isDebugEnabled,
   logAntigravityDebugResponse,
+  logCacheStats,
   type AntigravityDebugContext,
 } from "./debug";
 import { createLogger } from "./logger";
@@ -1649,6 +1650,17 @@ export async function transformAntigravityResponse(
     const effectiveBody = patched ?? parsed ?? undefined;
 
     const usage = usageFromSse ?? (effectiveBody ? extractUsageMetadata(effectiveBody) : null);
+    
+    // Log cache stats when available
+    if (usage && effectiveModel) {
+      logCacheStats(
+        effectiveModel,
+        usage.cachedContentTokenCount ?? 0,
+        0, // API doesn't provide cache write tokens separately
+        usage.promptTokenCount ?? usage.totalTokenCount ?? 0,
+      );
+    }
+    
     if (usage?.cachedContentTokenCount !== undefined) {
       headers.set("x-antigravity-cached-content-token-count", String(usage.cachedContentTokenCount));
       if (usage.totalTokenCount !== undefined) {

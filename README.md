@@ -77,7 +77,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 4. **Use it:**
 
    ```bash
-   opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+   opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
    ```
 
 </details>
@@ -100,7 +100,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 ### Verification
 
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
 ```
 
 </details>
@@ -111,28 +111,23 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --var
 
 ### Model Reference
 
-**Antigravity quota** (Claude + Gemini 3):
+All models use Antigravity quota by default with automatic fallback to Gemini CLI when exhausted.
 
 | Model | Variants | Notes |
 |-------|----------|-------|
-| `antigravity-gemini-3-pro` | low, high | Gemini 3 Pro with thinking |
-| `antigravity-gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
-| `antigravity-claude-sonnet-4-5` | — | Claude Sonnet 4.5 |
-| `antigravity-claude-sonnet-4-5-thinking` | low, max | Claude Sonnet with extended thinking |
-| `antigravity-claude-opus-4-5-thinking` | low, max | Claude Opus with extended thinking |
+| `gemini-3-pro` | low, high | Gemini 3 Pro with thinking |
+| `gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
+| `gemini-2.5-pro` | — | Gemini 2.5 Pro |
+| `gemini-2.5-flash` | — | Gemini 2.5 Flash |
+| `claude-sonnet-4-5` | — | Claude Sonnet 4.5 |
+| `claude-sonnet-4-5-thinking` | low, max | Claude Sonnet with extended thinking |
+| `claude-opus-4-5-thinking` | low, max | Claude Opus with extended thinking |
 
-**Gemini CLI quota** (separate from Antigravity):
-
-| Model | Notes |
-|-------|-------|
-| `gemini-2.5-flash` | Gemini 2.5 Flash |
-| `gemini-2.5-pro` | Gemini 2.5 Pro |
-| `gemini-3-flash-preview` | Gemini 3 Flash (preview) |
-| `gemini-3-pro-preview` | Gemini 3 Pro (preview) |
+> **Quota Behavior:** The plugin tries Antigravity quota first across ALL accounts. Only when Antigravity is exhausted on all accounts does it fall back to Gemini CLI quota. Model names are automatically transformed for the target API (e.g., `gemini-3-flash` → `gemini-3-flash-preview` for CLI).
 
 **Using variants:**
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
 ```
 
 For details on variant configuration and thinking levels, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
@@ -149,8 +144,8 @@ Add this to your `~/.config/opencode/opencode.json`:
   "provider": {
     "google": {
       "models": {
-        "antigravity-gemini-3-pro": {
-          "name": "Gemini 3 Pro (Antigravity)",
+        "gemini-3-pro": {
+          "name": "Gemini 3 Pro",
           "limit": { "context": 1048576, "output": 65535 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
@@ -158,8 +153,8 @@ Add this to your `~/.config/opencode/opencode.json`:
             "high": { "thinkingLevel": "high" }
           }
         },
-        "antigravity-gemini-3-flash": {
-          "name": "Gemini 3 Flash (Antigravity)",
+        "gemini-3-flash": {
+          "name": "Gemini 3 Flash",
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
@@ -169,54 +164,46 @@ Add this to your `~/.config/opencode/opencode.json`:
             "high": { "thinkingLevel": "high" }
           }
         },
-        "antigravity-claude-sonnet-4-5": {
-          "name": "Claude Sonnet 4.5 (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro",
+          "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "antigravity-claude-sonnet-4-5-thinking": {
-          "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
-          }
-        },
-        "antigravity-claude-opus-4-5-thinking": {
-          "name": "Claude Opus 4.5 Thinking (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
-          }
         },
         "gemini-2.5-flash": {
-          "name": "Gemini 2.5 Flash (Gemini CLI)",
+          "name": "Gemini 2.5 Flash",
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
-        "gemini-2.5-pro": {
-          "name": "Gemini 2.5 Pro (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65536 },
+        "claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5",
+          "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
-        "gemini-3-flash-preview": {
-          "name": "Gemini 3 Flash Preview (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65536 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        "claude-sonnet-4-5-thinking": {
+          "name": "Claude Sonnet 4.5 Thinking",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
         },
-        "gemini-3-pro-preview": {
-          "name": "Gemini 3 Pro Preview (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        "claude-opus-4-5-thinking": {
+          "name": "Claude Opus 4.5 Thinking",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
         }
       }
     }
   }
 }
 ```
+
+> **Backward Compatibility:** Legacy model names with `antigravity-` prefix (e.g., `antigravity-gemini-3-flash`) still work. The plugin automatically handles model name transformation for both Antigravity and Gemini CLI APIs.
 
 </details>
 
@@ -441,8 +428,8 @@ If you encounter errors during a session:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
-    "document-writer": { "model": "google/antigravity-gemini-3-flash" }
+    "frontend-ui-ux-engineer": { "model": "google/gemini-3-pro" },
+    "document-writer": { "model": "google/gemini-3-flash" }
   }
 }
 ```
@@ -579,9 +566,9 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
-    "document-writer": { "model": "google/antigravity-gemini-3-flash" },
-    "multimodal-looker": { "model": "google/antigravity-gemini-3-flash" }
+    "frontend-ui-ux-engineer": { "model": "google/gemini-3-pro" },
+    "document-writer": { "model": "google/gemini-3-flash" },
+    "multimodal-looker": { "model": "google/gemini-3-flash" }
   }
 }
 ```
