@@ -1,6 +1,10 @@
 # Changelog
 
-## [1.3.2] - 2026-01-27
+## 1.3.3
+
+- **Update Antigravity User-Agent** - Updated the Antigravity version in the User-Agent header to `1.15.8` to fix the "This version of Antigravity is no longer supported" error ([#310](https://github.com/NoeFabris/opencode-antigravity-auth/issues/310)).
+
+## 1.3.2
 
 ### Added
 

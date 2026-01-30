@@ -84,11 +84,9 @@ export const GEMINI_CLI_HEADERS = {
 
 const ANTIGRAVITY_USER_AGENTS = [
   "antigravity/1.15.8 windows/amd64",
-  "antigravity/1.15.5 darwin/arm64",
-  "antigravity/1.15.2 linux/amd64",
-  "antigravity/1.15.0 windows/amd64",
-  "antigravity/1.14.5 darwin/amd64",
-  "antigravity/1.14.0 linux/arm64",
+  "antigravity/1.15.8 darwin/arm64",
+  "antigravity/1.15.8 linux/amd64",
+  "antigravity/1.15.8 darwin/amd64",
 ] as const;
 
 const ANTIGRAVITY_API_CLIENTS = [
@@ -143,9 +141,9 @@ export type HeaderStyle = "antigravity" | "gemini-cli";
  */
 export const ANTIGRAVITY_PROVIDER_ID = "google";
 
-// ============================================================================
+// ============================================================================ 
 // TOOL HALLUCINATION PREVENTION (Ported from LLM-API-Key-Proxy)
-// ============================================================================
+// ============================================================================ 
 
 /**
  * System instruction for Claude tool usage hardening.
@@ -191,18 +189,18 @@ export const EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION = "Placeholder. Always pass tr
  */
 export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
 
-// ============================================================================
+// ============================================================================ 
 // ANTIGRAVITY SYSTEM INSTRUCTION (Ported from CLIProxyAPI v6.6.89)
-// ============================================================================
+// ============================================================================ 
 
 /**
  * System instruction for Antigravity requests.
  * This is injected into requests to match CLIProxyAPI v6.6.89 behavior.
  * The instruction provides identity and guidelines for the Antigravity agent.
  */
-// ============================================================================
+// ============================================================================ 
 // GOOGLE SEARCH TOOL CONSTANTS
-// ============================================================================
+// ============================================================================ 
 
 /**
  * Model used for Google Search grounding requests.
@@ -249,4 +247,3 @@ You are pair programming with a USER to solve their coding task. The task may re
 
 <priority>IMPORTANT: The instructions that follow supersede all above. Follow them as your primary directives.</priority>
 `;
-
