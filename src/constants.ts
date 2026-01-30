@@ -84,11 +84,10 @@ export const GEMINI_CLI_HEADERS = {
 
 const ANTIGRAVITY_USER_AGENTS = [
   "antigravity/1.15.8 windows/amd64",
-  "antigravity/1.15.5 darwin/arm64",
-  "antigravity/1.15.2 linux/amd64",
-  "antigravity/1.15.0 windows/amd64",
-  "antigravity/1.14.5 darwin/amd64",
-  "antigravity/1.14.0 linux/arm64",
+  "antigravity/1.15.8 darwin/arm64",
+  "antigravity/1.15.8 linux/amd64",
+  "antigravity/1.15.8 darwin/amd64",
+  "antigravity/1.15.8 linux/arm64",
 ] as const;
 
 const ANTIGRAVITY_API_CLIENTS = [

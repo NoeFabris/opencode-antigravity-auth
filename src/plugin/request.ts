@@ -1387,23 +1387,35 @@ export function prepareAntigravityRequest(
   // Use randomized headers as the fallback pool
   const selectedHeaders = getRandomizedHeaders(headerStyle);
 
-  // Use per-account fingerprint if provided, otherwise fall back to session fingerprint
-  // Fingerprint headers override randomized headers for User-Agent, X-Goog-Api-Client, Client-Metadata
-  // and add X-Goog-QuotaUser, X-Client-Device-Id for unique device identity
-  const fingerprint = options?.fingerprint ?? getSessionFingerprint();
-  const fingerprintHeaders = buildFingerprintHeaders(fingerprint);
+  // Only apply fingerprints for Antigravity requests
+  // Gemini CLI should use clean headers without Antigravity-specific fingerprinting
+  if (headerStyle === "antigravity") {
+    // Use per-account fingerprint if provided, otherwise fall back to session fingerprint
+    // Fingerprint headers override randomized headers for User-Agent, X-Goog-Api-Client, Client-Metadata
+    // and add X-Goog-QuotaUser, X-Client-Device-Id for unique device identity
+    const fingerprint = options?.fingerprint ?? getSessionFingerprint();
+    const fingerprintHeaders = buildFingerprintHeaders(fingerprint);
 
-  // Apply fingerprint headers (override randomized with fingerprint if available)
-  headers.set("User-Agent", fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"]);
-  headers.set("X-Goog-Api-Client", fingerprintHeaders["X-Goog-Api-Client"] || selectedHeaders["X-Goog-Api-Client"]);
-  headers.set("Client-Metadata", fingerprintHeaders["Client-Metadata"] || selectedHeaders["Client-Metadata"]);
+    // Apply fingerprint headers (override randomized with fingerprint if available)
+    headers.set("User-Agent", fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"]);
+    headers.set("X-Goog-Api-Client", fingerprintHeaders["X-Goog-Api-Client"] || selectedHeaders["X-Goog-Api-Client"]);
+    headers.set("Client-Metadata", fingerprintHeaders["Client-Metadata"] || selectedHeaders["Client-Metadata"]);
 
-  // Add new fingerprint-specific headers for device identity
-  if (fingerprintHeaders["X-Goog-QuotaUser"]) {
-    headers.set("X-Goog-QuotaUser", fingerprintHeaders["X-Goog-QuotaUser"]);
-  }
-  if (fingerprintHeaders["X-Client-Device-Id"]) {
-    headers.set("X-Client-Device-Id", fingerprintHeaders["X-Client-Device-Id"]);
+    // Add new fingerprint-specific headers for device identity
+    if (fingerprintHeaders["X-Goog-QuotaUser"]) {
+      headers.set("X-Goog-QuotaUser", fingerprintHeaders["X-Goog-QuotaUser"]);
+    }
+    if (fingerprintHeaders["X-Client-Device-Id"]) {
+      headers.set("X-Client-Device-Id", fingerprintHeaders["X-Client-Device-Id"]);
+    }
+  } else {
+    // For Gemini CLI, use clean headers without fingerprinting
+    // Explicitly delete Antigravity-specific headers to prevent leakage
+    headers.delete("X-Goog-QuotaUser");
+    headers.delete("X-Client-Device-Id");
+    headers.set("User-Agent", selectedHeaders["User-Agent"]);
+    headers.set("X-Goog-Api-Client", selectedHeaders["X-Goog-Api-Client"]);
+    headers.set("Client-Metadata", selectedHeaders["Client-Metadata"]);
   }
   // Optional debug header to observe tool normalization on the backend if surfaced
   if (toolDebugMissing > 0) {

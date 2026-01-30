@@ -1334,7 +1334,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // Track capacity retries per endpoint to prevent infinite loops
             let capacityRetryCount = 0;
             let lastEndpointIndex = -1;
-            
+
             for (let i = 0; i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length; i++) {
               // Reset capacity retry counter when switching to a new endpoint
               if (i !== lastEndpointIndex) {
@@ -1815,7 +1815,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   );
                 }
 
-                throw lastError || new Error("All Antigravity endpoints failed");
+                const endpointType = headerStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
+                throw lastError || new Error(`All ${endpointType} endpoints failed (headerStyle=${headerStyle})`);
               }
 
               continue;
