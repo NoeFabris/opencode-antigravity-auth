@@ -100,7 +100,7 @@ ANTIGRAVITY_LOGIN_PROXY=http://localhost:8080 opencode auth login
 # - POST to Antigravity loadCodeAssist endpoints
 
 # Make a test request
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5
+opencode run "Hello" --model=google/claude-sonnet-4-5
 
 # Proxy logs should show API traffic
 ```
