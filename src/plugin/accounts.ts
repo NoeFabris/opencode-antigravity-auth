@@ -4,9 +4,26 @@ import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
 import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
+import { ANTIGRAVITY_VERSION } from "../constants";
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
 export type { AccountSelectionStrategy } from "./config/schema";
+
+/**
+ * Update fingerprint userAgent to current version if outdated.
+ * Extracts platform/arch from existing userAgent and rebuilds with current version.
+ */
+function updateFingerprintVersion(fingerprint: Fingerprint): Fingerprint {
+  const match = fingerprint.userAgent.match(/^antigravity\/[\d.]+ (.+)$/);
+  if (match) {
+    const platformArch = match[1];
+    const expectedUserAgent = `antigravity/${ANTIGRAVITY_VERSION} ${platformArch}`;
+    if (fingerprint.userAgent !== expectedUserAgent) {
+      return { ...fingerprint, userAgent: expectedUserAgent };
+    }
+  }
+  return fingerprint;
+}
 
 export type RateLimitReason = 
   | "QUOTA_EXHAUSTED"
@@ -284,8 +301,10 @@ export class AccountManager {
             coolingDownUntil: acc.coolingDownUntil,
             cooldownReason: acc.cooldownReason,
             touchedForQuota: {},
-            // Use stored fingerprint or generate new one for rate limit mitigation
-            fingerprint: acc.fingerprint ?? generateFingerprint(),
+            // Use stored fingerprint (with updated version) or generate new one
+            fingerprint: acc.fingerprint
+              ? updateFingerprintVersion(acc.fingerprint)
+              : generateFingerprint(),
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
