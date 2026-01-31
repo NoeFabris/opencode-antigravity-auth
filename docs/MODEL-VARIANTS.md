@@ -9,7 +9,7 @@ OpenCode's variant system allows you to configure thinking budget dynamically in
 When you define a model with `variants`, OpenCode shows variant options in the model picker. Selecting a variant passes the `providerOptions` to the plugin, which extracts the thinking configuration.
 
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
+opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
 ```
 
 ---
@@ -63,12 +63,30 @@ Gemini 3 models use string-based thinking levels. Available levels differ by mod
 
 ```json
 {
-  "antigravity-gemini-3-pro": {
-    "name": "Gemini 3 Pro (Antigravity)",
+  "gemini-3-pro": {
+    "name": "Gemini 3 Pro",
     "limit": { "context": 1048576, "output": 65535 },
     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
     "variants": {
       "low": { "thinkingLevel": "low" },
+      "high": { "thinkingLevel": "high" }
+    }
+  }
+}
+```
+
+### Gemini 3 Flash Example
+
+```json
+{
+  "gemini-3-flash": {
+    "name": "Gemini 3 Flash",
+    "limit": { "context": 1048576, "output": 65536 },
+    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+    "variants": {
+      "minimal": { "thinkingLevel": "minimal" },
+      "low": { "thinkingLevel": "low" },
+      "medium": { "thinkingLevel": "medium" },
       "high": { "thinkingLevel": "high" }
     }
   }
@@ -108,7 +126,7 @@ Claude models use token-based thinking budgets:
 
 ```json
 {
-  "antigravity-claude-sonnet-4-5-thinking": {
+  "claude-sonnet-4-5-thinking": {
     "name": "Claude Sonnet 4.5 Thinking",
     "limit": { "context": 200000, "output": 64000 },
     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
@@ -152,17 +170,21 @@ For Gemini 3 models, the old `thinkingBudget` format is still supported but depr
 
 ## Backward Compatibility
 
-Legacy tier-suffixed models still work:
+Legacy model names still work:
 
 - `antigravity-claude-sonnet-4-5-thinking-low`
 - `antigravity-claude-sonnet-4-5-thinking-medium`
 - `antigravity-claude-sonnet-4-5-thinking-high`
 - `antigravity-gemini-3-pro-low`
 - `antigravity-gemini-3-pro-high`
+- `gemini-3-pro-low`
+- `gemini-3-flash-medium`
 
-However, **we recommend using variants** for:
+However, **we recommend using simplified model names with variants** for:
 
-- **Cleaner model picker** — 4 models instead of 12+
+- **Cleaner model picker** — 7 models instead of 12+
+- **Simpler config** — No need to configure both `antigravity-` and `-preview` versions
+- **Automatic quota fallback** — Plugin handles model name transformation
 - **Flexible budgets** — Define any budget, not just preset tiers
 - **Future-proof** — Works with OpenCode's native variant system
 

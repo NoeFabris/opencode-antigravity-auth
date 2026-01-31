@@ -132,6 +132,10 @@ export class ProactiveRefreshQueue {
     }
 
     return this.accountManager.getAccounts().filter((account) => {
+      // Skip disabled accounts - they shouldn't receive proactive refresh
+      if (account.enabled === false) {
+        return false;
+      }
       // Only refresh if not already expired (let the main flow handle expired tokens)
       if (this.isExpired(account)) {
         return false;

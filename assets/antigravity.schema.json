@@ -250,30 +250,6 @@
       "default": true,
       "type": "boolean",
       "description": "Enable automatic plugin updates. Env: OPENCODE_ANTIGRAVITY_AUTO_UPDATE=1"
-    },
-    "web_search": {
-      "type": "object",
-      "properties": {
-        "default_mode": {
-          "default": "off",
-          "type": "string",
-          "enum": [
-            "auto",
-            "off"
-          ]
-        },
-        "grounding_threshold": {
-          "default": 0.3,
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        }
-      },
-      "required": [
-        "default_mode",
-        "grounding_threshold"
-      ],
-      "additionalProperties": false
     }
   },
   "additionalProperties": false
