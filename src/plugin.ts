@@ -1909,6 +1909,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         "error"
                       );
                       
+                      console.error(`\n⚠️  Account verification required for ${accountEmail}`);
+                      if (verifyUrl) {
+                        console.error(`   Verify at: ${verifyUrl}`);
+                      }
+                      console.error(`   Cooldown: ${cooldownFormatted}`);
+                      console.error(`   After verifying, run: opencode auth login > select account > "Clear verification block"\n`);
+                      
                       log.warn("Account verification required", { 
                         email: accountEmail, 
                         url: verifyUrl, 
@@ -2315,6 +2322,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       acc.enabled = acc.enabled === false;
                       await saveAccounts(existingStorage);
                       console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
+                    }
+                  }
+                  if (menuResult.clearVerificationAccountIndex !== undefined) {
+                    const acc = existingStorage.accounts[menuResult.clearVerificationAccountIndex];
+                    if (acc && acc.cooldownReason === "verification-required") {
+                      delete acc.coolingDownUntil;
+                      delete acc.cooldownReason;
+                      acc.verificationAttemptCount = 0;
+                      delete acc.verificationUrl;
+                      delete acc.verificationUrlCapturedAt;
+                      await saveAccounts(existingStorage);
+                      console.log(`\nVerification block cleared for ${acc.email || menuResult.clearVerificationAccountIndex + 1}.\n`);
                     }
                   }
                   continue;
