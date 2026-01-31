@@ -13,6 +13,12 @@ export type { AccountSelectionStrategy } from "./config/schema";
  * Update fingerprint userAgent to current version if outdated.
  * Extracts platform/arch from existing userAgent and rebuilds with current version.
  */
+/**
+ * Updates the fingerprint userAgent to the current Antigravity version if it is outdated.
+ * Extracts platform/arch from the existing userAgent and rebuilds it with the current version string.
+ * @param fingerprint - The device fingerprint to update.
+ * @returns A new fingerprint object with the updated User-Agent, or the original if already current.
+ */
 function updateFingerprintVersion(fingerprint: Fingerprint): Fingerprint {
   const match = fingerprint.userAgent.match(/^antigravity\/[\d.]+ (.+)$/);
   if (match) {

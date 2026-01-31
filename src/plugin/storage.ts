@@ -383,6 +383,16 @@ function mergeFingerprint(existing?: Fingerprint, incoming?: Fingerprint): Finge
   if (existingVersion && incomingVersion) {
     const cmp = compareVersions(existingVersion, incomingVersion);
     if (cmp > 0) return existing;
+    if (cmp < 0) return incoming;
+  }
+
+  // Tie-breaker: use createdAt if both have it.
+  // This prevents stale processes on the same version from overwriting newer fingerprints.
+  const existingCreatedAt = Number.isFinite(existing.createdAt) ? existing.createdAt : undefined;
+  const incomingCreatedAt = Number.isFinite(incoming.createdAt) ? incoming.createdAt : undefined;
+
+  if (existingCreatedAt !== undefined && incomingCreatedAt !== undefined) {
+    return existingCreatedAt >= incomingCreatedAt ? existing : incoming;
   }
 
   // Default to existing behavior (incoming overwrites) when versions are equal/unknown.

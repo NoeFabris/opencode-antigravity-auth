@@ -16,16 +16,31 @@ function debugLog(message: string): void {
   debugLogToFile(message);
 }
 
+/**
+ * Checks if the plugin is running in local development mode based on the configuration.
+ * @param directory - The project root directory.
+ * @returns True if a local dev path is configured.
+ */
 export function isLocalDevMode(directory: string): boolean {
   return getLocalDevPath(directory) !== null;
 }
 
+/**
+ * Sanitizes a JSON string by removing single-line and multi-line comments.
+ * @param json - The raw JSON string.
+ * @returns The sanitized JSON string.
+ */
 function stripJsonComments(json: string): string {
   return json
     .replace(/\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g, (m: string, g: string | undefined) => (g ? "" : m))
     .replace(/,(\s*[}\]])/g, "$1");
 }
 
+/**
+ * Retrieves the potential paths for OpenCode configuration files in priority order.
+ * @param directory - The project root directory.
+ * @returns An array of absolute file paths to check.
+ */
 function getConfigPaths(directory: string): string[] {
   return [
     path.join(directory, ".opencode", "opencode.json"),
@@ -36,6 +51,11 @@ function getConfigPaths(directory: string): string[] {
   ];
 }
 
+/**
+ * Resolves the local development path for the plugin if configured.
+ * @param directory - The project root directory.
+ * @returns The absolute path to the local plugin directory, or null.
+ */
 export function getLocalDevPath(directory: string): string | null {
   for (const configPath of getConfigPaths(directory)) {
     try {
@@ -61,6 +81,11 @@ export function getLocalDevPath(directory: string): string | null {
   return null;
 }
 
+/**
+ * Searches upwards from a starting path for a package.json file matching this package.
+ * @param startPath - The directory or file to start searching from.
+ * @returns The absolute path to the matching package.json, or null.
+ */
 function findPackageJsonUp(startPath: string): string | null {
   try {
     const stat = fs.statSync(startPath);
@@ -87,6 +112,11 @@ function findPackageJsonUp(startPath: string): string | null {
   return null;
 }
 
+/**
+ * Resolves the version of the plugin running in local development mode.
+ * @param directory - The project root directory.
+ * @returns The version string from package.json, or null.
+ */
 export function getLocalDevVersion(directory: string): string | null {
   const localPath = getLocalDevPath(directory);
   if (!localPath) return null;
@@ -109,6 +139,11 @@ export interface PluginEntryInfo {
   configPath: string;
 }
 
+/**
+ * Locates the plugin entry in the OpenCode configuration files.
+ * @param directory - The project root directory.
+ * @returns Information about the found entry (pinned version, config path, etc.).
+ */
 export function findPluginEntry(directory: string): PluginEntryInfo | null {
   for (const configPath of getConfigPaths(directory)) {
     try {
@@ -138,6 +173,12 @@ export function findPluginEntry(directory: string): PluginEntryInfo | null {
   return null;
 }
 
+/**
+ * Resolves the version of the currently installed plugin.
+ * Prioritizes the version from the currently executing code's package.json.
+ * Falls back to the cached installation path if not found in the current path.
+ * @returns The version string or null if it cannot be resolved.
+ */
 export function getCachedVersion(): string | null {
   try {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -165,6 +206,14 @@ export function getCachedVersion(): string | null {
   return null;
 }
 
+/**
+ * Updates a pinned version in an OpenCode configuration file.
+ * Performs a text-based replacement to preserve comments and formatting.
+ * @param configPath - The absolute path to the configuration file.
+ * @param oldEntry - The current plugin entry string to replace.
+ * @param newVersion - The new version string to pin.
+ * @returns True if the file was successfully updated.
+ */
 export function updatePinnedVersion(configPath: string, oldEntry: string, newVersion: string): boolean {
   try {
     const content = fs.readFileSync(configPath, "utf-8");
@@ -215,6 +264,10 @@ export function updatePinnedVersion(configPath: string, oldEntry: string, newVer
   }
 }
 
+/**
+ * Fetches the latest published version of the plugin from the npm registry.
+ * @returns A promise resolving to the latest version string, or null.
+ */
 export async function getLatestVersion(): Promise<string | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), NPM_FETCH_TIMEOUT);
@@ -236,6 +289,12 @@ export async function getLatestVersion(): Promise<string | null> {
   }
 }
 
+/**
+ * Orchestrates an update check for the plugin.
+ * Detects local dev mode, pinned versions, and registry updates.
+ * @param directory - The project root directory.
+ * @returns A result object indicating if an update is available.
+ */
 export async function checkForUpdate(directory: string): Promise<UpdateCheckResult> {
   if (isLocalDevMode(directory)) {
     debugLog("[auto-update-checker] Local dev mode detected, skipping update check");

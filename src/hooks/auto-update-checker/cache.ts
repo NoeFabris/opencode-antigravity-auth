@@ -84,7 +84,13 @@ function removeFromBunInstallCache(packageName: string): boolean {
     let removed = false;
 
     for (const entry of entries) {
-      if (!entry.name.startsWith(packageName)) continue;
+      // Stricter matching: only remove if it's the exact package name or starts with name@ (versioned)
+      // This prevents removing "opencode-antigravity-auth-extra" when clearing "opencode-antigravity-auth"
+      const isMatch =
+        entry.name === packageName || entry.name.startsWith(`${packageName}@`);
+
+      if (!isMatch) continue;
+
       const fullPath = path.join(cacheDir, entry.name);
       try {
         fs.rmSync(fullPath, { recursive: true, force: true });
