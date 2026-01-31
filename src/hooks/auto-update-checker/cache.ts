@@ -153,9 +153,9 @@ export function invalidatePackage(packageName: string = PACKAGE_NAME): boolean {
       }
     }
 
-    lockRemoved =
-      removeFromBunLockAt(path.join(CACHE_DIR, "bun.lock"), packageName) ||
-      removeFromBunLockAt(path.join(configDir, "bun.lock"), packageName);
+    const cacheLockRemoved = removeFromBunLockAt(path.join(CACHE_DIR, "bun.lock"), packageName);
+    const configLockRemoved = removeFromBunLockAt(path.join(configDir, "bun.lock"), packageName);
+    lockRemoved = cacheLockRemoved || configLockRemoved;
 
     // Some environments (notably Bun-based plugin runners) may keep stale copies of packages
     // in Bun's global install cache. Best-effort removal helps ensure updated versions are used.

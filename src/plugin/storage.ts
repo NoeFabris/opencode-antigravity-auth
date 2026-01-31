@@ -428,6 +428,11 @@ export function deduplicateAccountsByEmail<
   return result;
 }
 
+/**
+ * Migrates account storage from V1 schema to V2.
+ * @param v1 - The storage object in V1 format.
+ * @returns The migrated V2 storage object.
+ */
 function migrateV1ToV2(v1: AccountStorageV1): AccountStorage {
   return {
     version: 2,
@@ -459,6 +464,11 @@ function migrateV1ToV2(v1: AccountStorageV1): AccountStorage {
   };
 }
 
+/**
+ * Migrates account storage from V2 schema to V3.
+ * @param v2 - The storage object in V2 format.
+ * @returns The migrated V3 storage object.
+ */
 export function migrateV2ToV3(v2: AccountStorage): AccountStorageV3 {
   return {
     version: 3,
@@ -495,6 +505,11 @@ export function migrateV2ToV3(v2: AccountStorage): AccountStorageV3 {
   };
 }
 
+/**
+ * Asynchronously loads account data from the persistent storage file.
+ * Handles schema migration automatically if an older version is detected.
+ * @returns A promise resolving to the storage object or null if not found.
+ */
 export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   try {
     const path = getStoragePath();
@@ -582,6 +597,11 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   }
 }
 
+/**
+ * Asynchronously saves account data to the persistent storage file.
+ * Uses a temporary file and atomic rename (plus locking) to ensure data integrity.
+ * @param storage - The storage object to save.
+ */
 export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
   const path = getStoragePath();
   const configDir = dirname(path);
