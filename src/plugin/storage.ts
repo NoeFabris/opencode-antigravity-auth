@@ -306,6 +306,11 @@ function mergeAccountStorage(
   };
 }
 
+/**
+ * Parses the Antigravity version number from a User-Agent string.
+ * @param userAgent - The User-Agent string to parse.
+ * @returns An array of version parts [major, minor, patch] or null if not found.
+ */
 function parseAntigravityVersion(userAgent: string | undefined): number[] | null {
   if (!userAgent) return null;
   const match = userAgent.match(/\bantigravity\/(\d+(?:\.\d+)*)\b/i);
@@ -315,6 +320,12 @@ function parseAntigravityVersion(userAgent: string | undefined): number[] | null
   return parts;
 }
 
+/**
+ * Compares two version arrays.
+ * @param a - The first version array.
+ * @param b - The second version array.
+ * @returns 1 if a > b, -1 if a < b, 0 if equal.
+ */
 function compareVersions(a: number[], b: number[]): number {
   const len = Math.max(a.length, b.length);
   for (let i = 0; i < len; i++) {
@@ -325,6 +336,13 @@ function compareVersions(a: number[], b: number[]): number {
   return 0;
 }
 
+/**
+ * Merges two device fingerprints, prioritizing the one with the newer Antigravity version.
+ * This prevents stale processes from downgrading account fingerprints.
+ * @param existing - The current fingerprint in storage.
+ * @param incoming - The new fingerprint being saved.
+ * @returns The preferred fingerprint.
+ */
 function mergeFingerprint(existing?: Fingerprint, incoming?: Fingerprint): Fingerprint | undefined {
   if (!incoming) return existing;
   if (!existing) return incoming;

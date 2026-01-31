@@ -255,6 +255,13 @@ export class AccountManager {
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private savePromiseResolvers: Array<() => void> = [];
 
+  /**
+   * Loads account pool from disk and performs proactive fingerprint version migration.
+   * Ensures that any outdated User-Agent strings are updated and persisted immediately
+   * to avoid race conditions with debounced saves.
+   * @param authFallback - Optional fallback auth details.
+   * @returns A promise resolving to a new AccountManager instance.
+   */
   static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
     const stored = await loadAccounts();
 

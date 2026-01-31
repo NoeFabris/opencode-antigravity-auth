@@ -34,15 +34,32 @@ opencode auth login
 This almost always means an outdated Antigravity `User-Agent` is still being used.
 
 1) Stop any running OpenCode processes (stale processes can overwrite your accounts file):
+
+**macOS/Linux:**
 ```bash
 pkill -f opencode || true
 ```
 
+**Windows (PowerShell):**
+```powershell
+Stop-Process -Name "opencode" -Force -ErrorAction SilentlyContinue
+```
+
 2) Clear the plugin caches and re-login:
+
+**macOS/Linux:**
 ```bash
 rm -f ~/.config/opencode/antigravity-accounts.json
 rm -rf ~/.cache/opencode/node_modules/opencode-antigravity-auth
 rm -rf ~/.bun/install/cache/opencode-antigravity-auth*
+opencode auth login
+```
+
+**Windows (PowerShell):**
+```powershell
+Remove-Item "$env:APPDATA\opencode\antigravity-accounts.json" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\opencode\Cache\node_modules\opencode-antigravity-auth" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.bun\install\cache\opencode-antigravity-auth*" -Recurse -Force -ErrorAction SilentlyContinue
 opencode auth login
 ```
 

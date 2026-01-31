@@ -3,7 +3,14 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { CACHE_DIR, PACKAGE_NAME } from "./constants";
 
+/**
+ * Resolves the OpenCode configuration directory path based on the operating system.
+ * @returns The absolute path to the opencode configuration directory.
+ */
 function getOpencodeConfigDir(): string {
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "opencode");
+  }
   const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
   return path.join(xdgConfig, "opencode");
 }
@@ -21,6 +28,12 @@ function stripTrailingCommas(json: string): string {
   return json.replace(/,(\s*[}\]])/g, "$1");
 }
 
+/**
+ * Removes a package entry from a Bun lockfile at a specific path.
+ * @param lockPath - The absolute path to the bun.lock file.
+ * @param packageName - The name of the package to remove.
+ * @returns True if the lockfile was modified and saved.
+ */
 function removeFromBunLockAt(lockPath: string, packageName: string): boolean {
   if (!fs.existsSync(lockPath)) return false;
 
@@ -50,6 +63,11 @@ function removeFromBunLockAt(lockPath: string, packageName: string): boolean {
   }
 }
 
+/**
+ * Clears the Bun global install cache for a specific package.
+ * @param packageName - The name of the package to purge from the cache.
+ * @returns True if any cache entries were successfully removed.
+ */
 function removeFromBunInstallCache(packageName: string): boolean {
   const cacheDir =
     process.env.BUN_INSTALL_CACHE_DIR ||
@@ -81,6 +99,12 @@ function removeFromBunInstallCache(packageName: string): boolean {
   }
 }
 
+/**
+ * Forcefully invalidates (removes) a package from all known OpenCode and Bun caches.
+ * Targets node_modules, package.json dependencies, lockfiles, and the Bun global install cache.
+ * @param packageName - The name of the package to invalidate (defaults to PACKAGE_NAME).
+ * @returns True if any cache entry was removed or modified.
+ */
 export function invalidatePackage(packageName: string = PACKAGE_NAME): boolean {
   try {
     const cachePkgDir = path.join(CACHE_DIR, "node_modules", packageName);
@@ -149,6 +173,9 @@ export function invalidatePackage(packageName: string = PACKAGE_NAME): boolean {
   }
 }
 
+/**
+ * @deprecated Use invalidatePackage instead.
+ */
 export function invalidateCache(): boolean {
   console.warn("[auto-update-checker] WARNING: invalidateCache is deprecated, use invalidatePackage");
   return invalidatePackage();
