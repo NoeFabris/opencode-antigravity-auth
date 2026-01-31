@@ -420,7 +420,7 @@ async function persistAccountPool(
       refreshToken: parts.refreshToken,
       projectId: parts.projectId ?? existing.projectId,
       managedProjectId: parts.managedProjectId ?? existing.managedProjectId,
-      proxyUrl: proxyUrl ?? existing.proxyUrl,
+      proxyUrl: proxyUrl !== undefined ? proxyUrl : existing.proxyUrl,
       lastUsed: now,
     };
     

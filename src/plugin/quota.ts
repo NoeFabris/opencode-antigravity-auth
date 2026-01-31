@@ -326,14 +326,14 @@ export async function checkAccountsQuota(
 
     try {
       if (accessTokenExpired(auth)) {
-        const refreshed = await refreshAccessToken(auth, client, providerId);
+        const refreshed = await refreshAccessToken(auth, client, providerId, account.proxyUrl);
         if (!refreshed) {
           throw new Error("Token refresh failed");
         }
         auth = refreshed;
       }
 
-      const projectContext = await ensureProjectContext(auth);
+      const projectContext = await ensureProjectContext(auth, account.proxyUrl);
       auth = projectContext.auth;
       const updatedAccount = applyAccountUpdates(account, auth);
 
