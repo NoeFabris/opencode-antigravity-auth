@@ -4,6 +4,10 @@ import {
   readFileSync,
   writeFileSync,
   appendFileSync,
+  mkdirSync,
+  renameSync,
+  copyFileSync,
+  unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -237,21 +241,73 @@ function getConfigDir(): string {
 }
 
 /**
- * Gets the storage path, checking legacy Windows location for migration.
- * If the new path doesn't exist but the legacy path does, returns the legacy path.
+ * Migrates config from legacy Windows location to the new path.
+ * Moves the file if legacy exists and new doesn't.
+ * Returns true if migration was performed.
+ */
+function migrateLegacyWindowsConfig(): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  const newPath = join(getConfigDir(), "antigravity-accounts.json");
+  const legacyPath = join(
+    getLegacyWindowsConfigDir(),
+    "antigravity-accounts.json",
+  );
+
+  // Only migrate if legacy exists and new doesn't
+  if (!existsSync(legacyPath) || existsSync(newPath)) {
+    return false;
+  }
+
+  try {
+    // Ensure new config directory exists
+    const newConfigDir = getConfigDir();
+
+    mkdirSync(newConfigDir, { recursive: true });
+
+    // Try rename first (atomic, but fails across filesystems)
+    try {
+      renameSync(legacyPath, newPath);
+      log.info("Migrated Windows config via rename", { from: legacyPath, to: newPath });
+    } catch {
+      // Fallback: copy then delete (for cross-filesystem moves)
+      copyFileSync(legacyPath, newPath);
+      unlinkSync(legacyPath);
+      log.info("Migrated Windows config via copy+delete", { from: legacyPath, to: newPath });
+    }
+
+    return true;
+  } catch (error) {
+    log.warn("Failed to migrate legacy Windows config, will use legacy path", {
+      legacyPath,
+      newPath,
+      error: String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * Gets the storage path, migrating from legacy Windows location if needed.
+ * On Windows, attempts to move legacy config to new path for alignment.
  */
 function getStoragePathWithMigration(): string {
   const newPath = join(getConfigDir(), "antigravity-accounts.json");
 
-  // On Windows, check for legacy %APPDATA% path if new path doesn't exist
+  // On Windows, attempt to migrate legacy config to new location
   if (process.platform === "win32") {
+    migrateLegacyWindowsConfig();
+
+    // If migration failed and legacy still exists, fall back to it
     if (!existsSync(newPath)) {
       const legacyPath = join(
         getLegacyWindowsConfigDir(),
         "antigravity-accounts.json",
       );
       if (existsSync(legacyPath)) {
-        log.info("Using legacy Windows config path for migration", {
+        log.info("Using legacy Windows config path (migration failed)", {
           legacyPath,
           newPath,
         });

@@ -66,6 +66,11 @@ function getCapacityBackoffDelay(consecutiveFailures: number): number {
 const warmupAttemptedSessionIds = new Set<string>();
 const warmupSucceededSessionIds = new Set<string>();
 
+// Track if this plugin instance is running in a child session (subagent, background task)
+// Used to filter toasts based on toast_scope config
+let isChildSession = false;
+let childSessionParentID: string | undefined = undefined;
+
 const log = createLogger("plugin");
 
 // Module-level toast debounce to persist across requests (fixes toast spam)
@@ -834,6 +839,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
     // Forward to update checker
     await updateChecker.event(input);
     
+    // Track if this is a child session (subagent, background task)
+    // This is used to filter toasts based on toast_scope config
+    if (input.event.type === "session.created") {
+      const props = input.event.properties as { info?: { parentID?: string } } | undefined;
+      if (props?.info?.parentID) {
+        isChildSession = true;
+        childSessionParentID = props.info.parentID;
+        log.debug("child-session-detected", { parentID: props.info.parentID });
+      } else {
+        // Reset for root sessions - important when plugin instance is reused
+        isChildSession = false;
+        childSessionParentID = undefined;
+        log.debug("root-session-detected", {});
+      }
+    }
+    
     // Handle session recovery
     if (sessionRecovery && input.event.type === "session.error") {
       const props = input.event.properties as Record<string, unknown> | undefined;
@@ -862,15 +883,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
             query: { directory },
           }).catch(() => {});
           
-          // Show success toast
+          // Show success toast (respects toast_scope for child sessions)
           const successToast = getRecoverySuccessToast();
-          await client.tui.showToast({
-            body: {
-              title: successToast.title,
-              message: successToast.message,
-              variant: "success",
-            },
-          }).catch(() => {});
+          log.debug("recovery-toast", { ...successToast, isChildSession, toastScope: config.toast_scope });
+          if (!(config.toast_scope === "root_only" && isChildSession)) {
+            await client.tui.showToast({
+              body: {
+                title: successToast.title,
+                message: successToast.message,
+                variant: "success",
+              },
+            }).catch(() => {});
+          }
         }
       }
     }
@@ -1052,11 +1076,21 @@ export const createAntigravityPlugin = (providerId: string) => async (
           // Use while(true) loop to handle rate limits with backoff
           // This ensures we wait and retry when all accounts are rate-limited
           const quietMode = config.quiet_mode;
+          const toastScope = config.toast_scope;
 
-          // Helper to show toast without blocking on abort (respects quiet_mode)
+          // Helper to show toast without blocking on abort (respects quiet_mode and toast_scope)
           const showToast = async (message: string, variant: "info" | "warning" | "success" | "error") => {
+            // Always log to debug regardless of toast filtering
+            log.debug("toast", { message, variant, isChildSession, toastScope });
+            
             if (quietMode) return;
             if (abortSignal?.aborted) return;
+            
+            // Filter toasts for child sessions when toast_scope is "root_only"
+            if (toastScope === "root_only" && isChildSession) {
+              log.debug("toast-suppressed-child-session", { message, variant, parentID: childSessionParentID });
+              return;
+            }
             
             if (variant === "warning" && message.toLowerCase().includes("rate")) {
               if (!shouldShowRateLimitToast(message)) {

@@ -22,6 +22,16 @@ export const AccountSelectionStrategySchema = z.enum(['sticky', 'round-robin', '
 export type AccountSelectionStrategy = z.infer<typeof AccountSelectionStrategySchema>;
 
 /**
+ * Toast notification scope for controlling which sessions show toasts.
+ * 
+ * - `root_only` (default): Only show toasts for root sessions (no parentID).
+ *   Subagents and background tasks won't show toast notifications.
+ * - `all`: Show toasts for all sessions including subagents and background tasks.
+ */
+export const ToastScopeSchema = z.enum(['root_only', 'all']);
+export type ToastScope = z.infer<typeof ToastScopeSchema>;
+
+/**
  * Scheduling mode for rate limit behavior.
  * 
  * - `cache_first`: Wait for same account to recover (preserves prompt cache). Default.
@@ -66,6 +76,19 @@ export const AntigravityConfigSchema = z.object({
    * @default false
    */
   quiet_mode: z.boolean().default(false),
+  
+  /**
+   * Control which sessions show toast notifications.
+   * 
+   * - `root_only` (default): Only root sessions show toasts.
+   *   Subagents and background tasks will be silent (less spam).
+   * - `all`: All sessions show toasts including subagents and background tasks.
+   * 
+   * Debug logging captures all toasts regardless of this setting.
+   * Env override: OPENCODE_ANTIGRAVITY_TOAST_SCOPE=all
+   * @default "root_only"
+   */
+  toast_scope: ToastScopeSchema.default('root_only'),
   
   /**
    * Enable debug logging to file.
@@ -404,6 +427,7 @@ export type SignatureCacheConfig = z.infer<typeof SignatureCacheConfigSchema>;
  */
 export const DEFAULT_CONFIG: AntigravityConfig = {
   quiet_mode: false,
+  toast_scope: 'root_only',
   debug: false,
   keep_thinking: false,
   session_recovery: true,

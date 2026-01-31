@@ -82,13 +82,17 @@ export const GEMINI_CLI_HEADERS = {
   "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
 } as const;
 
-const ANTIGRAVITY_USER_AGENTS = [
-  "antigravity/1.11.5 windows/amd64",
-  "antigravity/1.11.4 darwin/arm64",
-  "antigravity/1.11.3 linux/amd64",
-  "antigravity/1.10.9 windows/amd64",
-  "antigravity/1.10.8 darwin/amd64",
-] as const;
+/**
+ * Antigravity version string - SINGLE SOURCE OF TRUTH.
+ * Update this value when a new version is needed.
+ * Used by both constants.ts and fingerprint.ts
+ */
+export const ANTIGRAVITY_VERSION = "1.15.8" as const;
+
+const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "linux/amd64", "darwin/amd64", "linux/arm64"] as const;
+
+// Derive user agents from version (keeps them in sync automatically)
+const ANTIGRAVITY_USER_AGENTS = ANTIGRAVITY_PLATFORMS.map(platform => `antigravity/${ANTIGRAVITY_VERSION} ${platform}`);
 
 const ANTIGRAVITY_API_CLIENTS = [
   "google-cloud-sdk vscode_cloudshelleditor/0.1",
