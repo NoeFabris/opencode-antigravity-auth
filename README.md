@@ -394,7 +394,7 @@ If you encounter errors during a session:
   },
   "categories": {
     "visual-engineering": { "model": "google/antigravity-gemini-3-pro" },
-    "document-writer": { "model": "google/antigravity-gemini-3-flash" }
+    "writing": { "model": "google/antigravity-gemini-3-flash" }
   }
 }
 ```
@@ -535,7 +535,7 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
   },
   "categories": {
     "visual-engineering": { "model": "google/gemini-3-pro" },
-    "document-writer": { "model": "google/gemini-3-flash" }
+    "writing": { "model": "google/gemini-3-flash" }
   }
 }
 ```
