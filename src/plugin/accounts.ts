@@ -142,108 +142,56 @@ export function calculateBackoffMs(
 export type BaseQuotaKey = "claude" | "gemini-antigravity" | "gemini-cli";
 export type QuotaKey = BaseQuotaKey | `${BaseQuotaKey}:${string}`;
 
+/**
+ * Represents an account managed by the AccountManager.
+ * Includes auth details, usage metadata, and device fingerprint.
+ */
 export interface ManagedAccount {
+  /** The unique index of the account in the pool. */
   index: number;
+  /** The account email address. */
   email?: string;
+  /** Timestamp of when the account was added. */
   addedAt: number;
+  /** Timestamp of when the account was last used. */
   lastUsed: number;
-  parts: RefreshParts;
+  /** Parsed parts of the OAuth refresh details. */
+  parts: {
+    /** The OAuth refresh token. */
+    refreshToken: string;
+    /** The Google Cloud project ID. */
+    projectId?: string;
+    /** The managed project ID. */
+    managedProjectId?: string;
+  };
+  /** The current access token. */
   access?: string;
+  /** Timestamp of when the access token expires. */
   expires?: number;
+  /** Flag indicating if the account is enabled. */
   enabled: boolean;
+  /** Map of rate limit reset times per provider/family. */
   rateLimitResetTimes: RateLimitStateV3;
-  lastSwitchReason?: "rate-limit" | "initial" | "rotation";
+  /** The reason the account was last switched. */
+  lastSwitchReason?: string;
+  /** Timestamp until which the account is cooling down. */
   coolingDownUntil?: number;
+  /** The reason the account is cooling down. */
   cooldownReason?: CooldownReason;
-  touchedForQuota: Record<string, number>;
-  consecutiveFailures?: number;
-  /** Timestamp of last failure for TTL-based reset of consecutiveFailures */
-  lastFailureTime?: number;
-  /** Per-account device fingerprint for rate limit mitigation */
-  fingerprint?: import("./fingerprint").Fingerprint;
-  /** History of previous fingerprints for this account */
+  /** Map of touch events for quota tracking. */
+  touchedForQuota: Record<string, boolean>;
+  /** The device fingerprint assigned to this account. */
+  fingerprint: Fingerprint;
+  /** History of previous fingerprints for this account. */
   fingerprintHistory?: FingerprintVersion[];
 }
 
-function nowMs(): number {
-  return Date.now();
-}
-
-function clampNonNegativeInt(value: unknown, fallback: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return fallback;
-  }
-  return value < 0 ? 0 : Math.floor(value);
-}
-
-function getQuotaKey(family: ModelFamily, headerStyle: HeaderStyle, model?: string | null): QuotaKey {
-  if (family === "claude") {
-    return "claude";
-  }
-  const base = headerStyle === "gemini-cli" ? "gemini-cli" : "gemini-antigravity";
-  if (model) {
-    return `${base}:${model}`;
-  }
-  return base;
-}
-
-function isRateLimitedForQuotaKey(account: ManagedAccount, key: QuotaKey): boolean {
-  const resetTime = account.rateLimitResetTimes[key];
-  return resetTime !== undefined && nowMs() < resetTime;
-}
-
-function isRateLimitedForFamily(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean {
-  if (family === "claude") {
-    return isRateLimitedForQuotaKey(account, "claude");
-  }
-  
-  const antigravityIsLimited = isRateLimitedForHeaderStyle(account, family, "antigravity", model);
-  const cliIsLimited = isRateLimitedForHeaderStyle(account, family, "gemini-cli", model);
-  
-  return antigravityIsLimited && cliIsLimited;
-}
-
-function isRateLimitedForHeaderStyle(account: ManagedAccount, family: ModelFamily, headerStyle: HeaderStyle, model?: string | null): boolean {
-  clearExpiredRateLimits(account);
-  
-  if (family === "claude") {
-    return isRateLimitedForQuotaKey(account, "claude");
-  }
-
-  // Check model-specific quota first if provided
-  if (model) {
-    const modelKey = getQuotaKey(family, headerStyle, model);
-    if (isRateLimitedForQuotaKey(account, modelKey)) {
-      return true;
-    }
-  }
-
-  // Then check base family quota
-  const baseKey = getQuotaKey(family, headerStyle);
-  return isRateLimitedForQuotaKey(account, baseKey);
-}
-
-function clearExpiredRateLimits(account: ManagedAccount): void {
-  const now = nowMs();
-  const keys = Object.keys(account.rateLimitResetTimes) as QuotaKey[];
-  for (const key of keys) {
-    const resetTime = account.rateLimitResetTimes[key];
-    if (resetTime !== undefined && now >= resetTime) {
-      delete account.rateLimitResetTimes[key];
-    }
-  }
-}
-
 /**
- * In-memory multi-account manager with sticky account selection.
- *
- * Uses the same account until it hits a rate limit (429), then switches.
- * Rate limits are tracked per-model-family (claude/gemini) so an account
- * rate-limited for Claude can still be used for Gemini.
- *
- * Source of truth for the pool is `antigravity-accounts.json`.
+ * Manages a pool of Google accounts for OAuth authentication and rate limit distribution.
+ * Handles persistence, account rotation, and device fingerprinting.
  */
 export class AccountManager {
+
   private accounts: ManagedAccount[] = [];
   private cursor = 0;
   private currentAccountIndexByFamily: Record<ModelFamily, number> = {

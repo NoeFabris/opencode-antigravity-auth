@@ -151,11 +151,140 @@ export interface AccountMetadataV1 {
   lastSwitchReason?: "rate-limit" | "initial" | "rotation";
 }
 
+/**
+ * Defines the structure for account storage version 1.
+ */
 export interface AccountStorageV1 {
+  /** The version number of the storage schema. */
   version: 1;
-  accounts: AccountMetadataV1[];
+  /** The list of accounts stored. */
+  accounts: Array<{
+    /** The account email address. */
+    email: string;
+    /** The OAuth refresh token. */
+    refreshToken: string;
+    /** The Google Cloud project ID. */
+    projectId?: string;
+    /** The managed project ID. */
+    managedProjectId?: string;
+    /** Timestamp of when the account was added. */
+    addedAt: number;
+    /** Timestamp of when the account was last used. */
+    lastUsed: number;
+    /** The reason the account was last switched. */
+    lastSwitchReason?: string;
+    /** Flag indicating if the account is rate limited. */
+    isRateLimited?: boolean;
+    /** Timestamp of when the rate limit resets. */
+    rateLimitResetTime?: number;
+  }>;
+  /** The index of the currently active account. */
   activeIndex: number;
 }
+
+/**
+ * Defines the state of rate limits for different model families.
+ */
+export interface RateLimitState {
+  /** Reset time for Claude models. */
+  claude?: number;
+  /** Reset time for Gemini models. */
+  gemini?: number;
+}
+
+/**
+ * Metadata for an account in version 2 storage.
+ */
+export interface AccountMetadata {
+  /** The account email address. */
+  email: string;
+  /** The OAuth refresh token. */
+  refreshToken: string;
+  /** The Google Cloud project ID. */
+  projectId?: string;
+  /** The managed project ID. */
+  managedProjectId?: string;
+  /** Timestamp of when the account was added. */
+  addedAt: number;
+  /** Timestamp of when the account was last used. */
+  lastUsed: number;
+  /** The reason the account was last switched. */
+  lastSwitchReason?: string;
+  /** The current rate limit state. */
+  rateLimitResetTimes?: RateLimitState;
+}
+
+/**
+ * Defines the structure for account storage version 2.
+ */
+export interface AccountStorage {
+  /** The version number of the storage schema. */
+  version: 2;
+  /** The list of accounts stored. */
+  accounts: AccountMetadata[];
+  /** The index of the currently active account. */
+  activeIndex: number;
+}
+
+/**
+ * Defines the state of rate limits for different model families in version 3.
+ */
+export interface RateLimitStateV3 {
+  /** Reset time for Claude models. */
+  claude?: number;
+  /** Reset time for Gemini models using the Antigravity provider. */
+  "gemini-antigravity"?: number;
+  /** Reset time for Gemini models using the Gemini CLI provider. */
+  "gemini-cli"?: number;
+}
+
+/**
+ * Metadata for an account in version 3 storage.
+ */
+export interface AccountMetadataV3 {
+  /** The account email address. */
+  email: string;
+  /** The OAuth refresh token. */
+  refreshToken: string;
+  /** The Google Cloud project ID. */
+  projectId?: string;
+  /** The managed project ID. */
+  managedProjectId?: string;
+  /** Timestamp of when the account was added. */
+  addedAt: number;
+  /** Timestamp of when the account was last used. */
+  lastUsed: number;
+  /** The reason the account was last switched. */
+  lastSwitchReason?: string;
+  /** The current rate limit state. */
+  rateLimitResetTimes?: RateLimitStateV3;
+  /** Timestamp until which the account is cooling down. */
+  coolingDownUntil?: number;
+  /** The reason the account is cooling down. */
+  cooldownReason?: string;
+  /** Per-account device fingerprint for rate limit mitigation */
+  fingerprint?: import("./fingerprint").Fingerprint;
+}
+
+/**
+ * Defines the structure for account storage version 3.
+ */
+export interface AccountStorageV3 {
+  /** The version number of the storage schema. */
+  version: 3;
+  /** The list of accounts stored. */
+  accounts: AccountMetadataV3[];
+  /** The index of the currently active account. */
+  activeIndex: number;
+  /** Map of active indices per model family. */
+  activeIndexByFamily?: {
+    /** Active index for Claude models. */
+    claude?: number;
+    /** Active index for Gemini models. */
+    gemini?: number;
+  };
+}
+
 
 export interface AccountMetadata {
   email?: string;
