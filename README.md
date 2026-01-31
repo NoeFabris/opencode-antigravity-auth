@@ -399,7 +399,10 @@ If you encounter errors during a session:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
+    "multimodal-looker": { "model": "google/antigravity-gemini-3-flash" }
+  },
+  "categories": {
+    "visual-engineering": { "model": "google/antigravity-gemini-3-pro" },
     "document-writer": { "model": "google/antigravity-gemini-3-flash" }
   }
 }
