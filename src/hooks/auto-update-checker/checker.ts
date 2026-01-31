@@ -140,16 +140,6 @@ export function findPluginEntry(directory: string): PluginEntryInfo | null {
 
 export function getCachedVersion(): string | null {
   try {
-    if (fs.existsSync(INSTALLED_PACKAGE_JSON)) {
-      const content = fs.readFileSync(INSTALLED_PACKAGE_JSON, "utf-8");
-      const pkg = JSON.parse(content) as PackageJson;
-      if (pkg.version) return pkg.version;
-    }
-  } catch {
-    return null;
-  }
-
-  try {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
     const pkgPath = findPackageJsonUp(currentDir);
     if (pkgPath) {
@@ -159,6 +149,17 @@ export function getCachedVersion(): string | null {
     }
   } catch (err) {
     debugLog(`[auto-update-checker] Failed to resolve version from current directory: ${err}`);
+  }
+
+  // Fallback: use the cached install path (may be stale if multiple installs exist).
+  try {
+    if (fs.existsSync(INSTALLED_PACKAGE_JSON)) {
+      const content = fs.readFileSync(INSTALLED_PACKAGE_JSON, "utf-8");
+      const pkg = JSON.parse(content) as PackageJson;
+      if (pkg.version) return pkg.version;
+    }
+  } catch {
+    return null;
   }
 
   return null;

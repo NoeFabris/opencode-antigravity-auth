@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import lockfile from "proper-lockfile";
 import type { HeaderStyle } from "../constants";
+import type { Fingerprint } from "./fingerprint";
 import { createLogger } from "./logger";
 
 const log = createLogger("storage");
@@ -276,6 +277,7 @@ function mergeAccountStorage(
     if (acc.refreshToken) {
       const existingAcc = accountMap.get(acc.refreshToken);
       if (existingAcc) {
+        const mergedFingerprint = mergeFingerprint(existingAcc.fingerprint, acc.fingerprint);
         accountMap.set(acc.refreshToken, {
           ...existingAcc,
           ...acc,
@@ -287,6 +289,8 @@ function mergeAccountStorage(
             ...acc.rateLimitResetTimes,
           },
           lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
+          // Prevent stale processes from downgrading fingerprints back to an older Antigravity version.
+          fingerprint: mergedFingerprint,
         });
       } else {
         accountMap.set(acc.refreshToken, acc);
@@ -300,6 +304,45 @@ function mergeAccountStorage(
     activeIndex: incoming.activeIndex,
     activeIndexByFamily: incoming.activeIndexByFamily,
   };
+}
+
+function parseAntigravityVersion(userAgent: string | undefined): number[] | null {
+  if (!userAgent) return null;
+  const match = userAgent.match(/\bantigravity\/(\d+(?:\.\d+)*)\b/i);
+  if (!match) return null;
+  const parts = match[1]!.split(".").map((p) => Number.parseInt(p, 10));
+  if (parts.some((n) => !Number.isFinite(n))) return null;
+  return parts;
+}
+
+function compareVersions(a: number[], b: number[]): number {
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    if (av !== bv) return av > bv ? 1 : -1;
+  }
+  return 0;
+}
+
+function mergeFingerprint(existing?: Fingerprint, incoming?: Fingerprint): Fingerprint | undefined {
+  if (!incoming) return existing;
+  if (!existing) return incoming;
+
+  const existingVersion = parseAntigravityVersion(existing.userAgent);
+  const incomingVersion = parseAntigravityVersion(incoming.userAgent);
+
+  // Prefer a parseable Antigravity version when possible.
+  if (existingVersion && !incomingVersion) return existing;
+  if (!existingVersion && incomingVersion) return incoming;
+
+  if (existingVersion && incomingVersion) {
+    const cmp = compareVersions(existingVersion, incomingVersion);
+    if (cmp > 0) return existing;
+  }
+
+  // Default to existing behavior (incoming overwrites) when versions are equal/unknown.
+  return incoming;
 }
 
 export function deduplicateAccountsByEmail<

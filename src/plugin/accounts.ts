@@ -257,6 +257,38 @@ export class AccountManager {
 
   static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
     const stored = await loadAccounts();
+
+    // If fingerprints are outdated (e.g., Antigravity version bumped), update and persist immediately.
+    // This avoids relying on debounced saves (which may not fire before process exit) and reduces
+    // the chance that an older process re-writes stale versions back to disk.
+    if (stored && stored.accounts.length > 0) {
+      let didUpdate = false;
+      const updatedAccounts = stored.accounts.map((acc) => {
+        if (!acc?.fingerprint) {
+          return acc;
+        }
+        const updatedFingerprint = updateFingerprintVersion(acc.fingerprint);
+        if (updatedFingerprint !== acc.fingerprint) {
+          didUpdate = true;
+          return { ...acc, fingerprint: updatedFingerprint };
+        }
+        return acc;
+      });
+
+      if (didUpdate) {
+        try {
+          await saveAccounts({
+            ...stored,
+            accounts: updatedAccounts,
+          });
+        } catch {
+          // best-effort migration; avoid blocking plugin startup
+        }
+      }
+
+      return new AccountManager(authFallback, { ...stored, accounts: updatedAccounts });
+    }
+
     return new AccountManager(authFallback, stored);
   }
 

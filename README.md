@@ -333,9 +333,9 @@ Invalid JSON payload received. Unknown name "parameters" at 'request.tools[0]'
 - Plugin version regression
 
 **Solutions:**
-1. **Update to latest beta:**
+1. **Update to latest plugin:**
    ```json
-   { "plugin": ["opencode-antigravity-auth@beta"] }
+   { "plugin": ["opencode-antigravity-auth@latest"] }
    ```
 
 2. **Disable MCP servers** one-by-one to find the problematic one
@@ -372,10 +372,10 @@ This usually means an MCP tool name starts with a number (for example, a 1mcp ke
 
 ### "All Accounts Rate-Limited" (But Quota Available)
 
-**Cause:** Cascade bug in `clearExpiredRateLimits()` in hybrid mode (fixed in recent beta).
+**Cause:** Cascade bug in `clearExpiredRateLimits()` in hybrid mode (fixed in recent versions).
 
 **Solutions:**
-1. Update to latest beta version
+1. Update to latest plugin version
 2. If persists, delete accounts file and re-authenticate
 3. Try switching `account_selection_strategy` to `"sticky"` in `antigravity.json`
 
@@ -494,7 +494,7 @@ The correct key is `plugin` (singular):
 
 ```json
 {
-  "plugin": ["opencode-antigravity-auth@beta"]
+  "plugin": ["opencode-antigravity-auth@latest"]
 }
 ```
 
@@ -505,7 +505,7 @@ The correct key is `plugin` (singular):
 ### Migrating Accounts Between Machines
 
 When copying `antigravity-accounts.json` to a new machine:
-1. Ensure the plugin is installed: `"plugin": ["opencode-antigravity-auth@beta"]`
+1. Ensure the plugin is installed: `"plugin": ["opencode-antigravity-auth@latest"]`
 2. Copy `~/.config/opencode/antigravity-accounts.json`
 3. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
 
