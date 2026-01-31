@@ -177,7 +177,7 @@ export interface AccountStorage {
   activeIndex: number;
 }
 
-export type CooldownReason = "auth-failure" | "network-error" | "project-error";
+export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "verification-required";
 
 export interface AccountMetadataV3 {
   email?: string;
@@ -191,6 +191,16 @@ export interface AccountMetadataV3 {
   rateLimitResetTimes?: RateLimitStateV3;
   coolingDownUntil?: number;
   cooldownReason?: CooldownReason;
+
+  /** Verification URL from last VALIDATION_REQUIRED error */
+  verificationUrl?: string;
+
+  /** Timestamp when verification URL was captured */
+  verificationUrlCapturedAt?: number;
+
+  /** Count of consecutive verification failures (for progressive cooldown) */
+  verificationAttemptCount?: number;
+
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
   /** Cached soft quota data */
@@ -389,6 +399,10 @@ function mergeAccountStorage(
           // Preserve manually configured projectId/managedProjectId if not in incoming
           projectId: acc.projectId ?? existingAcc.projectId,
           managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
+          // Preserve verification fields if incoming doesn't have them
+          verificationUrl: acc.verificationUrl ?? existingAcc.verificationUrl,
+          verificationUrlCapturedAt: acc.verificationUrlCapturedAt ?? existingAcc.verificationUrlCapturedAt,
+          verificationAttemptCount: acc.verificationAttemptCount ?? existingAcc.verificationAttemptCount,
           rateLimitResetTimes: {
             ...existingAcc.rateLimitResetTimes,
             ...acc.rateLimitResetTimes,

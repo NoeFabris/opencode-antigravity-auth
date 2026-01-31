@@ -2,7 +2,9 @@ import { ANSI } from './ansi';
 import { select, type MenuItem } from './select';
 import { confirm } from './confirm';
 
-export type AccountStatus = 'active' | 'rate-limited' | 'expired' | 'unknown';
+export type AccountStatus = 'active' | 'rate-limited' | 'expired' | 'verification-required' | 'unknown';
+
+type CooldownReason = "auth-failure" | "network-error" | "project-error" | "verification-required";
 
 export interface AccountInfo {
   email?: string;
@@ -12,6 +14,9 @@ export interface AccountInfo {
   status?: AccountStatus;
   isCurrentAccount?: boolean;
   enabled?: boolean;
+  cooldownReason?: CooldownReason;
+  coolingDownUntil?: number;
+  verificationUrl?: string;
 }
 
 export type AuthMenuAction =
@@ -22,7 +27,7 @@ export type AuthMenuAction =
   | { type: 'manage' }
   | { type: 'cancel' };
 
-export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'cancel';
+export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'clear-verification' | 'cancel';
 
 function formatRelativeTime(timestamp: number | undefined): string {
   if (!timestamp) return 'never';
@@ -44,6 +49,7 @@ function getStatusBadge(status: AccountStatus | undefined): string {
     case 'active': return `${ANSI.green}[active]${ANSI.reset}`;
     case 'rate-limited': return `${ANSI.yellow}[rate-limited]${ANSI.reset}`;
     case 'expired': return `${ANSI.red}[expired]${ANSI.reset}`;
+    case 'verification-required': return `${ANSI.magenta}[verification-required]${ANSI.reset}`;
     default: return '';
   }
 }
@@ -96,15 +102,39 @@ export async function showAccountDetails(account: AccountInfo): Promise<AccountA
   console.log(`${ANSI.bold}Account: ${label}${badge ? ' ' + badge : ''}${disabledBadge}${ANSI.reset}`);
   console.log(`${ANSI.dim}Added: ${formatDate(account.addedAt)}${ANSI.reset}`);
   console.log(`${ANSI.dim}Last used: ${formatRelativeTime(account.lastUsed)}${ANSI.reset}`);
+  
+  if (account.verificationUrl) {
+    console.log('');
+    console.log(`${ANSI.yellow}Verification URL:${ANSI.reset}`);
+    console.log(`  ${account.verificationUrl}`);
+  }
+  
   console.log('');
 
+  const options: MenuItem<AccountAction>[] = [
+    { label: 'Back', value: 'back' },
+    { 
+      label: account.enabled === false ? 'Enable account' : 'Disable account', 
+      value: 'toggle', 
+      color: account.enabled === false ? 'green' : 'yellow' 
+    },
+  ];
+  
+  if (account.cooldownReason === 'verification-required') {
+    options.push({
+      label: 'Clear verification block (I verified my account)',
+      value: 'clear-verification',
+      color: 'green',
+    });
+  }
+  
+  options.push(
+    { label: 'Refresh token', value: 'refresh', color: 'cyan' },
+    { label: 'Delete this account', value: 'delete', color: 'red' },
+  );
+
   while (true) {
-    const result = await select([
-      { label: 'Back', value: 'back' as const },
-      { label: account.enabled === false ? 'Enable account' : 'Disable account', value: 'toggle' as const, color: account.enabled === false ? 'green' : 'yellow' },
-      { label: 'Refresh token', value: 'refresh' as const, color: 'cyan' },
-      { label: 'Delete this account', value: 'delete' as const, color: 'red' },
-    ], { 
+    const result = await select(options, { 
       message: 'Account options',
       subtitle: 'Select action'
     });
@@ -116,6 +146,14 @@ export async function showAccountDetails(account: AccountInfo): Promise<AccountA
 
     if (result === 'refresh') {
       const confirmed = await confirm(`Re-authenticate ${label}?`);
+      if (!confirmed) continue;
+    }
+    
+    if (result === 'clear-verification') {
+      const confirmed = await confirm(
+        `Clear verification block for ${label}?\n` +
+        `Only do this if you've already verified the account in your browser.`
+      );
       if (!confirmed) continue;
     }
 

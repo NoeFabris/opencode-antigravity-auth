@@ -603,6 +603,50 @@ async function extractRetryInfoFromBody(response: Response): Promise<RateLimitBo
   }
 }
 
+function getErrorMetadata(parsed: unknown): Record<string, string> | undefined {
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const error = (parsed as { error?: any }).error;
+  const details = error?.details;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      if (detail && typeof detail === "object") {
+        const type = detail["@type"];
+        if (typeof type === "string" && type.includes("google.rpc.ErrorInfo")) {
+          return detail.metadata;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function extractVerificationUrl(parsed: unknown, rawText: string): string | undefined {
+  const metadata = getErrorMetadata(parsed);
+  if (metadata?.verificationUrl) return metadata.verificationUrl;
+  
+  const urlMatch = rawText.match(/https:\/\/accounts[^\s\\"']*/);
+  return urlMatch ? urlMatch[0].replace(/\\u0026/g, "&") : undefined;
+}
+
+function isVerificationRequiredError(
+  parsedBody: unknown, 
+  rawText: string
+): { required: boolean; url?: string } {
+  const { reason } = extractRateLimitBodyInfo(parsedBody);
+  if (reason === "VALIDATION_REQUIRED") {
+    const url = extractVerificationUrl(parsedBody, rawText);
+    return { required: true, url };
+  }
+  
+  if (rawText.includes("verify your account") || 
+      rawText.includes("validation_error_message")) {
+    const url = extractVerificationUrl(parsedBody, rawText);
+    return { required: true, url };
+  }
+  
+  return { required: false };
+}
+
 function formatWaitTime(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const seconds = Math.ceil(ms / 1000);
@@ -615,6 +659,23 @@ function formatWaitTime(ms: number): string {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function buildVerificationErrorMessage(
+  email: string, 
+  url: string | undefined, 
+  cooldown: string
+): string {
+  const urlSection = url 
+    ? `\n\nPlease visit this URL to verify your account:\n${url}`
+    : `\n\nPlease check your email or Google account for verification instructions.`;
+    
+  return `[Antigravity] Account verification required for ${email}.` +
+    urlSection +
+    `\n\nAfter verification, either:` +
+    `\n• Use "opencode auth" > select account > "Clear verification block"` +
+    `\n• Wait for cooldown to expire (${cooldown})` +
+    `\n\nCooldown: ${cooldown}`;
 }
 
 // Progressive rate limit retry delays
@@ -1793,6 +1854,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   getHealthTracker().recordSuccess(account.index);
                   accountManager.markAccountUsed(account.index);
                   
+                  accountManager.clearVerificationStateOnSuccess(account);
+                  
                   void triggerAsyncQuotaRefreshForAccount(
                     accountManager,
                     account.index,
@@ -1818,6 +1881,60 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       );
                       const errorMessage = `[Antigravity Error] Context is too long for this model.\n\nPlease use /compact to reduce context size, then retry your request.\n\nAlternatively, you can:\n- Use /clear to start fresh\n- Use /undo to remove recent messages\n- Switch to a model with larger context window`;
                       return createSyntheticErrorResponse(errorMessage, prepared.requestedModel);
+                    }
+                  }
+
+                  if (response.status === 403) {
+                    const cloned403 = response.clone();
+                    const body403 = await cloned403.text();
+                    
+                    let parsedBody: unknown;
+                    try {
+                      parsedBody = JSON.parse(body403);
+                    } catch {
+                      parsedBody = null;
+                    }
+                    
+                    const verificationCheck = isVerificationRequiredError(parsedBody, body403);
+                    
+                    if (verificationCheck.required) {
+                      const accountEmail = account.email || "unknown account";
+                      const verifyUrl = verificationCheck.url;
+                      
+                      const cooldownMs = accountManager.markVerificationRequired(account, verifyUrl);
+                      const cooldownFormatted = formatWaitTime(cooldownMs);
+                      
+                      await showToast(
+                        `⚠️ Verification required for ${accountEmail} (cooldown: ${cooldownFormatted})`, 
+                        "error"
+                      );
+                      
+                      log.warn("Account verification required", { 
+                        email: accountEmail, 
+                        url: verifyUrl, 
+                        cooldownMs 
+                      });
+                      
+                      const nextAccount = accountManager.getCurrentOrNextForFamily(family);
+                      if (nextAccount) {
+                        shouldSwitchAccount = true;
+                        break; 
+                      }
+                      
+                      const errorMessage = buildVerificationErrorMessage(accountEmail, verifyUrl, cooldownFormatted);
+                      
+                      return new Response(JSON.stringify({
+                        error: {
+                          type: "verification_required",
+                          message: errorMessage,
+                          verification_url: verifyUrl,
+                          account_email: accountEmail,
+                          cooldown_seconds: Math.ceil(cooldownMs / 1000),
+                        }
+                      }), {
+                        status: 403,
+                        headers: { "Content-Type": "application/json" },
+                      });
                     }
                   }
                 }
