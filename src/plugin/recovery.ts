@@ -11,6 +11,7 @@
 
 import type { AntigravityConfig } from "./config";
 import { createLogger } from "./logger";
+import { logToast } from "./debug";
 import type { PluginClient } from "./types";
 import {
   readParts,
@@ -458,6 +459,7 @@ export function createSessionRecoveryHook(
 
       // Show toast notification
       const toastContent = getRecoveryToastContent(errorType);
+      logToast(`${toastContent.title}: ${toastContent.message}`, "warning");
       await client.tui
         .showToast({
           body: {

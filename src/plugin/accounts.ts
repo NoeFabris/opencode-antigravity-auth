@@ -1,9 +1,12 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
-import { loadAccounts, saveAccounts, type AccountStorageV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
+import { loadAccounts, saveAccounts, type AccountStorageV3, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
 import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
+import type { QuotaGroup, QuotaGroupSummary } from "./quota";
+import { getModelFamily } from "./transform/model-resolver";
+import { debugLogToFile } from "./debug";
 import { ANTIGRAVITY_VERSION } from "../constants";
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
@@ -157,6 +160,9 @@ export interface ManagedAccount {
   fingerprint?: import("./fingerprint").Fingerprint;
   /** History of previous fingerprints for this account */
   fingerprintHistory?: FingerprintVersion[];
+  /** Cached quota data from last checkAccountsQuota() call */
+  cachedQuota?: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
+  cachedQuotaUpdatedAt?: number;
 }
 
 function nowMs(): number {
@@ -226,6 +232,69 @@ function clearExpiredRateLimits(account: ManagedAccount): void {
       delete account.rateLimitResetTimes[key];
     }
   }
+}
+
+/**
+ * Resolve the quota group for soft quota checks.
+ * 
+ * When a model string is available, we can precisely determine the quota group.
+ * When model is null/undefined, we fall back based on family:
+ * - Claude → "claude" quota group
+ * - Gemini → "gemini-pro" (conservative fallback; may misclassify flash models)
+ * 
+ * @param family - The model family ("claude" | "gemini")
+ * @param model - Optional model string for precise resolution
+ * @returns The QuotaGroup to use for soft quota checks
+ */
+export function resolveQuotaGroup(family: ModelFamily, model?: string | null): QuotaGroup {
+  if (model) {
+    return getModelFamily(model);
+  }
+  return family === "claude" ? "claude" : "gemini-pro";
+}
+
+function isOverSoftQuotaThreshold(
+  account: ManagedAccount,
+  family: ModelFamily,
+  thresholdPercent: number,
+  cacheTtlMs: number,
+  model?: string | null
+): boolean {
+  if (thresholdPercent >= 100) return false;
+  if (!account.cachedQuota) return false;
+  
+  if (account.cachedQuotaUpdatedAt == null) return false;
+  const age = nowMs() - account.cachedQuotaUpdatedAt;
+  if (age > cacheTtlMs) return false;
+  
+  const quotaGroup = resolveQuotaGroup(family, model);
+  
+  const groupData = account.cachedQuota[quotaGroup];
+  if (groupData?.remainingFraction == null) return false;
+  
+  const remainingFraction = Math.max(0, Math.min(1, groupData.remainingFraction));
+  const usedPercent = (1 - remainingFraction) * 100;
+  const isOverThreshold = usedPercent >= thresholdPercent;
+  
+  if (isOverThreshold) {
+    const accountLabel = account.email || `Account ${account.index + 1}`;
+    debugLogToFile(
+      `[SoftQuota] Skipping ${accountLabel}: ${quotaGroup} usage ${usedPercent.toFixed(1)}% >= threshold ${thresholdPercent}%` +
+      (groupData.resetTime ? ` (resets: ${groupData.resetTime})` : '')
+    );
+  }
+  
+  return isOverThreshold;
+}
+
+export function computeSoftQuotaCacheTtlMs(
+  ttlConfig: "auto" | number,
+  refreshIntervalMinutes: number
+): number {
+  if (ttlConfig === "auto") {
+    return Math.max(2 * refreshIntervalMinutes, 10) * 60 * 1000;
+  }
+  return ttlConfig * 60 * 1000;
 }
 
 /**
@@ -305,6 +374,8 @@ export class AccountManager {
             fingerprint: acc.fingerprint
               ? updateFingerprintVersion(acc.fingerprint)
               : generateFingerprint(),
+            cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
+            cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -428,11 +499,13 @@ export class AccountManager {
     strategy: AccountSelectionStrategy = 'sticky',
     headerStyle: HeaderStyle = 'antigravity',
     pidOffsetEnabled: boolean = false,
+    softQuotaThresholdPercent: number = 100,
+    softQuotaCacheTtlMs: number = 10 * 60 * 1000,
   ): ManagedAccount | null {
     const quotaKey = getQuotaKey(family, headerStyle, model);
 
     if (strategy === 'round-robin') {
-      const next = this.getNextForFamily(family, model, headerStyle);
+      const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs);
       if (next) {
         this.markTouchedForQuota(next, quotaKey);
         this.currentAccountIndexByFamily[family] = next.index;
@@ -452,7 +525,8 @@ export class AccountManager {
             index: acc.index,
             lastUsed: acc.lastUsed,
             healthScore: healthTracker.getScore(acc.index),
-            isRateLimited: isRateLimitedForFamily(acc, family, model),
+            isRateLimited: isRateLimitedForFamily(acc, family, model) || 
+                          isOverSoftQuotaThreshold(acc, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model),
             isCoolingDown: this.isAccountCoolingDown(acc),
           };
         });
@@ -478,7 +552,11 @@ export class AccountManager {
     if (pidOffsetEnabled && !this.sessionOffsetApplied[family] && this.accounts.length > 1) {
       const pidOffset = process.pid % this.accounts.length;
       const baseIndex = this.currentAccountIndexByFamily[family] ?? 0;
-      this.currentAccountIndexByFamily[family] = (baseIndex + pidOffset) % this.accounts.length;
+      const newIndex = (baseIndex + pidOffset) % this.accounts.length;
+      
+      debugLogToFile(`[Account] Applying PID offset: pid=${process.pid} offset=${pidOffset} family=${family} index=${baseIndex}->${newIndex}`);
+      
+      this.currentAccountIndexByFamily[family] = newIndex;
       this.sessionOffsetApplied[family] = true;
     }
 
@@ -486,13 +564,14 @@ export class AccountManager {
     if (current) {
       clearExpiredRateLimits(current);
       const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
-      if (!isLimitedForRequestedStyle && !this.isAccountCoolingDown(current)) {
+      const isOverThreshold = isOverSoftQuotaThreshold(current, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
+      if (!isLimitedForRequestedStyle && !isOverThreshold && !this.isAccountCoolingDown(current)) {
         this.markTouchedForQuota(current, quotaKey);
         return current;
       }
     }
 
-    const next = this.getNextForFamily(family, model, headerStyle);
+    const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs);
     if (next) {
       this.markTouchedForQuota(next, quotaKey);
       this.currentAccountIndexByFamily[family] = next.index;
@@ -500,10 +579,13 @@ export class AccountManager {
     return next;
   }
 
-  getNextForFamily(family: ModelFamily, model?: string | null, headerStyle: HeaderStyle = "antigravity"): ManagedAccount | null {
+  getNextForFamily(family: ModelFamily, model?: string | null, headerStyle: HeaderStyle = "antigravity", softQuotaThresholdPercent: number = 100, softQuotaCacheTtlMs: number = 10 * 60 * 1000): ManagedAccount | null {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
-      return a.enabled !== false && !isRateLimitedForHeaderStyle(a, family, headerStyle, model) && !this.isAccountCoolingDown(a);
+      return a.enabled !== false && 
+             !isRateLimitedForHeaderStyle(a, family, headerStyle, model) && 
+             !isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model) &&
+             !this.isAccountCoolingDown(a);
     });
 
     if (available.length === 0) {
@@ -667,6 +749,49 @@ export class AccountManager {
     return null;
   }
 
+  /**
+   * Check if any OTHER account has antigravity quota available for the given family/model.
+   * 
+   * Used to determine whether to switch accounts vs fall back to gemini-cli:
+   * - If true: Switch to another account (preserve antigravity priority)
+   * - If false: All accounts exhausted antigravity, safe to fall back to gemini-cli
+   * 
+   * @param currentAccountIndex - Index of the current account (will be excluded from check)
+   * @param family - Model family ("gemini" or "claude")
+   * @param model - Optional model name for model-specific rate limits
+   * @returns true if any other enabled, non-cooling-down account has antigravity available
+   */
+  hasOtherAccountWithAntigravityAvailable(
+    currentAccountIndex: number,
+    family: ModelFamily,
+    model?: string | null
+  ): boolean {
+    // Claude has no gemini-cli fallback - always return false
+    // (This method is only relevant for Gemini's dual quota pools)
+    if (family === "claude") {
+      return false;
+    }
+
+    return this.accounts.some(acc => {
+      // Skip current account
+      if (acc.index === currentAccountIndex) {
+        return false;
+      }
+      // Skip disabled accounts
+      if (acc.enabled === false) {
+        return false;
+      }
+      // Skip cooling down accounts
+      if (this.isAccountCoolingDown(acc)) {
+        return false;
+      }
+      // Clear expired rate limits before checking
+      clearExpiredRateLimits(acc);
+      // Check if antigravity is available for this account
+      return !isRateLimitedForHeaderStyle(acc, family, "antigravity", model);
+    });
+  }
+
   removeAccount(account: ManagedAccount): boolean {
     const idx = this.accounts.indexOf(account);
     if (idx < 0) {
@@ -790,6 +915,8 @@ export class AccountManager {
         cooldownReason: a.cooldownReason,
         fingerprint: a.fingerprint,
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
+        cachedQuota: a.cachedQuota && Object.keys(a.cachedQuota).length > 0 ? a.cachedQuota : undefined,
+        cachedQuotaUpdatedAt: a.cachedQuotaUpdatedAt,
       })),
       activeIndex: claudeIndex,
       activeIndexByFamily: {
@@ -929,5 +1056,92 @@ export class AccountManager {
       return [];
     }
     return [...account.fingerprintHistory];
+  }
+
+  updateQuotaCache(accountIndex: number, quotaGroups: Partial<Record<QuotaGroup, QuotaGroupSummary>>): void {
+    const account = this.accounts[accountIndex];
+    if (account) {
+      account.cachedQuota = quotaGroups;
+      account.cachedQuotaUpdatedAt = nowMs();
+    }
+  }
+
+  isAccountOverSoftQuota(account: ManagedAccount, family: ModelFamily, thresholdPercent: number, cacheTtlMs: number, model?: string | null): boolean {
+    return isOverSoftQuotaThreshold(account, family, thresholdPercent, cacheTtlMs, model);
+  }
+
+  getAccountsForQuotaCheck(): AccountMetadataV3[] {
+    return this.accounts.map((a) => ({
+      email: a.email,
+      refreshToken: a.parts.refreshToken,
+      projectId: a.parts.projectId,
+      managedProjectId: a.parts.managedProjectId,
+      addedAt: a.addedAt,
+      lastUsed: a.lastUsed,
+      enabled: a.enabled,
+    }));
+  }
+
+  getOldestQuotaCacheAge(): number | null {
+    let oldest: number | null = null;
+    for (const acc of this.accounts) {
+      if (acc.enabled === false) continue;
+      if (acc.cachedQuotaUpdatedAt == null) return null;
+      const age = nowMs() - acc.cachedQuotaUpdatedAt;
+      if (oldest === null || age > oldest) oldest = age;
+    }
+    return oldest;
+  }
+
+  areAllAccountsOverSoftQuota(family: ModelFamily, thresholdPercent: number, cacheTtlMs: number, model?: string | null): boolean {
+    if (thresholdPercent >= 100) return false;
+    const enabled = this.accounts.filter(a => a.enabled !== false);
+    if (enabled.length === 0) return false;
+    return enabled.every(a => isOverSoftQuotaThreshold(a, family, thresholdPercent, cacheTtlMs, model));
+  }
+
+  /**
+   * Get minimum wait time until any account's soft quota resets.
+   * Returns 0 if any account is available (not over threshold).
+   * Returns the minimum resetTime across all over-threshold accounts.
+   * Returns null if no resetTime data is available.
+   */
+  getMinWaitTimeForSoftQuota(
+    family: ModelFamily,
+    thresholdPercent: number,
+    cacheTtlMs: number,
+    model?: string | null
+  ): number | null {
+    if (thresholdPercent >= 100) return 0;
+    
+    const enabled = this.accounts.filter(a => a.enabled !== false);
+    if (enabled.length === 0) return null;
+    
+    // If any account is available (not over threshold), no wait needed
+    const available = enabled.filter(a => !isOverSoftQuotaThreshold(a, family, thresholdPercent, cacheTtlMs, model));
+    if (available.length > 0) return 0;
+    
+    // All accounts are over threshold - find earliest reset time
+    // For gemini family, we MUST have the model to distinguish pro vs flash quotas.
+    // Fail-open (return null = no wait info) if model is missing to avoid blocking on wrong quota.
+    if (!model && family !== "claude") return null;
+    const quotaGroup = resolveQuotaGroup(family, model);
+    const now = nowMs();
+    const waitTimes: number[] = [];
+    
+    for (const acc of enabled) {
+      const groupData = acc.cachedQuota?.[quotaGroup];
+      if (groupData?.resetTime) {
+        const resetTimestamp = Date.parse(groupData.resetTime);
+        if (Number.isFinite(resetTimestamp)) {
+          waitTimes.push(Math.max(0, resetTimestamp - now));
+        }
+      }
+    }
+    
+    if (waitTimes.length === 0) return null;
+    const minWait = Math.min(...waitTimes);
+    // Treat 0 as stale cache (resetTime in the past) → fail-open to avoid spin loop
+    return minWait === 0 ? null : minWait;
   }
 }

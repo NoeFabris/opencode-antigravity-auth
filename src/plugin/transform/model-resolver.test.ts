@@ -14,22 +14,42 @@ describe("resolveModelWithTier", () => {
       const result = resolveModelWithTier("gemini-3-flash");
       expect(result.actualModel).toBe("gemini-3-flash");
       expect(result.thinkingLevel).toBe("low");
+      expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("gemini-3-flash-preview gets default thinkingLevel 'low'", () => {
+    it("gemini-3-flash-preview gets default thinkingLevel 'low' with antigravity quota", () => {
       const result = resolveModelWithTier("gemini-3-flash-preview");
       expect(result.actualModel).toBe("gemini-3-flash-preview");
       expect(result.thinkingLevel).toBe("low");
-      expect(result.quotaPreference).toBe("gemini-cli");
+      // All Gemini models now default to antigravity
+      expect(result.quotaPreference).toBe("antigravity");
     });
   });
 
   describe("Gemini 3 preview models (Issue #115)", () => {
-    it("gemini-3-pro-preview gets default thinkingLevel 'low'", () => {
+    it("gemini-3-pro-preview gets default thinkingLevel 'low' with antigravity quota", () => {
       const result = resolveModelWithTier("gemini-3-pro-preview");
       expect(result.actualModel).toBe("gemini-3-pro-preview");
       expect(result.thinkingLevel).toBe("low");
-      expect(result.quotaPreference).toBe("gemini-cli");
+      // All Gemini models now default to antigravity
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+  });
+
+  describe("All Gemini models default to antigravity quota", () => {
+    it("gemini-2.5-flash defaults to antigravity", () => {
+      const result = resolveModelWithTier("gemini-2.5-flash");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("gemini-2.5-pro defaults to antigravity", () => {
+      const result = resolveModelWithTier("gemini-2.5-pro");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("gemini-2.0-flash defaults to antigravity", () => {
+      const result = resolveModelWithTier("gemini-2.0-flash");
+      expect(result.quotaPreference).toBe("antigravity");
     });
   });
 

@@ -368,6 +368,54 @@ describe("filterUnsignedThinkingBlocks", () => {
     expect(result[0].parts[0].type).toBe("text");
   });
 
+  it("strips <thinking>...</thinking> XML tags from plain text content for Claude models", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          {
+            text: "\n\n<thinking>\nI found the relevant commit: f6fa5ec\nLet me analyze the changes...\n</thinking>\n\nI found the PR you mentioned!",
+          },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents, undefined, undefined, true /* isClaudeModel */);
+    expect(result[0].parts).toHaveLength(1);
+    expect(result[0].parts[0].text).toBe("I found the PR you mentioned!");
+    expect(result[0].parts[0].text).not.toContain("<thinking>");
+    expect(result[0].parts[0].text).not.toContain("</thinking>");
+  });
+
+  it("filters out text parts that become empty after stripping <thinking> XML tags", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          { text: "<thinking>Only thinking here, no other content</thinking>" },
+          { text: "Visible content remains" },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents, undefined, undefined, true /* isClaudeModel */);
+    expect(result[0].parts).toHaveLength(1);
+    expect(result[0].parts[0].text).toBe("Visible content remains");
+  });
+
+  it("handles multiline <thinking> blocks with various content", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          {
+            text: "<thinking>\nLine 1\nLine 2\n\nLine 4 with <code>tags</code>\n</thinking>After the thinking",
+          },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents, undefined, undefined, true);
+    expect(result[0].parts[0].text).toBe("After the thinking");
+  });
+
   it("filters thinking parts with short signatures", () => {
     const contents = [
       {

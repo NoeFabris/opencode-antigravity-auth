@@ -896,18 +896,49 @@ function isToolBlock(part: Record<string, unknown>): boolean {
 }
 
 /**
+ * Strips <thinking>...</thinking> XML tags from text content.
+ * Claude sometimes outputs thinking as XML tags in plain text, which the
+ * Antigravity API rejects with "Request contains an invalid argument."
+ * This regex handles multiline thinking blocks with DOTALL mode.
+ */
+function stripThinkingXmlFromText(text: string): string {
+  // Use regex to strip <thinking>...</thinking> blocks (including multiline)
+  // The [\s\S]*? pattern matches any character including newlines (non-greedy)
+  return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "").trim();
+}
+
+/**
  * Unconditionally strips ALL thinking/reasoning blocks from a content array.
  * Used for Claude models to avoid signature validation errors entirely.
  * Claude will generate fresh thinking for each turn.
+ * 
+ * Also strips <thinking>...</thinking> XML tags from text content, as Claude
+ * sometimes outputs thinking as plain XML which the Antigravity API rejects.
  */
 function stripAllThinkingBlocks(contentArray: any[]): any[] {
-  return contentArray.filter(item => {
-    if (!item || typeof item !== "object") return true;
-    if (isToolBlock(item)) return true;
-    if (isThinkingPart(item)) return false;
-    if (hasSignatureField(item)) return false;
-    return true;
-  });
+  return contentArray
+    .filter(item => {
+      if (!item || typeof item !== "object") return true;
+      if (isToolBlock(item)) return true;
+      if (isThinkingPart(item)) return false;
+      if (hasSignatureField(item)) return false;
+      return true;
+    })
+    .map(item => {
+      // Also strip <thinking>...</thinking> XML from text content
+      if (item && typeof item === "object" && typeof item.text === "string") {
+        const strippedText = stripThinkingXmlFromText(item.text);
+        if (strippedText !== item.text) {
+          // If text was modified and is now empty, filter it out
+          if (strippedText.length === 0) {
+            return null;
+          }
+          return { ...item, text: strippedText };
+        }
+      }
+      return item;
+    })
+    .filter(item => item !== null);
 }
 
 /**
@@ -1131,7 +1162,8 @@ function filterContentArray(
 
     // For the LAST assistant message with thinking blocks:
     // - If signature is OUR cached signature, pass through unchanged
-    // - Otherwise inject sentinel to bypass Antigravity validation
+    // - Otherwise: for Claude, strip entirely (Claude generates fresh thinking)
+    //   for other models, inject sentinel to bypass validation
     // NOTE: We can't trust signatures just because they're >= 50 chars - Claude returns
     // its own signatures which are long but invalid for Antigravity.
     if (isLastAssistantMessage && (isThinking || hasSignature)) {
@@ -1142,7 +1174,19 @@ function filterContentArray(
         continue;
       }
       
-      // Not our signature (or no signature) - inject sentinel
+      // Not our signature (or no signature)
+      // For Claude models: just strip the thinking block entirely
+      // Claude will generate fresh thinking for this turn
+      // The sentinel approach was being rejected by the Antigravity API
+      if (isClaudeModel) {
+        const existingSignature = item.signature || item.thoughtSignature;
+        const signatureInfo = existingSignature ? `foreign signature (${String(existingSignature).length} chars)` : "no signature";
+        log.debug(`Stripping last-message thinking block with ${signatureInfo} (Claude will regenerate)`);
+        // Don't add to filtered - effectively strips this thinking block
+        continue;
+      }
+      
+      // For non-Claude models: inject sentinel to bypass validation
       const thinkingText = getThinkingText(item) || "";
       const existingSignature = item.signature || item.thoughtSignature;
       const signatureInfo = existingSignature ? `foreign signature (${String(existingSignature).length} chars)` : "no signature";
