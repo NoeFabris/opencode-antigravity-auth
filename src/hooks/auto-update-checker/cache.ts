@@ -24,6 +24,11 @@ interface BunLockfile {
   packages?: Record<string, unknown>;
 }
 
+/**
+ * Sanitizes a JSON string by removing trailing commas to ensure compatibility with standard JSON.parse.
+ * @param json - The raw JSON string with potential trailing commas.
+ * @returns The sanitized JSON string.
+ */
 function stripTrailingCommas(json: string): string {
   return json.replace(/,(\s*[}\]])/g, "$1");
 }

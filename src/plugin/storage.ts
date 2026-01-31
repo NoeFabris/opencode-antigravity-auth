@@ -204,6 +204,11 @@ export interface AccountStorageV3 {
 
 type AnyAccountStorage = AccountStorageV1 | AccountStorage | AccountStorageV3;
 
+/**
+ * Resolves the absolute path to the directory where OpenCode configuration is stored.
+ * OS-aware: handles Windows AppData vs Unix .config.
+ * @returns The directory path.
+ */
 function getConfigDir(): string {
   const platform = process.platform;
   if (platform === "win32") {
@@ -217,6 +222,10 @@ function getConfigDir(): string {
   return join(xdgConfig, "opencode");
 }
 
+/**
+ * Resolves the absolute path to the antigravity-accounts.json file.
+ * @returns The absolute file path.
+ */
 export function getStoragePath(): string {
   return join(getConfigDir(), "antigravity-accounts.json");
 }
@@ -231,6 +240,10 @@ const LOCK_OPTIONS = {
   },
 };
 
+/**
+ * Ensures the target file exists. Creates the file with an empty initial storage state if it doesn't.
+ * @param path - The absolute path to the file.
+ */
 async function ensureFileExists(path: string): Promise<void> {
   try {
     await fs.access(path);
@@ -244,6 +257,12 @@ async function ensureFileExists(path: string): Promise<void> {
   }
 }
 
+/**
+ * Executes a function within a file lock to ensure exclusive access to the target file.
+ * @param path - The absolute path to the file to lock.
+ * @param fn - The asynchronous function to execute.
+ * @returns The result of the function.
+ */
 async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await ensureFileExists(path);
   let release: (() => Promise<void>) | null = null;
@@ -261,6 +280,13 @@ async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Merges two account storage objects, deduplicating accounts by refresh token.
+ * Prioritizes fingerprints with newer Antigravity version strings.
+ * @param existing - The current storage object.
+ * @param incoming - The new storage object to merge in.
+ * @returns The merged storage object.
+ */
 function mergeAccountStorage(
   existing: AccountStorageV3,
   incoming: AccountStorageV3,
@@ -363,6 +389,12 @@ function mergeFingerprint(existing?: Fingerprint, incoming?: Fingerprint): Finge
   return incoming;
 }
 
+/**
+ * Deduplicates a list of accounts by their email address.
+ * Keeps the newest account for each email based on lastUsed and addedAt timestamps.
+ * @param accounts - The list of accounts to deduplicate.
+ * @returns The deduplicated list.
+ */
 export function deduplicateAccountsByEmail<
   T extends { email?: string; lastUsed?: number; addedAt?: number },
 >(accounts: T[]): T[] {
