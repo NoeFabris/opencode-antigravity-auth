@@ -49,6 +49,17 @@ const SERVER_ERROR_BACKOFF = 20_000;
 const UNKNOWN_BACKOFF = 60_000;
 const MIN_BACKOFF_MS = 2_000;
 
+// Progressive cooldown: 10m → 1h → 6h → 24h
+const VERIFICATION_COOLDOWN_SCHEDULE = [
+  10 * 60 * 1000,       // 10 minutes
+  60 * 60 * 1000,       // 1 hour  
+  6 * 60 * 60 * 1000,   // 6 hours
+  24 * 60 * 60 * 1000,  // 24 hours (cap)
+] as const;
+
+// Jitter to prevent synchronized retries
+const COOLDOWN_JITTER_MAX_MS = 60 * 1000; // +0-60s
+
 /**
  * Generate a random jitter value for backoff timing.
  * Helps prevent thundering herd problem when multiple clients retry simultaneously.
@@ -152,6 +163,9 @@ export interface ManagedAccount {
   lastSwitchReason?: "rate-limit" | "initial" | "rotation";
   coolingDownUntil?: number;
   cooldownReason?: CooldownReason;
+  verificationUrl?: string;
+  verificationUrlCapturedAt?: number;
+  verificationAttemptCount?: number;
   touchedForQuota: Record<string, number>;
   consecutiveFailures?: number;
   /** Timestamp of last failure for TTL-based reset of consecutiveFailures */
@@ -369,6 +383,9 @@ export class AccountManager {
             lastSwitchReason: acc.lastSwitchReason,
             coolingDownUntil: acc.coolingDownUntil,
             cooldownReason: acc.cooldownReason,
+            verificationUrl: acc.verificationUrl,
+            verificationUrlCapturedAt: acc.verificationUrlCapturedAt,
+            verificationAttemptCount: acc.verificationAttemptCount,
             touchedForQuota: {},
             // Use stored fingerprint (with updated version) or generate new one
             fingerprint: acc.fingerprint
@@ -702,6 +719,83 @@ export class AccountManager {
     return this.isAccountCoolingDown(account) ? account.cooldownReason : undefined;
   }
 
+  /**
+   * Mark account as requiring verification with progressive cooldown.
+   * Uses "set if later" semantics to handle concurrent requests.
+   * Only escalates if called during active cooldown.
+   */
+  markVerificationRequired(account: ManagedAccount, verifyUrl?: string): number {
+    const now = nowMs();
+    const isCurrentlyCoolingDown = this.isAccountCoolingDown(account) && 
+      account.cooldownReason === "verification-required";
+    
+    // Only escalate if repeating during active cooldown
+    const attemptCount = isCurrentlyCoolingDown 
+      ? (account.verificationAttemptCount ?? 0) + 1
+      : 1;
+    
+    account.verificationAttemptCount = attemptCount;
+    
+    if (verifyUrl) {
+      account.verificationUrl = verifyUrl;
+      account.verificationUrlCapturedAt = now;
+    }
+    
+    // Calculate cooldown with jitter
+    const scheduleIndex = Math.min(attemptCount - 1, VERIFICATION_COOLDOWN_SCHEDULE.length - 1);
+    const baseCooldown = VERIFICATION_COOLDOWN_SCHEDULE[scheduleIndex] ?? VERIFICATION_COOLDOWN_SCHEDULE[0];
+    const jitter = Math.floor(Math.random() * COOLDOWN_JITTER_MAX_MS);
+    const cooldownMs = baseCooldown + jitter;
+    
+    // "Set if later" semantics for concurrency safety
+    const newCooldownUntil = now + cooldownMs;
+    if (!account.coolingDownUntil || newCooldownUntil > account.coolingDownUntil) {
+      this.markAccountCoolingDown(account, cooldownMs, "verification-required");
+    }
+    
+    this.requestSaveToDisk();
+    return cooldownMs;
+  }
+
+  /**
+   * Clear verification cooldown and reset attempt counter.
+   */
+  clearVerificationCooldown(accountIndex: number): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) return false;
+    
+    if (account.cooldownReason === "verification-required") {
+      this.clearAccountCooldown(account);
+      account.verificationAttemptCount = 0;
+      delete account.verificationUrl;
+      delete account.verificationUrlCapturedAt;
+      this.requestSaveToDisk();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Clear verification state on successful request.
+   * Called after any successful API call.
+   */
+  clearVerificationStateOnSuccess(account: ManagedAccount): void {
+    if (account.verificationAttemptCount || account.verificationUrl) {
+      account.verificationAttemptCount = 0;
+      delete account.verificationUrl;
+      delete account.verificationUrlCapturedAt;
+      // Active cooldown remains until expiration
+      this.requestSaveToDisk();
+    }
+  }
+
+  /**
+   * Get stored verification URL for an account.
+   */
+  getVerificationUrl(accountIndex: number): string | undefined {
+    return this.accounts[accountIndex]?.verificationUrl;
+  }
+
   markTouchedForQuota(account: ManagedAccount, quotaKey: string): void {
     account.touchedForQuota[quotaKey] = nowMs();
   }
@@ -854,42 +948,48 @@ export class AccountManager {
     headerStyle?: HeaderStyle,
     strict?: boolean,
   ): number {
-    const available = this.accounts.filter((a) => {
-      clearExpiredRateLimits(a);
-      return a.enabled !== false && (strict && headerStyle
-        ? !isRateLimitedForHeaderStyle(a, family, headerStyle, model)
-        : !isRateLimitedForFamily(a, family, model));
-    });
-    if (available.length > 0) {
-      return 0;
-    }
+    const now = nowMs();
+    let minWait = Infinity;
 
-    const waitTimes: number[] = [];
-    for (const a of this.accounts) {
+    for (const account of this.accounts) {
+      if (account.enabled === false) continue;
+
+      // Check rate limit wait time
+      let rateLimitWait = 0;
       if (family === "claude") {
-        const t = a.rateLimitResetTimes.claude;
-        if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));
+        const t = account.rateLimitResetTimes.claude;
+        if (t !== undefined) rateLimitWait = Math.max(0, t - now);
       } else if (strict && headerStyle) {
         const key = getQuotaKey(family, headerStyle, model);
-        const t = a.rateLimitResetTimes[key];
-        if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));
+        const t = account.rateLimitResetTimes[key];
+        if (t !== undefined) rateLimitWait = Math.max(0, t - now);
       } else {
-        // For Gemini, account becomes available when EITHER pool expires for this model/family
+        // For Gemini, account becomes available when EITHER pool expires
         const antigravityKey = getQuotaKey(family, "antigravity", model);
         const cliKey = getQuotaKey(family, "gemini-cli", model);
 
-        const t1 = a.rateLimitResetTimes[antigravityKey];
-        const t2 = a.rateLimitResetTimes[cliKey];
-        
-        const accountWait = Math.min(
-          t1 !== undefined ? Math.max(0, t1 - nowMs()) : Infinity,
-          t2 !== undefined ? Math.max(0, t2 - nowMs()) : Infinity
-        );
-        if (accountWait !== Infinity) waitTimes.push(accountWait);
+        const t1 = account.rateLimitResetTimes[antigravityKey];
+        const t2 = account.rateLimitResetTimes[cliKey];
+
+        const wait1 = t1 !== undefined ? Math.max(0, t1 - now) : 0;
+        const wait2 = t2 !== undefined ? Math.max(0, t2 - now) : 0;
+        rateLimitWait = Math.min(wait1, wait2);
       }
+
+      // Check cooldown wait time
+      const cooldownWait = account.coolingDownUntil
+        ? Math.max(0, account.coolingDownUntil - now)
+        : 0;
+
+      // Account is available when BOTH are 0 (or Infinity for rate limit means no limit)
+      const accountWait = Math.max(
+        rateLimitWait === Infinity ? 0 : rateLimitWait,
+        cooldownWait
+      );
+      minWait = Math.min(minWait, accountWait);
     }
 
-    return waitTimes.length > 0 ? Math.min(...waitTimes) : 0;
+    return minWait === Infinity ? 0 : minWait;
   }
 
   getAccounts(): ManagedAccount[] {
@@ -913,6 +1013,9 @@ export class AccountManager {
         rateLimitResetTimes: Object.keys(a.rateLimitResetTimes).length > 0 ? a.rateLimitResetTimes : undefined,
         coolingDownUntil: a.coolingDownUntil,
         cooldownReason: a.cooldownReason,
+        verificationUrl: a.verificationUrl,
+        verificationUrlCapturedAt: a.verificationUrlCapturedAt,
+        verificationAttemptCount: a.verificationAttemptCount,
         fingerprint: a.fingerprint,
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
         cachedQuota: a.cachedQuota && Object.keys(a.cachedQuota).length > 0 ? a.cachedQuota : undefined,

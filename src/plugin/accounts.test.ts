@@ -631,6 +631,115 @@ describe("AccountManager", () => {
       expect(manager.isRateLimitedForHeaderStyle(account!, "gemini", "antigravity")).toBe(false);
       expect(manager.isRateLimitedForHeaderStyle(account!, "gemini", "gemini-cli")).toBe(false);
     });
+
+    it("supports verification-required cooldown reason for account verification errors", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const account = manager.getCurrentOrNextForFamily("claude");
+
+      manager.markAccountCoolingDown(account!, 24 * 60 * 60 * 1000, "verification-required");
+
+      expect(manager.isAccountCoolingDown(account!)).toBe(true);
+      expect(manager.getAccountCooldownReason(account!)).toBe("verification-required");
+
+      const nextAccount = manager.getCurrentOrNextForFamily("claude");
+      expect(nextAccount?.parts.refreshToken).toBe("r2");
+    });
+  });
+
+  describe("getMinWaitTimeForFamily with cooldowns", () => {
+    it("returns cooldown wait time when account is cooling down but not rate-limited", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(0));
+      
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+      
+      const manager = new AccountManager(undefined, stored);
+      const account = manager.getAccounts()[0]!;
+      
+      manager.markAccountCoolingDown(account, 600_000, "verification-required");
+      
+      const waitTime = manager.getMinWaitTimeForFamily("claude");
+      expect(waitTime).toBe(600_000);
+      
+      vi.useRealTimers();
+    });
+
+    it("returns max of rate-limit and cooldown when both set", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(0));
+      
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+      
+      const manager = new AccountManager(undefined, stored);
+      const account = manager.getAccounts()[0]!;
+      
+      manager.markAccountCoolingDown(account, 300_000, "auth-failure");
+      manager.markRateLimited(account, 600_000, "claude", "antigravity");
+      
+      const waitTime = manager.getMinWaitTimeForFamily("claude", null, "antigravity");
+      expect(waitTime).toBe(600_000);
+      
+      vi.useRealTimers();
+    });
+
+    it("returns 0 when at least one account is available", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+      
+      const manager = new AccountManager(undefined, stored);
+      const [acc1, acc2] = manager.getAccounts();
+      
+      manager.markAccountCoolingDown(acc1!, 600_000, "verification-required");
+      // acc2 is available
+      
+      const waitTime = manager.getMinWaitTimeForFamily("claude");
+      expect(waitTime).toBe(0);
+    });
+
+    it("excludes cooling-down accounts from available set", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+      
+      const manager = new AccountManager(undefined, stored);
+      const account = manager.getAccounts()[0]!;
+      
+      manager.markAccountCoolingDown(account, 600_000, "verification-required");
+      
+      const next = manager.getCurrentOrNextForFamily("claude");
+      expect(next).toBeNull();
+    });
   });
 
   describe("account selection strategies", () => {
