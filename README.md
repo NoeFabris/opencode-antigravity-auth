@@ -390,11 +390,11 @@ If you encounter errors during a session:
 {
   "google_auth": false,
   "agents": {
-    "multimodal-looker": { "model": "google/antigravity-gemini-3-flash" }
+    "multimodal-looker": { "model": "google/gemini-3-flash" }
   },
   "categories": {
-    "visual-engineering": { "model": "google/antigravity-gemini-3-pro" },
-    "writing": { "model": "google/antigravity-gemini-3-flash" }
+    "visual-engineering": { "model": "google/gemini-3-pro" },
+    "writing": { "model": "google/gemini-3-flash" }
   }
 }
 ```
