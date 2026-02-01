@@ -390,8 +390,11 @@ If you encounter errors during a session:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/gemini-3-pro" },
-    "document-writer": { "model": "google/gemini-3-flash" }
+    "multimodal-looker": { "model": "google/gemini-3-flash" }
+  },
+  "categories": {
+    "visual-engineering": { "model": "google/gemini-3-pro" },
+    "writing": { "model": "google/gemini-3-flash" }
   }
 }
 ```
@@ -528,9 +531,11 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/gemini-3-pro" },
-    "document-writer": { "model": "google/gemini-3-flash" },
     "multimodal-looker": { "model": "google/gemini-3-flash" }
+  },
+  "categories": {
+    "visual-engineering": { "model": "google/gemini-3-pro" },
+    "writing": { "model": "google/gemini-3-flash" }
   }
 }
 ```
