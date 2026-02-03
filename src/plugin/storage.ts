@@ -173,7 +173,14 @@ export interface AccountStorage {
   activeIndex: number;
 }
 
-export type CooldownReason = "auth-failure" | "network-error" | "project-error";
+/**
+ * Reasons why an account may be cooling down.
+ * - "auth-failure": Authentication/token refresh failed
+ * - "network-error": Network connectivity issues
+ * - "project-error": Project ID resolution failed
+ * - "validation-required": Google requires account verification (403 PERMISSION_DENIED with VALIDATION_REQUIRED)
+ */
+export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required";
 
 export interface AccountMetadataV3 {
   email?: string;
@@ -189,6 +196,8 @@ export interface AccountMetadataV3 {
   cooldownReason?: CooldownReason;
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
+  /** History of previous fingerprints for this account */
+  fingerprintHistory?: import("./fingerprint").FingerprintVersion[];
 }
 
 export interface AccountStorageV3 {
