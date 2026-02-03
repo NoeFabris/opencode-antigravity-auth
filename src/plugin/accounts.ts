@@ -25,9 +25,9 @@ function updateFingerprintVersion(fingerprint: Fingerprint): Fingerprint {
   return fingerprint;
 }
 
-export type RateLimitReason = 
+export type RateLimitReason =
   | "QUOTA_EXHAUSTED"
-  | "RATE_LIMIT_EXCEEDED" 
+  | "RATE_LIMIT_EXCEEDED"
   | "MODEL_CAPACITY_EXHAUSTED"
   | "SERVER_ERROR"
   | "UNKNOWN";
@@ -55,8 +55,8 @@ function generateJitter(maxJitterMs: number): number {
 }
 
 export function parseRateLimitReason(
-  reason: string | undefined, 
-  message: string | undefined, 
+  reason: string | undefined,
+  message: string | undefined,
   status?: number
 ): RateLimitReason {
   // 1. Status Code Checks (Rust parity)
@@ -73,11 +73,11 @@ export function parseRateLimitReason(
       case "MODEL_CAPACITY_EXHAUSTED": return "MODEL_CAPACITY_EXHAUSTED";
     }
   }
-  
+
   // 3. Message Text Scanning (Rust Regex parity)
   if (message) {
     const lower = message.toLowerCase();
-    
+
     // Capacity / Overloaded (Transient) - Check FIRST before "exhausted"
     if (lower.includes("capacity") || lower.includes("overloaded") || lower.includes("resource exhausted")) {
       return "MODEL_CAPACITY_EXHAUSTED";
@@ -95,12 +95,12 @@ export function parseRateLimitReason(
       return "QUOTA_EXHAUSTED";
     }
   }
-  
+
   // Default fallback for 429 without clearer info
   if (status === 429) {
-    return "UNKNOWN"; 
+    return "UNKNOWN";
   }
-  
+
   return "UNKNOWN";
 }
 
@@ -114,7 +114,7 @@ export function calculateBackoffMs(
     // Rust uses 2s min buffer, we keep 2s
     return Math.max(retryAfterMs, MIN_BACKOFF_MS);
   }
-  
+
   switch (reason) {
     case "QUOTA_EXHAUSTED": {
       const index = Math.min(consecutiveFailures, QUOTA_EXHAUSTED_BACKOFFS.length - 1);
@@ -190,16 +190,16 @@ function isRateLimitedForFamily(account: ManagedAccount, family: ModelFamily, mo
   if (family === "claude") {
     return isRateLimitedForQuotaKey(account, "claude");
   }
-  
+
   const antigravityIsLimited = isRateLimitedForHeaderStyle(account, family, "antigravity", model);
   const cliIsLimited = isRateLimitedForHeaderStyle(account, family, "gemini-cli", model);
-  
+
   return antigravityIsLimited && cliIsLimited;
 }
 
 function isRateLimitedForHeaderStyle(account: ManagedAccount, family: ModelFamily, headerStyle: HeaderStyle, model?: string | null): boolean {
   clearExpiredRateLimits(account);
-  
+
   if (family === "claude") {
     return isRateLimitedForQuotaKey(account, "claude");
   }
@@ -423,7 +423,7 @@ export class AccountManager {
   }
 
   getCurrentOrNextForFamily(
-    family: ModelFamily, 
+    family: ModelFamily,
     model?: string | null,
     strategy: AccountSelectionStrategy = 'sticky',
     headerStyle: HeaderStyle = 'antigravity',
@@ -443,7 +443,7 @@ export class AccountManager {
     if (strategy === 'hybrid') {
       const healthTracker = getHealthTracker();
       const tokenTracker = getTokenTracker();
-      
+
       const accountsWithMetrics: AccountWithMetrics[] = this.accounts
         .filter(acc => acc.enabled !== false)
         .map(acc => {
@@ -459,7 +459,7 @@ export class AccountManager {
 
       // Get current account index for stickiness
       const currentIndex = this.currentAccountIndexByFamily[family] ?? null;
-      
+
       const selectedIndex = selectHybridAccount(accountsWithMetrics, tokenTracker, currentIndex);
       if (selectedIndex !== null) {
         const selected = this.accounts[selectedIndex];
@@ -553,20 +553,20 @@ export class AccountManager {
     failureTtlMs: number = 3600_000, // Default 1 hour TTL
   ): number {
     const now = nowMs();
-    
+
     // TTL-based reset: if last failure was more than failureTtlMs ago, reset count
     if (account.lastFailureTime !== undefined && (now - account.lastFailureTime) > failureTtlMs) {
       account.consecutiveFailures = 0;
     }
-    
+
     const failures = (account.consecutiveFailures ?? 0) + 1;
     account.consecutiveFailures = failures;
     account.lastFailureTime = now;
-    
+
     const backoffMs = calculateBackoffMs(reason, failures - 1, retryAfterMs);
     const key = getQuotaKey(family, headerStyle, model);
     account.rateLimitResetTimes[key] = now + backoffMs;
-    
+
     return backoffMs;
   }
 
@@ -627,10 +627,10 @@ export class AccountManager {
   isFreshForQuota(account: ManagedAccount, quotaKey: string): boolean {
     const touchedAt = account.touchedForQuota[quotaKey];
     if (!touchedAt) return true;
-    
+
     const resetTime = account.rateLimitResetTimes[quotaKey as QuotaKey];
     if (resetTime && touchedAt < resetTime) return true;
-    
+
     return false;
   }
 
@@ -638,9 +638,9 @@ export class AccountManager {
     return this.accounts.filter(acc => {
       clearExpiredRateLimits(acc);
       return acc.enabled !== false &&
-             this.isFreshForQuota(acc, quotaKey) && 
-             !isRateLimitedForFamily(acc, family, model) && 
-             !this.isAccountCoolingDown(acc);
+        this.isFreshForQuota(acc, quotaKey) &&
+        !isRateLimitedForFamily(acc, family, model) &&
+        !this.isAccountCoolingDown(acc);
     });
   }
 
@@ -755,7 +755,7 @@ export class AccountManager {
 
         const t1 = a.rateLimitResetTimes[antigravityKey];
         const t2 = a.rateLimitResetTimes[cliKey];
-        
+
         const accountWait = Math.min(
           t1 !== undefined ? Math.max(0, t1 - nowMs()) : Infinity,
           t2 !== undefined ? Math.max(0, t2 - nowMs()) : Infinity
@@ -771,10 +771,29 @@ export class AccountManager {
     return [...this.accounts];
   }
 
+  async syncEnabledStatusFromDisk(): Promise<void> {
+    try {
+      const stored = await loadAccounts();
+      if (!stored) return;
+
+      const enabledRefreshTokens = new Set(
+        stored.accounts
+          .filter((a) => a.enabled !== false)
+          .map((a) => a.refreshToken)
+      );
+
+      for (const account of this.accounts) {
+        account.enabled = enabledRefreshTokens.has(account.parts.refreshToken);
+      }
+    } catch (error) {
+      // Ignore errors reading from disk, fallback to in-memory state
+    }
+  }
+
   async saveToDisk(): Promise<void> {
     const claudeIndex = Math.max(0, this.currentAccountIndexByFamily.claude);
     const geminiIndex = Math.max(0, this.currentAccountIndexByFamily.gemini);
-    
+
     const storage: AccountStorageV3 = {
       version: 3,
       accounts: this.accounts.map((a) => ({
@@ -823,7 +842,7 @@ export class AccountManager {
   private async executeSave(): Promise<void> {
     this.savePending = false;
     this.saveTimeout = null;
-    
+
     try {
       await this.saveToDisk();
     } catch {
@@ -847,7 +866,7 @@ export class AccountManager {
   regenerateAccountFingerprint(accountIndex: number): Fingerprint | null {
     const account = this.accounts[accountIndex];
     if (!account) return null;
-    
+
     // Save current fingerprint to history if it exists
     if (account.fingerprint) {
       const historyEntry: FingerprintVersion = {
@@ -855,14 +874,14 @@ export class AccountManager {
         timestamp: nowMs(),
         reason: 'regenerated',
       };
-      
+
       if (!account.fingerprintHistory) {
         account.fingerprintHistory = [];
       }
-      
+
       // Add to beginning of history (most recent first)
       account.fingerprintHistory.unshift(historyEntry);
-      
+
       // Trim to max history size
       if (account.fingerprintHistory.length > MAX_FINGERPRINT_HISTORY) {
         account.fingerprintHistory = account.fingerprintHistory.slice(0, MAX_FINGERPRINT_HISTORY);
@@ -872,7 +891,7 @@ export class AccountManager {
     // Generate and assign new fingerprint
     account.fingerprint = generateFingerprint();
     this.requestSaveToDisk();
-    
+
     return account.fingerprint;
   }
 
@@ -890,10 +909,10 @@ export class AccountManager {
     if (!history || historyIndex < 0 || historyIndex >= history.length) {
       return null;
     }
-    
+
     // Capture the fingerprint to restore BEFORE modifying history
     const fingerprintToRestore = history[historyIndex]!.fingerprint;
-    
+
     // Save current fingerprint to history before restoring (if it exists)
     if (account.fingerprint) {
       const historyEntry: FingerprintVersion = {
@@ -901,9 +920,9 @@ export class AccountManager {
         timestamp: nowMs(),
         reason: 'restored',
       };
-      
+
       account.fingerprintHistory!.unshift(historyEntry);
-      
+
       // Trim to max history size
       if (account.fingerprintHistory!.length > MAX_FINGERPRINT_HISTORY) {
         account.fingerprintHistory = account.fingerprintHistory!.slice(0, MAX_FINGERPRINT_HISTORY);
@@ -912,9 +931,9 @@ export class AccountManager {
 
     // Restore the fingerprint
     account.fingerprint = { ...fingerprintToRestore, createdAt: nowMs() };
-    
+
     this.requestSaveToDisk();
-    
+
     return account.fingerprint;
   }
 
