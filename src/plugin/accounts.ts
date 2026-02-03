@@ -808,7 +808,7 @@ export class AccountManager {
     this.savePending = true;
     this.saveTimeout = setTimeout(() => {
       void this.executeSave();
-    }, 1000);
+    }, 30000);
   }
 
   async flushSaveToDisk(): Promise<void> {
