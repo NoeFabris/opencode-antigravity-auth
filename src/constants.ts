@@ -225,9 +225,8 @@ export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
  * Model used for Google Search grounding requests.
  * Uses gemini-3-flash for fast, cost-effective search operations.
  */
-export const SEARCH_MODEL = "gemini-2.5-flash";/* gemini-3.0 is showing unusual behavior when webfetching thorugh the internet 
+export const SEARCH_MODEL = "gemini-2.5-flash";/* gemini-3.0 is showing unusual behavior when webfetching through the internet 
 *and hence tried switching to gemini-2.5-flash
-*/
 
 /**
  * Thinking budget for deep search (more thorough analysis).
