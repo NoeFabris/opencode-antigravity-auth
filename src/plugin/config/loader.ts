@@ -22,13 +22,17 @@ const log = createLogger("config");
 // =============================================================================
 
 /**
- * Get the OS-specific config directory.
+ * Get the config directory path, with the following precedence:
+ * 1. OPENCODE_CONFIG_DIR env var (if set)
+ * 2. ~/.config/opencode (all platforms, including Windows)
  */
 function getConfigDir(): string {
-  const platform = process.platform;
-  if (platform === "win32") {
-    return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "opencode");
+  // 1. Check for explicit override via env var
+  if (process.env.OPENCODE_CONFIG_DIR) {
+    return process.env.OPENCODE_CONFIG_DIR;
   }
+
+  // 2. Use ~/.config/opencode on all platforms (including Windows)
   const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
   return join(xdgConfig, "opencode");
 }

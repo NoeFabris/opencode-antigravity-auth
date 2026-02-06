@@ -254,10 +254,8 @@ export async function executeSearch(
     ],
     tools,
     generationConfig: {
-      thinkingConfig: {
-        thinkingLevel: thinking ? "high" : "low",
-        includeThoughts: false,
-      },
+      temperature: 0,
+      topP: 1,
     },
   };
 

@@ -22,6 +22,16 @@ export const AccountSelectionStrategySchema = z.enum(['sticky', 'round-robin', '
 export type AccountSelectionStrategy = z.infer<typeof AccountSelectionStrategySchema>;
 
 /**
+ * Toast notification scope for controlling which sessions show toasts.
+ * 
+ * - `root_only` (default): Only show toasts for root sessions (no parentID).
+ *   Subagents and background tasks won't show toast notifications.
+ * - `all`: Show toasts for all sessions including subagents and background tasks.
+ */
+export const ToastScopeSchema = z.enum(['root_only', 'all']);
+export type ToastScope = z.infer<typeof ToastScopeSchema>;
+
+/**
  * Scheduling mode for rate limit behavior.
  * 
  * - `cache_first`: Wait for same account to recover (preserves prompt cache). Default.
@@ -66,6 +76,19 @@ export const AntigravityConfigSchema = z.object({
    * @default false
    */
   quiet_mode: z.boolean().default(false),
+  
+  /**
+   * Control which sessions show toast notifications.
+   * 
+   * - `root_only` (default): Only root sessions show toasts.
+   *   Subagents and background tasks will be silent (less spam).
+   * - `all`: All sessions show toasts including subagents and background tasks.
+   * 
+   * Debug logging captures all toasts regardless of this setting.
+   * Env override: OPENCODE_ANTIGRAVITY_TOAST_SCOPE=all
+   * @default "root_only"
+   */
+  toast_scope: ToastScopeSchema.default('root_only'),
   
   /**
    * Enable debug logging to file.
@@ -242,6 +265,16 @@ export const AntigravityConfigSchema = z.object({
    * @default false
    */
   quota_fallback: z.boolean().default(false),
+
+  /**
+   * Prefer gemini-cli routing before Antigravity for Gemini models.
+   * 
+   * When false (default): Antigravity is tried first, then gemini-cli.
+   * When true: gemini-cli is tried first, then Antigravity.
+   * 
+   * @default false
+   */
+  cli_first: z.boolean().default(false),
   
   /**
    * Strategy for selecting accounts when making requests.
@@ -326,6 +359,40 @@ export const AntigravityConfigSchema = z.object({
     */
    request_jitter_max_ms: z.number().min(0).max(5000).default(0),
    
+   /**
+    * Soft quota threshold percentage (1-100).
+    * When an account's quota usage reaches this percentage, skip it during
+    * account selection (same as if it were rate-limited).
+    * 
+    * Example: 90 means skip account when 90% of quota is used (10% remaining).
+    * Set to 100 to disable soft quota protection.
+    * 
+    * @default 90
+    */
+   soft_quota_threshold_percent: z.number().min(1).max(100).default(90),
+   
+   /**
+    * How often to refresh quota data in the background (in minutes).
+    * Quota is refreshed opportunistically after successful API requests.
+    * Set to 0 to disable automatic refresh (manual only via Check quotas).
+    * 
+    * @default 15
+    */
+   quota_refresh_interval_minutes: z.number().min(0).max(60).default(15),
+   
+   /**
+    * How long quota cache is considered fresh for threshold checks (in minutes).
+    * After this time, cache is stale and account is allowed (fail-open).
+    * 
+    * "auto" = derive from refresh interval: max(2 * refresh_interval, 10)
+    * 
+    * @default "auto"
+    */
+   soft_quota_cache_ttl_minutes: z.union([
+     z.literal("auto"),
+     z.number().min(1).max(120)
+   ]).default("auto"),
+   
    // =========================================================================
    // Health Score (used by hybrid strategy)
    // =========================================================================
@@ -370,6 +437,7 @@ export type SignatureCacheConfig = z.infer<typeof SignatureCacheConfigSchema>;
  */
 export const DEFAULT_CONFIG: AntigravityConfig = {
   quiet_mode: false,
+  toast_scope: 'root_only',
   debug: false,
   keep_thinking: false,
   session_recovery: true,
@@ -384,6 +452,7 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   proactive_refresh_check_interval_seconds: 300,
   max_rate_limit_wait_seconds: 300,
   quota_fallback: false,
+  cli_first: false,
   account_selection_strategy: 'hybrid',
   pid_offset_enabled: false,
   switch_on_first_rate_limit: true,
@@ -393,6 +462,9 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   default_retry_after_seconds: 60,
   max_backoff_seconds: 60,
   request_jitter_max_ms: 0,
+  soft_quota_threshold_percent: 90,
+  quota_refresh_interval_minutes: 15,
+  soft_quota_cache_ttl_minutes: "auto",
   auto_update: true,
   signature_cache: {
     enabled: true,

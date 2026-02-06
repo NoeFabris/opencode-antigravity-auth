@@ -20,6 +20,7 @@ export type AuthMenuAction =
   | { type: 'delete-all' }
   | { type: 'check' }
   | { type: 'manage' }
+  | { type: 'configure-models' }
   | { type: 'cancel' };
 
 export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'cancel';
@@ -53,6 +54,7 @@ export async function showAuthMenu(accounts: AccountInfo[]): Promise<AuthMenuAct
     { label: 'Add new account', value: { type: 'add' } },
     { label: 'Check quotas', value: { type: 'check' } },
     { label: 'Manage accounts (enable/disable)', value: { type: 'manage' } },
+    { label: 'Configure models in opencode.json', value: { type: 'configure-models' } },
 
     ...accounts.map(account => {
       const badge = getStatusBadge(account.status);

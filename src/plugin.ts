@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { tool } from "@opencode-ai/plugin";
-import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_PROVIDER_ID, type HeaderStyle } from "./constants";
+import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_ENDPOINT_PROD, ANTIGRAVITY_PROVIDER_ID, type HeaderStyle } from "./constants";
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts } from "./plugin/auth";
@@ -33,7 +33,7 @@ import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
 import { clearAccounts, loadAccounts, saveAccounts } from "./plugin/storage";
-import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs } from "./plugin/accounts";
+import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
 import { createSessionRecoveryHook, getRecoverySuccessToast } from "./plugin/recovery";
@@ -46,6 +46,7 @@ import { executeSearch } from "./plugin/search";
 import type {
   GetAuth,
   LoaderResult,
+  PluginClient,
   PluginContext,
   PluginResult,
   ProjectContextResult,
@@ -64,6 +65,11 @@ function getCapacityBackoffDelay(consecutiveFailures: number): number {
 const warmupAttemptedSessionIds = new Set<string>();
 const warmupSucceededSessionIds = new Set<string>();
 
+// Track if this plugin instance is running in a child session (subagent, background task)
+// Used to filter toasts based on toast_scope config
+let isChildSession = false;
+let childSessionParentID: string | undefined = undefined;
+
 const log = createLogger("plugin");
 
 // Module-level toast debounce to persist across requests (fixes toast spam)
@@ -71,8 +77,9 @@ const rateLimitToastCooldowns = new Map<string, number>();
 const RATE_LIMIT_TOAST_COOLDOWN_MS = 5000;
 const MAX_TOAST_COOLDOWN_ENTRIES = 100;
 
-// Track if "all accounts rate-limited" toast was shown to prevent spam in while loop
-let allAccountsRateLimitedToastShown = false;
+// Track if "all accounts blocked" toasts were shown to prevent spam in while loop
+let softQuotaToastShown = false;
+let rateLimitToastShown = false;
 
 function cleanupToastCooldowns(): void {
   if (rateLimitToastCooldowns.size > MAX_TOAST_COOLDOWN_ENTRIES) {
@@ -97,8 +104,57 @@ function shouldShowRateLimitToast(message: string): boolean {
   return true;
 }
 
-function resetAllAccountsRateLimitedToast(): void {
-  allAccountsRateLimitedToastShown = false;
+function resetAllAccountsBlockedToasts(): void {
+  softQuotaToastShown = false;
+  rateLimitToastShown = false;
+}
+
+const quotaRefreshInProgressByEmail = new Set<string>();
+
+async function triggerAsyncQuotaRefreshForAccount(
+  accountManager: AccountManager,
+  accountIndex: number,
+  client: PluginClient,
+  providerId: string,
+  intervalMinutes: number,
+): Promise<void> {
+  if (intervalMinutes <= 0) return;
+  
+  const accounts = accountManager.getAccounts();
+  const account = accounts[accountIndex];
+  if (!account || account.enabled === false) return;
+  
+  const accountKey = account.email ?? `idx-${accountIndex}`;
+  if (quotaRefreshInProgressByEmail.has(accountKey)) return;
+  
+  const intervalMs = intervalMinutes * 60 * 1000;
+  const age = account.cachedQuotaUpdatedAt != null 
+    ? Date.now() - account.cachedQuotaUpdatedAt 
+    : Infinity;
+  
+  if (age < intervalMs) return;
+  
+  quotaRefreshInProgressByEmail.add(accountKey);
+  
+  try {
+    const accountsForCheck = accountManager.getAccountsForQuotaCheck();
+    const singleAccount = accountsForCheck[accountIndex];
+    if (!singleAccount) {
+      quotaRefreshInProgressByEmail.delete(accountKey);
+      return;
+    }
+    
+    const results = await checkAccountsQuota([singleAccount], client, providerId);
+    
+    if (results[0]?.status === "ok" && results[0]?.quota?.groups) {
+      accountManager.updateQuotaCache(accountIndex, results[0].quota.groups);
+      accountManager.requestSaveToDisk();
+    }
+  } catch (err) {
+    log.debug(`quota-refresh-failed email=${accountKey}`, { error: String(err) });
+  } finally {
+    quotaRefreshInProgressByEmail.delete(accountKey);
+  }
 }
 
 function trackWarmupAttempt(sessionId: string): boolean {
@@ -779,6 +835,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
     // Forward to update checker
     await updateChecker.event(input);
     
+    // Track if this is a child session (subagent, background task)
+    // This is used to filter toasts based on toast_scope config
+    if (input.event.type === "session.created") {
+      const props = input.event.properties as { info?: { parentID?: string } } | undefined;
+      if (props?.info?.parentID) {
+        isChildSession = true;
+        childSessionParentID = props.info.parentID;
+        log.debug("child-session-detected", { parentID: props.info.parentID });
+      } else {
+        // Reset for root sessions - important when plugin instance is reused
+        isChildSession = false;
+        childSessionParentID = undefined;
+        log.debug("root-session-detected", {});
+      }
+    }
+    
     // Handle session recovery
     if (sessionRecovery && input.event.type === "session.error") {
       const props = input.event.properties as Record<string, unknown> | undefined;
@@ -807,15 +879,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
             query: { directory },
           }).catch(() => {});
           
-          // Show success toast
+          // Show success toast (respects toast_scope for child sessions)
           const successToast = getRecoverySuccessToast();
-          await client.tui.showToast({
-            body: {
-              title: successToast.title,
-              message: successToast.message,
-              variant: "success",
-            },
-          }).catch(() => {});
+          log.debug("recovery-toast", { ...successToast, isChildSession, toastScope: config.toast_scope });
+          if (!(config.toast_scope === "root_only" && isChildSession)) {
+            await client.tui.showToast({
+              body: {
+                title: successToast.title,
+                message: successToast.message,
+                variant: "success",
+              },
+            }).catch(() => {});
+          }
         }
       }
     }
@@ -992,11 +1067,21 @@ export const createAntigravityPlugin = (providerId: string) => async (
           // Use while(true) loop to handle rate limits with backoff
           // This ensures we wait and retry when all accounts are rate-limited
           const quietMode = config.quiet_mode;
+          const toastScope = config.toast_scope;
 
-          // Helper to show toast without blocking on abort (respects quiet_mode)
+          // Helper to show toast without blocking on abort (respects quiet_mode and toast_scope)
           const showToast = async (message: string, variant: "info" | "warning" | "success" | "error") => {
+            // Always log to debug regardless of toast filtering
+            log.debug("toast", { message, variant, isChildSession, toastScope });
+            
             if (quietMode) return;
             if (abortSignal?.aborted) return;
+            
+            // Filter toasts for child sessions when toast_scope is "root_only"
+            if (toastScope === "root_only" && isChildSession) {
+              log.debug("toast-suppressed-child-session", { message, variant, parentID: childSessionParentID });
+              return;
+            }
             
             if (variant === "warning" && message.toLowerCase().includes("rate")) {
               if (!shouldShowRateLimitToast(message)) {
@@ -1015,10 +1100,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
           
           const hasOtherAccountWithAntigravity = (currentAccount: any): boolean => {
             if (family !== "gemini") return false;
-            const otherAccounts = accountManager.getAccounts().filter(acc => acc.index !== currentAccount.index);
-            return otherAccounts.some(acc => 
-              !accountManager.isRateLimitedForHeaderStyle(acc, family, "antigravity", model)
-            );
+            // Use AccountManager method which properly checks for disabled/cooling-down accounts
+            return accountManager.hasOtherAccountWithAntigravityAvailable(currentAccount.index, family, model);
           };
 
           while (true) {
@@ -1033,15 +1116,52 @@ export const createAntigravityPlugin = (providerId: string) => async (
               throw new Error("No Antigravity accounts available. Run `opencode auth login`.");
             }
 
+            const softQuotaCacheTtlMs = computeSoftQuotaCacheTtlMs(
+              config.soft_quota_cache_ttl_minutes,
+              config.quota_refresh_interval_minutes,
+            );
+
             const account = accountManager.getCurrentOrNextForFamily(
               family, 
               model, 
               config.account_selection_strategy,
               preferredHeaderStyle,
               config.pid_offset_enabled,
+              config.soft_quota_threshold_percent,
+              softQuotaCacheTtlMs,
             );
             
             if (!account) {
+              if (accountManager.areAllAccountsOverSoftQuota(family, config.soft_quota_threshold_percent, softQuotaCacheTtlMs, model)) {
+                const threshold = config.soft_quota_threshold_percent;
+                const softQuotaWaitMs = accountManager.getMinWaitTimeForSoftQuota(family, threshold, softQuotaCacheTtlMs, model);
+                const maxWaitMs = (config.max_rate_limit_wait_seconds ?? 300) * 1000;
+                
+                if (softQuotaWaitMs === null || (maxWaitMs > 0 && softQuotaWaitMs > maxWaitMs)) {
+                  const waitTimeFormatted = softQuotaWaitMs ? formatWaitTime(softQuotaWaitMs) : "unknown";
+                  await showToast(
+                    `All accounts over ${threshold}% quota threshold. Resets in ${waitTimeFormatted}.`,
+                    "error"
+                  );
+                  throw new Error(
+                    `Quota protection: All ${accountCount} account(s) are over ${threshold}% usage for ${family}. ` +
+                    `Quota resets in ${waitTimeFormatted}. ` +
+                    `Add more accounts, wait for quota reset, or set soft_quota_threshold_percent: 100 to disable.`
+                  );
+                }
+                
+                const waitSecValue = Math.max(1, Math.ceil(softQuotaWaitMs / 1000));
+                pushDebug(`all-over-soft-quota family=${family} accounts=${accountCount} waitMs=${softQuotaWaitMs}`);
+                
+                if (!softQuotaToastShown) {
+                  await showToast(`All ${accountCount} account(s) over ${threshold}% quota. Waiting ${formatWaitTime(softQuotaWaitMs)}...`, "warning");
+                  softQuotaToastShown = true;
+                }
+                
+                await sleep(softQuotaWaitMs, abortSignal);
+                continue;
+              }
+
               // All accounts are rate-limited - wait and retry
               const waitMs = accountManager.getMinWaitTimeForFamily(
                 family,
@@ -1079,9 +1199,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 );
               }
 
-              if (!allAccountsRateLimitedToastShown) {
+              if (!rateLimitToastShown) {
                 await showToast(`All ${accountCount} account(s) rate-limited for ${family}. Waiting ${waitSecValue}s...`, "warning");
-                allAccountsRateLimitedToastShown = true;
+                rateLimitToastShown = true;
               }
 
               // Wait for the rate-limit cooldown to expire, then retry
@@ -1090,7 +1210,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
 
             // Account is available - reset the toast flag
-            resetAllAccountsRateLimitedToast();
+            resetAllAccountsBlockedToasts();
 
             pushDebug(
               `selected idx=${account.index} email=${account.email ?? ""} family=${family} accounts=${accountCount} strategy=${config.account_selection_strategy}`,
@@ -1212,7 +1332,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
               continue;
             }
 
-            if (projectContext.auth !== authRecord) {
+            if (projectContext.auth.refresh !== authRecord.refresh || 
+                projectContext.auth.access !== authRecord.access) {
               accountManager.updateFromAuth(account, projectContext.auth);
               authRecord = projectContext.auth;
               try {
@@ -1294,7 +1415,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // - Models with :antigravity suffix -> use Antigravity quota
             // - Models without suffix (default) -> use Gemini CLI quota
             // - Claude models -> always use Antigravity
+            // Use preferredHeaderStyle (computed at loop start) instead of recomputing
             let headerStyle = preferredHeaderStyle;
+            const cliFirst = getCliFirst(config);
             pushDebug(`headerStyle=${headerStyle} explicit=${explicitQuota}`);
             if (account.fingerprint) {
               pushDebug(`fingerprint: quotaUser=${account.fingerprint.quotaUser} deviceId=${account.fingerprint.deviceId.slice(0, 8)}...`);
@@ -1302,17 +1425,54 @@ export const createAntigravityPlugin = (providerId: string) => async (
             
             // Check if this header style is rate-limited for this account
             if (accountManager.isRateLimitedForHeaderStyle(account, family, headerStyle, model)) {
-              // Quota fallback: try alternate quota on same account (if enabled and not explicit)
-              if (config.quota_fallback && !explicitQuota && family === "gemini") {
+              // Antigravity-first fallback: exhaust antigravity across ALL accounts before gemini-cli
+              if (config.quota_fallback && !explicitQuota && family === "gemini" && headerStyle === "antigravity" && !cliFirst) {
+                // Check if ANY other account has antigravity available
+                if (accountManager.hasOtherAccountWithAntigravityAvailable(account.index, family, model)) {
+                  // Switch to another account with antigravity (preserve antigravity priority)
+                  pushDebug(`antigravity rate-limited on account ${account.index}, but available on other accounts. Switching.`);
+                  shouldSwitchAccount = true;
+                } else {
+                  // All accounts exhausted antigravity - fall back to gemini-cli on this account
+                  const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
+                  const fallbackStyle = resolveQuotaFallbackHeaderStyle({
+                    quotaFallback: config.quota_fallback,
+                    cliFirst,
+                    explicitQuota,
+                    family,
+                    headerStyle,
+                    alternateStyle,
+                  });
+                  if (fallbackStyle) {
+                    await showToast(
+                      `Antigravity quota exhausted on all accounts. Using Gemini CLI quota.`,
+                      "warning"
+                    );
+                    headerStyle = fallbackStyle;
+                    pushDebug(`all-accounts antigravity exhausted, quota fallback: ${headerStyle}`);
+                  } else {
+                    shouldSwitchAccount = true;
+                  }
+                }
+              } else if (config.quota_fallback && !explicitQuota && family === "gemini") {
+                // gemini-cli rate-limited - try alternate style (antigravity) on same account
                 const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
-                if (alternateStyle && alternateStyle !== headerStyle) {
+                const fallbackStyle = resolveQuotaFallbackHeaderStyle({
+                  quotaFallback: config.quota_fallback,
+                  cliFirst,
+                  explicitQuota,
+                  family,
+                  headerStyle,
+                  alternateStyle,
+                });
+                if (fallbackStyle) {
                   const quotaName = headerStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
-                  const altQuotaName = alternateStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
+                  const altQuotaName = fallbackStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
                   await showToast(
                     `${quotaName} quota exhausted, using ${altQuotaName} quota`,
                     "warning"
                   );
-                  headerStyle = alternateStyle;
+                  headerStyle = fallbackStyle;
                   pushDebug(`quota fallback: ${headerStyle}`);
                 } else {
                   shouldSwitchAccount = true;
@@ -1342,6 +1502,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
               }
 
               const currentEndpoint = ANTIGRAVITY_ENDPOINT_FALLBACKS[i];
+
+              // Skip sandbox endpoints for Gemini CLI models - they only work with Antigravity quota
+              // Gemini CLI models must use production endpoint (cloudcode-pa.googleapis.com)
+              if (headerStyle === "gemini-cli" && currentEndpoint !== ANTIGRAVITY_ENDPOINT_PROD) {
+                pushDebug(`Skipping sandbox endpoint ${currentEndpoint} for gemini-cli headerStyle`);
+                continue;
+              }
 
               try {
                 const prepared = prepareAntigravityRequest(
@@ -1527,9 +1694,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                   accountManager.requestSaveToDisk();
 
-                  // For Gemini, try prioritized Antigravity across ALL accounts first
+                  // For Gemini, preserve preferred quota across accounts before fallback
                   if (family === "gemini") {
-                    if (headerStyle === "antigravity") {
+                    if (headerStyle === "antigravity" && !cliFirst) {
                       // Check if any other account has Antigravity quota for this model
                       if (hasOtherAccountWithAntigravity(account)) {
                         pushDebug(`antigravity exhausted on account ${account.index}, but available on others. Switching account.`);
@@ -1543,13 +1710,43 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       // Before falling back to gemini-cli, check if it's the last option (automatic fallback)
                       if (config.quota_fallback && !explicitQuota) {
                         const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
-                        if (alternateStyle && alternateStyle !== headerStyle) {
+                        const fallbackStyle = resolveQuotaFallbackHeaderStyle({
+                          quotaFallback: config.quota_fallback,
+                          cliFirst,
+                          explicitQuota,
+                          family,
+                          headerStyle,
+                          alternateStyle,
+                        });
+                        if (fallbackStyle) {
                           const safeModelName = model || "this model";
                           await showToast(
                             `Antigravity quota exhausted for ${safeModelName}. Switching to Gemini CLI quota...`,
                             "warning"
                           );
-                          headerStyle = alternateStyle;
+                          headerStyle = fallbackStyle;
+                          pushDebug(`quota fallback: ${headerStyle}`);
+                          continue;
+                        }
+                      }
+                    } else if (headerStyle === "gemini-cli" && cliFirst) {
+                      if (config.quota_fallback && !explicitQuota) {
+                        const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
+                        const fallbackStyle = resolveQuotaFallbackHeaderStyle({
+                          quotaFallback: config.quota_fallback,
+                          cliFirst,
+                          explicitQuota,
+                          family,
+                          headerStyle,
+                          alternateStyle,
+                        });
+                        if (fallbackStyle) {
+                          const safeModelName = model || "this model";
+                          await showToast(
+                            `Gemini CLI quota exhausted for ${safeModelName}. Switching to Antigravity quota...`,
+                            "warning"
+                          );
+                          headerStyle = fallbackStyle;
                           pushDebug(`quota fallback: ${headerStyle}`);
                           continue;
                         }
@@ -1644,6 +1841,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   account.consecutiveFailures = 0;
                   getHealthTracker().recordSuccess(account.index);
                   accountManager.markAccountUsed(account.index);
+                  
+                  void triggerAsyncQuotaRefreshForAccount(
+                    accountManager,
+                    account.index,
+                    client,
+                    providerId,
+                    config.quota_refresh_interval_minutes,
+                  );
                 }
                 logAntigravityDebugResponse(debugContext, response, {
                   note: response.ok ? "Success" : `Error ${response.status}`,
@@ -1904,36 +2109,132 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 menuResult = await promptLoginMode(existingAccounts);
 
                 if (menuResult.mode === "check") {
-                  console.log("\nChecking quotas for all accounts...");
+                  console.log("\n📊 Checking quotas for all accounts...\n");
                   const results = await checkAccountsQuota(existingStorage.accounts, client, providerId);
+                  let storageUpdated = false;
+                  
                   for (const res of results) {
                     const label = res.email || `Account ${res.index + 1}`;
                     const disabledStr = res.disabled ? " (disabled)" : "";
-                    console.log(`\n${res.index + 1}. ${label}${disabledStr}`);
+                    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+                    console.log(`  ${label}${disabledStr}`);
+                    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+                    
                     if (res.status === "error") {
-                      console.log(`   Error: ${res.error}`);
+                      console.log(`  ❌ Error: ${res.error}\n`);
                       continue;
                     }
-                    if (!res.quota || Object.keys(res.quota.groups).length === 0) {
-                      console.log("   No quota information available.");
-                      if (res.quota?.error) console.log(`   Error: ${res.quota.error}`);
-                      continue;
-                    }
-                    const printGrp = (name: string, group: any) => {
-                      if (!group) return;
-                      const remaining = typeof group.remainingFraction === 'number' 
-                        ? `${Math.round(group.remainingFraction * 100)}%` 
-                        : 'UNKNOWN';
-                      const resetStr = group.resetTime ? `, resets in ${formatWaitTime(Date.parse(group.resetTime) - Date.now())}` : '';
-                      console.log(`   ${name}: ${remaining}${resetStr}`);
+
+                    // ANSI color codes
+                    const colors = {
+                      red: '\x1b[31m',
+                      orange: '\x1b[33m',  // Yellow/orange
+                      green: '\x1b[32m',
+                      reset: '\x1b[0m',
                     };
-                    printGrp("Claude", res.quota.groups.claude);
-                    printGrp("Gemini 3 Pro", res.quota.groups["gemini-pro"]);
-                    printGrp("Gemini 3 Flash", res.quota.groups["gemini-flash"]);
-                    if (res.updatedAccount) {
-                      existingStorage.accounts[res.index] = res.updatedAccount;
-                      await saveAccounts(existingStorage);
+
+                    // Get color based on remaining percentage
+                    const getColor = (remaining?: number): string => {
+                      if (typeof remaining !== 'number') return colors.reset;
+                      if (remaining < 0.2) return colors.red;
+                      if (remaining < 0.6) return colors.orange;
+                      return colors.green;
+                    };
+
+                    // Helper to create colored progress bar
+                    const createProgressBar = (remaining?: number, width: number = 20): string => {
+                      if (typeof remaining !== 'number') return '░'.repeat(width) + ' ???';
+                      const filled = Math.round(remaining * width);
+                      const empty = width - filled;
+                      const color = getColor(remaining);
+                      const bar = `${color}${'█'.repeat(filled)}${colors.reset}${'░'.repeat(empty)}`;
+                      const pct = `${color}${Math.round(remaining * 100)}%${colors.reset}`.padStart(4 + color.length + colors.reset.length);
+                      return `${bar} ${pct}`;
+                    };
+
+                    // Helper to format reset time with days support
+                    const formatReset = (resetTime?: string): string => {
+                      if (!resetTime) return '';
+                      const ms = Date.parse(resetTime) - Date.now();
+                      if (ms <= 0) return ' (resetting...)';
+                      
+                      const hours = ms / (1000 * 60 * 60);
+                      if (hours >= 24) {
+                        const days = Math.floor(hours / 24);
+                        const remainingHours = Math.floor(hours % 24);
+                        if (remainingHours > 0) {
+                          return ` (resets in ${days}d ${remainingHours}h)`;
+                        }
+                        return ` (resets in ${days}d)`;
+                      }
+                      return ` (resets in ${formatWaitTime(ms)})`;
+                    };
+
+                    // Display Gemini CLI Quota first (as requested - swap order)
+                    const hasGeminiCli = res.geminiCliQuota && res.geminiCliQuota.models.length > 0;
+                    console.log(`\n  ┌─ Gemini CLI Quota`);
+                    if (!hasGeminiCli) {
+                      const errorMsg = res.geminiCliQuota?.error || "No Gemini CLI quota available";
+                      console.log(`  │  └─ ${errorMsg}`);
+                    } else {
+                      const models = res.geminiCliQuota!.models;
+                      models.forEach((model, idx) => {
+                        const isLast = idx === models.length - 1;
+                        const connector = isLast ? "└─" : "├─";
+                        const bar = createProgressBar(model.remainingFraction);
+                        const reset = formatReset(model.resetTime);
+                        const modelName = model.modelId.padEnd(29);
+                        console.log(`  │  ${connector} ${modelName} ${bar}${reset}`);
+                      });
                     }
+
+                    // Display Antigravity Quota second
+                    const hasAntigravity = res.quota && Object.keys(res.quota.groups).length > 0;
+                    console.log(`  │`);
+                    console.log(`  └─ Antigravity Quota`);
+                    if (!hasAntigravity) {
+                      const errorMsg = res.quota?.error || "No quota information available";
+                      console.log(`     └─ ${errorMsg}`);
+                    } else {
+                      const groups = res.quota!.groups;
+                      const groupEntries = [
+                        { name: "Claude", data: groups.claude },
+                        { name: "Gemini 3 Pro", data: groups["gemini-pro"] },
+                        { name: "Gemini 3 Flash", data: groups["gemini-flash"] },
+                      ].filter(g => g.data);
+                      
+                      groupEntries.forEach((g, idx) => {
+                        const isLast = idx === groupEntries.length - 1;
+                        const connector = isLast ? "└─" : "├─";
+                        const bar = createProgressBar(g.data!.remainingFraction);
+                        const reset = formatReset(g.data!.resetTime);
+                        const modelName = g.name.padEnd(29);
+                        console.log(`     ${connector} ${modelName} ${bar}${reset}`);
+                      });
+                    }
+                    console.log("");
+
+                    // Cache quota data for soft quota protection
+                    if (res.quota?.groups) {
+                      const acc = existingStorage.accounts[res.index];
+                      if (acc) {
+                        acc.cachedQuota = res.quota.groups;
+                        acc.cachedQuotaUpdatedAt = Date.now();
+                        storageUpdated = true;
+                      }
+                    }
+
+                    if (res.updatedAccount) {
+                      existingStorage.accounts[res.index] = {
+                        ...res.updatedAccount,
+                        cachedQuota: res.quota?.groups,
+                        cachedQuotaUpdatedAt: Date.now(),
+                      };
+                      storageUpdated = true;
+                    }
+                  }
+                  if (storageUpdated) {
+                    await saveAccounts(existingStorage);
                   }
                   console.log("");
                   continue;
@@ -2412,16 +2713,40 @@ function getModelFamilyFromUrl(urlString: string): ModelFamily {
   return family;
 }
 
+function resolveQuotaFallbackHeaderStyle(input: {
+  quotaFallback: boolean;
+  cliFirst: boolean;
+  explicitQuota: boolean;
+  family: ModelFamily;
+  headerStyle: HeaderStyle;
+  alternateStyle: HeaderStyle | null;
+}): HeaderStyle | null {
+  if (!input.quotaFallback || input.explicitQuota || input.family !== "gemini") {
+    return null;
+  }
+  if (!input.alternateStyle || input.alternateStyle === input.headerStyle) {
+    return null;
+  }
+  if (input.cliFirst && input.headerStyle !== "gemini-cli") {
+    return null;
+  }
+  return input.alternateStyle;
+}
+
+function getCliFirst(config: AntigravityConfig): boolean {
+  return (config as AntigravityConfig & { cli_first?: boolean }).cli_first ?? false;
+}
+
 function getHeaderStyleFromUrl(urlString: string, family: ModelFamily): HeaderStyle {
   if (family === "claude") {
     return "antigravity";
   }
   const modelWithSuffix = extractModelFromUrlWithSuffix(urlString);
   if (!modelWithSuffix) {
-    return "gemini-cli";
+    return "antigravity";
   }
   const { quotaPreference } = resolveModelWithTier(modelWithSuffix);
-  return quotaPreference ?? "gemini-cli";
+  return quotaPreference === "gemini-cli" ? "antigravity" : (quotaPreference ?? "antigravity");
 }
 
 function isExplicitQuotaFromUrl(urlString: string): boolean {
@@ -2432,3 +2757,8 @@ function isExplicitQuotaFromUrl(urlString: string): boolean {
   const { explicitQuota } = resolveModelWithTier(modelWithSuffix);
   return explicitQuota ?? false;
 }
+
+export const __testExports = {
+  getHeaderStyleFromUrl,
+  resolveQuotaFallbackHeaderStyle,
+};

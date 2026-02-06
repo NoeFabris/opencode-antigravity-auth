@@ -4,6 +4,10 @@ import {
   readFileSync,
   writeFileSync,
   appendFileSync,
+  mkdirSync,
+  renameSync,
+  copyFileSync,
+  unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -189,6 +193,9 @@ export interface AccountMetadataV3 {
   cooldownReason?: CooldownReason;
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
+  /** Cached soft quota data */
+  cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
+  cachedQuotaUpdatedAt?: number;
 }
 
 export interface AccountStorageV3 {
@@ -203,22 +210,122 @@ export interface AccountStorageV3 {
 
 type AnyAccountStorage = AccountStorageV1 | AccountStorage | AccountStorageV3;
 
+/**
+ * Gets the legacy Windows config directory (%APPDATA%\opencode).
+ * Used for migration from older plugin versions.
+ */
+function getLegacyWindowsConfigDir(): string {
+  return join(
+    process.env.APPDATA || join(homedir(), "AppData", "Roaming"),
+    "opencode",
+  );
+}
+
+/**
+ * Gets the config directory path, with the following precedence:
+ * 1. OPENCODE_CONFIG_DIR env var (if set)
+ * 2. ~/.config/opencode (all platforms, including Windows)
+ *
+ * On Windows, also checks for legacy %APPDATA%\opencode path for migration.
+ */
 function getConfigDir(): string {
-  const platform = process.platform;
-  if (platform === "win32") {
-    return join(
-      process.env.APPDATA || join(homedir(), "AppData", "Roaming"),
-      "opencode",
-    );
+  // 1. Check for explicit override via env var
+  if (process.env.OPENCODE_CONFIG_DIR) {
+    return process.env.OPENCODE_CONFIG_DIR;
   }
 
+  // 2. Use ~/.config/opencode on all platforms (including Windows)
   const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
   return join(xdgConfig, "opencode");
 }
 
-export function getStoragePath(): string {
-  return join(getConfigDir(), "antigravity-accounts.json");
+/**
+ * Migrates config from legacy Windows location to the new path.
+ * Moves the file if legacy exists and new doesn't.
+ * Returns true if migration was performed.
+ */
+function migrateLegacyWindowsConfig(): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  const newPath = join(getConfigDir(), "antigravity-accounts.json");
+  const legacyPath = join(
+    getLegacyWindowsConfigDir(),
+    "antigravity-accounts.json",
+  );
+
+  // Only migrate if legacy exists and new doesn't
+  if (!existsSync(legacyPath) || existsSync(newPath)) {
+    return false;
+  }
+
+  try {
+    // Ensure new config directory exists
+    const newConfigDir = getConfigDir();
+
+    mkdirSync(newConfigDir, { recursive: true });
+
+    // Try rename first (atomic, but fails across filesystems)
+    try {
+      renameSync(legacyPath, newPath);
+      log.info("Migrated Windows config via rename", { from: legacyPath, to: newPath });
+    } catch {
+      // Fallback: copy then delete (for cross-filesystem moves)
+      copyFileSync(legacyPath, newPath);
+      unlinkSync(legacyPath);
+      log.info("Migrated Windows config via copy+delete", { from: legacyPath, to: newPath });
+    }
+
+    return true;
+  } catch (error) {
+    log.warn("Failed to migrate legacy Windows config, will use legacy path", {
+      legacyPath,
+      newPath,
+      error: String(error),
+    });
+    return false;
+  }
 }
+
+/**
+ * Gets the storage path, migrating from legacy Windows location if needed.
+ * On Windows, attempts to move legacy config to new path for alignment.
+ */
+function getStoragePathWithMigration(): string {
+  const newPath = join(getConfigDir(), "antigravity-accounts.json");
+
+  // On Windows, attempt to migrate legacy config to new location
+  if (process.platform === "win32") {
+    migrateLegacyWindowsConfig();
+
+    // If migration failed and legacy still exists, fall back to it
+    if (!existsSync(newPath)) {
+      const legacyPath = join(
+        getLegacyWindowsConfigDir(),
+        "antigravity-accounts.json",
+      );
+      if (existsSync(legacyPath)) {
+        log.info("Using legacy Windows config path (migration failed)", {
+          legacyPath,
+          newPath,
+        });
+        return legacyPath;
+      }
+    }
+  }
+
+  return newPath;
+}
+
+export function getStoragePath(): string {
+  return getStoragePathWithMigration();
+}
+
+/**
+ * Gets the config directory path. Exported for use by other modules.
+ */
+export { getConfigDir };
 
 const LOCK_OPTIONS = {
   stale: 10000,
