@@ -72,7 +72,9 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
    opencode auth login
    ```
 
-3. **Add models** — copy the [full configuration](#models) below
+3. **Add models** — choose one:
+   - Run `opencode auth login` → select **"Configure models in opencode.json"** (auto-configures all models)
+   - Or manually copy the [full configuration](#models) below
 
 4. **Use it:**
 
@@ -111,7 +113,7 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --var
 
 ### Model Reference
 
-**Antigravity quota** (Claude + Gemini 3):
+**Antigravity quota** (default routing for Claude and Gemini):
 
 | Model | Variants | Notes |
 |-------|----------|-------|
@@ -121,7 +123,7 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --var
 | `antigravity-claude-sonnet-4-5-thinking` | low, max | Claude Sonnet with extended thinking |
 | `antigravity-claude-opus-4-5-thinking` | low, max | Claude Opus with extended thinking |
 
-**Gemini CLI quota** (separate from Antigravity):
+**Gemini CLI quota** (separate from Antigravity; used when `cli_first` is true or as fallback):
 
 | Model | Notes |
 |-------|-------|
@@ -129,6 +131,13 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --var
 | `gemini-2.5-pro` | Gemini 2.5 Pro |
 | `gemini-3-flash-preview` | Gemini 3 Flash (preview) |
 | `gemini-3-pro-preview` | Gemini 3 Pro (preview) |
+
+> **Routing Behavior:**
+> - **Antigravity-first (default):** Gemini models use Antigravity quota across accounts.
+> - **CLI-first (`cli_first: true`):** Gemini models use Gemini CLI quota first.
+> - With `quota_fallback` enabled, the plugin can spill to the other quota when all accounts are exhausted.
+> - Claude and image models always use Antigravity.
+> Model names are automatically transformed for the target API (e.g., `antigravity-gemini-3-flash` → `gemini-3-flash-preview` for CLI).
 
 **Using variants:**
 ```bash
@@ -218,6 +227,8 @@ Add this to your `~/.config/opencode/opencode.json`:
 }
 ```
 
+> **Backward Compatibility:** Legacy model names with `antigravity-` prefix (e.g., `antigravity-gemini-3-flash`) still work. The plugin automatically handles model name transformation for both Antigravity and Gemini CLI APIs.
+
 </details>
 
 ---
@@ -231,6 +242,7 @@ opencode auth login  # Run again to add more accounts
 ```
 
 **Account management options (via `opencode auth login`):**
+- **Configure models** — Auto-configure all plugin models in opencode.json
 - **Check quotas** — View remaining API quota for each account
 - **Manage accounts** — Enable/disable specific accounts for rotation
 
@@ -254,6 +266,10 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 | Debug logs | `~/.config/opencode/antigravity-logs/` |
 
 > **Windows users**: `~` resolves to your user home directory (e.g., `C:\Users\YourName`). Do NOT use `%APPDATA%`.
+
+> **Custom path**: Set `OPENCODE_CONFIG_DIR` environment variable to use a custom location.
+
+> **Windows migration**: If upgrading from plugin v1.3.x or earlier, the plugin will automatically find your existing config in `%APPDATA%\opencode\` and use it. New installations use `~/.config/opencode/`.
 
 ---
 
@@ -570,7 +586,7 @@ Most users don't need to configure anything — defaults work well.
 |--------|---------|--------------
 | `keep_thinking` | `false` | Preserve Claude's thinking across turns. **Warning:** enabling may degrade model stability. |
 | `session_recovery` | `true` | Auto-recover from tool errors |
-| `web_search.default_mode` | `"off"` | Gemini Google Search: `"auto"` or `"off"` |
+| `cli_first` | `false` | Route Gemini models to Gemini CLI first (Claude and image models stay on Antigravity). |
 
 ### Account Rotation
 
@@ -580,6 +596,16 @@ Most users don't need to configure anything — defaults work well.
 | **2-5 accounts** | Default (`"hybrid"`) works great |
 | **5+ accounts** | `"account_selection_strategy": "round-robin"` |
 | **Parallel agents** | Add `"pid_offset_enabled": true` |
+
+### Quota Protection
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `soft_quota_threshold_percent` | `90` | Skip account when quota usage exceeds this percentage. Prevents Google from penalizing accounts that fully exhaust quota. Set to `100` to disable. |
+| `quota_refresh_interval_minutes` | `15` | Background quota refresh interval. After successful API requests, refreshes quota cache if older than this interval. Set to `0` to disable. |
+| `soft_quota_cache_ttl_minutes` | `"auto"` | How long quota cache is considered fresh. `"auto"` = max(2 × refresh interval, 10 minutes). Set a number (1-120) for fixed TTL. |
+
+> **How it works**: Quota cache is refreshed automatically after API requests (when older than `quota_refresh_interval_minutes`) and manually via "Check quotas" in `opencode auth login`. The threshold check uses `soft_quota_cache_ttl_minutes` to determine cache freshness - if cache is older, the account is considered "unknown" and allowed (fail-open). When ALL accounts exceed the threshold, the plugin waits for the earliest quota reset time (like rate limit behavior). If wait time exceeds `max_rate_limit_wait_seconds`, it errors immediately.
 
 ### Rate Limit Scheduling
 
@@ -608,8 +634,9 @@ For all options, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 **Environment variables:**
 ```bash
-OPENCODE_ANTIGRAVITY_DEBUG=1 opencode   # Enable debug logging
-OPENCODE_ANTIGRAVITY_DEBUG=2 opencode   # Verbose logging
+OPENCODE_CONFIG_DIR=/path/to/config opencode  # Custom config directory
+OPENCODE_ANTIGRAVITY_DEBUG=1 opencode         # Enable debug logging
+OPENCODE_ANTIGRAVITY_DEBUG=2 opencode         # Verbose logging
 ```
 
 ---

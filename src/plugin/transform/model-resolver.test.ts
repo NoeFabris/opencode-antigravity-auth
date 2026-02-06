@@ -14,22 +14,72 @@ describe("resolveModelWithTier", () => {
       const result = resolveModelWithTier("gemini-3-flash");
       expect(result.actualModel).toBe("gemini-3-flash");
       expect(result.thinkingLevel).toBe("low");
+      expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("gemini-3-flash-preview gets default thinkingLevel 'low'", () => {
+    it("gemini-3-flash-preview gets default thinkingLevel 'low' with antigravity quota", () => {
       const result = resolveModelWithTier("gemini-3-flash-preview");
       expect(result.actualModel).toBe("gemini-3-flash-preview");
       expect(result.thinkingLevel).toBe("low");
-      expect(result.quotaPreference).toBe("gemini-cli");
+      // All Gemini models now default to antigravity
+      expect(result.quotaPreference).toBe("antigravity");
     });
   });
 
   describe("Gemini 3 preview models (Issue #115)", () => {
-    it("gemini-3-pro-preview gets default thinkingLevel 'low'", () => {
+    it("gemini-3-pro-preview gets default thinkingLevel 'low' with antigravity quota", () => {
       const result = resolveModelWithTier("gemini-3-pro-preview");
       expect(result.actualModel).toBe("gemini-3-pro-preview");
       expect(result.thinkingLevel).toBe("low");
+      // All Gemini models now default to antigravity
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+  });
+
+  describe("All Gemini models default to antigravity quota", () => {
+    it("gemini-2.5-flash defaults to antigravity", () => {
+      const result = resolveModelWithTier("gemini-2.5-flash");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("gemini-2.5-pro defaults to antigravity", () => {
+      const result = resolveModelWithTier("gemini-2.5-pro");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("gemini-2.0-flash defaults to antigravity", () => {
+      const result = resolveModelWithTier("gemini-2.0-flash");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+  });
+
+  describe("cli_first quota preference", () => {
+    it("prefers gemini-cli when cli_first is true and no prefix is set", () => {
+      const result = resolveModelWithTier("gemini-3-flash", { cli_first: true });
       expect(result.quotaPreference).toBe("gemini-cli");
+      expect(result.explicitQuota).toBe(false);
+    });
+
+    it("keeps antigravity when antigravity prefix is explicit", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3-flash", { cli_first: true });
+      expect(result.quotaPreference).toBe("antigravity");
+      expect(result.explicitQuota).toBe(true);
+    });
+
+    it("keeps antigravity for Claude models when cli_first is true", () => {
+      const result = resolveModelWithTier("claude-sonnet-4-5-thinking", { cli_first: true });
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("keeps antigravity for image models when cli_first is true", () => {
+      const result = resolveModelWithTier("gemini-3-pro-image", { cli_first: true });
+      expect(result.quotaPreference).toBe("antigravity");
+      expect(result.explicitQuota).toBe(true);
+    });
+
+    it("defaults to antigravity when cli_first is false", () => {
+      const result = resolveModelWithTier("gemini-3-flash", { cli_first: false });
+      expect(result.quotaPreference).toBe("antigravity");
     });
   });
 

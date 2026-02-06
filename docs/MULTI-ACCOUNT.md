@@ -12,7 +12,7 @@ opencode auth login  # Run again to add more accounts
 
 - **Sticky account selection** — Sticks to the same account until rate-limited (preserves Anthropic's prompt cache)
 - **Per-model-family limits** — Rate limits tracked separately for Claude and Gemini models
-- **Dual quota pools for Gemini** — Automatic fallback between Antigravity quota and Gemini CLI quota before switching accounts
+- **Antigravity-first for Gemini** — All Gemini requests use Antigravity quota first, then automatically fall back to Gemini CLI when exhausted across all accounts
 - **Smart retry threshold** — Short rate limits (≤5s) are retried on same account
 - **Exponential backoff** — Increasing delays for consecutive rate limits
 
@@ -24,10 +24,18 @@ For Gemini models, the plugin accesses **two independent quota pools** per accou
 
 | Quota Pool | When Used |
 |------------|-----------|
-| **Antigravity** | Primary (tried first) |
-| **Gemini CLI** | Fallback when Antigravity is rate-limited |
+| **Antigravity** | Default for all requests |
+| **Gemini CLI** | Automatic fallback when Antigravity exhausted on ALL accounts |
 
-This effectively **doubles your Gemini quota** per account.
+This effectively **doubles your Gemini quota** when you have `quota_fallback` enabled.
+
+### How Quota Fallback Works
+
+1. Request uses Antigravity quota on current account
+2. If rate-limited, plugin checks if ANY other account has Antigravity available
+3. If yes → switch to that account (stay on Antigravity)
+4. If no (all accounts exhausted) → fall back to Gemini CLI quota on current account
+5. Model names are automatically transformed (e.g., `gemini-3-flash` → `gemini-3-flash-preview`)
 
 To enable automatic fallback between pools, set in `antigravity.json`:
 

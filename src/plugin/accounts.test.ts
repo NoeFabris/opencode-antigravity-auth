@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason } from "./accounts";
+import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason, resolveQuotaGroup } from "./accounts";
 import type { AccountStorageV3 } from "./storage";
 import type { OAuthAuthDetails } from "./types";
 
@@ -1556,5 +1556,303 @@ describe("AccountManager", () => {
       const history = manager.getAccountFingerprintHistory(0);
       expect(history.length).toBeLessThanOrEqual(5);
     });
+  });
+
+  describe("soft quota threshold", () => {
+    it("skips account over soft quota threshold in sticky mode", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 2, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.05, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 90);
+      expect(account?.parts.refreshToken).toBe("r2");
+    });
+
+    it("allows account under soft quota threshold", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.15, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 90);
+      expect(account?.parts.refreshToken).toBe("r1");
+    });
+
+    it("threshold of 100 disables soft quota protection", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.01, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 100);
+      expect(account?.parts.refreshToken).toBe("r1");
+    });
+
+    it("returns null when all accounts over threshold", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 2, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.05, modelCount: 1 } });
+      manager.updateQuotaCache(1, { claude: { remainingFraction: 0.08, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 90);
+      expect(account).toBeNull();
+    });
+
+    it("skips account over threshold in round-robin mode", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 2, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.05, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "round-robin", "antigravity", false, 90);
+      expect(account?.parts.refreshToken).toBe("r2");
+    });
+
+    it("account without cached quota is not skipped", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 90);
+      expect(account?.parts.refreshToken).toBe("r1");
+    });
+
+    it("handles remainingFraction of 0 (fully exhausted)", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 2, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 90);
+      expect(account?.parts.refreshToken).toBe("r2");
+    });
+
+    it("ignores stale quota cache (over 10 minutes old)", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(0));
+
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.05, modelCount: 1 } });
+
+      vi.setSystemTime(new Date(11 * 60 * 1000));
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 90);
+      expect(account?.parts.refreshToken).toBe("r1");
+
+      vi.useRealTimers();
+    });
+
+    it("fails open when cachedQuotaUpdatedAt is missing", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const acc = (manager as any).accounts[0];
+      acc.cachedQuota = { claude: { remainingFraction: 0.05, modelCount: 1 } };
+      acc.cachedQuotaUpdatedAt = undefined;
+
+      const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 90);
+      expect(account?.parts.refreshToken).toBe("r1");
+    });
+  });
+
+  describe("getMinWaitTimeForSoftQuota", () => {
+    it("returns 0 when accounts are available (under threshold)", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.15, modelCount: 1 } });
+
+      const waitMs = manager.getMinWaitTimeForSoftQuota("claude", 90, 10 * 60 * 1000);
+      expect(waitMs).toBe(0);
+    });
+
+    it("returns null when no resetTime available", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { claude: { remainingFraction: 0.05, modelCount: 1 } });
+
+      const waitMs = manager.getMinWaitTimeForSoftQuota("claude", 90, 10 * 60 * 1000);
+      expect(waitMs).toBeNull();
+    });
+
+    it("returns wait time from resetTime when over threshold", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-28T10:00:00Z"));
+
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { 
+        claude: { 
+          remainingFraction: 0.05, 
+          resetTime: "2026-01-28T15:00:00Z",
+          modelCount: 1 
+        } 
+      });
+
+      const waitMs = manager.getMinWaitTimeForSoftQuota("claude", 90, 10 * 60 * 1000);
+      expect(waitMs).toBe(5 * 60 * 60 * 1000);
+
+      vi.useRealTimers();
+    });
+
+    it("returns null (fail-open) when resetTime is in the past", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-28T16:00:00Z"));
+
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { 
+        claude: { 
+          remainingFraction: 0.05, 
+          resetTime: "2026-01-28T15:00:00Z",
+          modelCount: 1 
+        } 
+      });
+
+      const waitMs = manager.getMinWaitTimeForSoftQuota("claude", 90, 10 * 60 * 1000);
+      expect(waitMs).toBe(null);
+
+      vi.useRealTimers();
+    });
+
+    it("returns minimum wait time across multiple accounts", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-28T10:00:00Z"));
+
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 2, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { 
+        claude: { remainingFraction: 0.05, resetTime: "2026-01-28T15:00:00Z", modelCount: 1 } 
+      });
+      manager.updateQuotaCache(1, { 
+        claude: { remainingFraction: 0.08, resetTime: "2026-01-28T12:00:00Z", modelCount: 1 } 
+      });
+
+      const waitMs = manager.getMinWaitTimeForSoftQuota("claude", 90, 10 * 60 * 1000);
+      expect(waitMs).toBe(2 * 60 * 60 * 1000);
+
+      vi.useRealTimers();
+    });
+  });
+});
+
+describe("resolveQuotaGroup", () => {
+  it("returns model-based quota group when model is provided", () => {
+    expect(resolveQuotaGroup("claude", "claude-opus-4-5")).toBe("claude");
+    expect(resolveQuotaGroup("gemini", "gemini-2.5-pro")).toBe("gemini-pro");
+    expect(resolveQuotaGroup("gemini", "gemini-2.5-flash")).toBe("gemini-flash");
+  });
+
+  it("falls back to claude for claude family when no model", () => {
+    expect(resolveQuotaGroup("claude", null)).toBe("claude");
+    expect(resolveQuotaGroup("claude", undefined)).toBe("claude");
+  });
+
+  it("falls back to gemini-pro for gemini family when no model", () => {
+    expect(resolveQuotaGroup("gemini", null)).toBe("gemini-pro");
+    expect(resolveQuotaGroup("gemini", undefined)).toBe("gemini-pro");
+  });
+
+  it("model takes precedence over family", () => {
+    // Even if family says claude, model determines the quota group
+    expect(resolveQuotaGroup("gemini", "gemini-2.5-flash")).toBe("gemini-flash");
+    expect(resolveQuotaGroup("gemini", "gemini-3-pro")).toBe("gemini-pro");
   });
 });
