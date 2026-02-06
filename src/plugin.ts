@@ -24,6 +24,7 @@ import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
 } from "./plugin/request";
+import { fetchWithProxy } from "./plugin/proxy";
 import { resolveModelWithTier } from "./plugin/transform/model-resolver";
 import {
   isEmptyResponseBody,
@@ -32,7 +33,7 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts } from "./plugin/storage";
+import { clearAccounts, loadAccounts, saveAccounts, type AccountMetadataV3 } from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
@@ -347,6 +348,7 @@ async function persistAccountPool(
   results: Array<Extract<AntigravityTokenExchangeResult, { type: "success" }>>,
   replaceAll: boolean = false,
 ): Promise<void> {
+  const proxyUrl = process.env.ANTIGRAVITY_LOGIN_PROXY;
   if (results.length === 0) {
     return;
   }
@@ -396,6 +398,7 @@ async function persistAccountPool(
         refreshToken: parts.refreshToken,
         projectId: parts.projectId,
         managedProjectId: parts.managedProjectId,
+        proxyUrl,
         addedAt: now,
         lastUsed: now,
         enabled: true,
@@ -417,6 +420,7 @@ async function persistAccountPool(
       refreshToken: parts.refreshToken,
       projectId: parts.projectId ?? existing.projectId,
       managedProjectId: parts.managedProjectId ?? existing.managedProjectId,
+      proxyUrl: proxyUrl !== undefined ? proxyUrl : existing.proxyUrl,
       lastUsed: now,
     };
     
@@ -954,6 +958,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
         return "Error: No valid access token available. Please run `opencode auth login` to re-authenticate.";
       }
 
+      const accountManager = await AccountManager.loadFromDisk(auth);
+      const accounts = accountManager.getAccounts();
+      const account = accounts.find(a => a.parts.refreshToken === parts.refreshToken);
+
       return executeSearch(
         {
           query: args.query,
@@ -963,6 +971,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
         accessToken,
         projectId,
         ctx.abort,
+        account?.proxyUrl,
       );
     },
   });
@@ -1288,7 +1297,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             if (accessTokenExpired(authRecord)) {
               try {
-                const refreshed = await refreshAccessToken(authRecord, client, providerId);
+                const refreshed = await refreshAccessToken(authRecord, client, providerId, account.proxyUrl);
                 if (!refreshed) {
                   const { failures, shouldCooldown, cooldownMs } = trackAccountFailure(account.index);
                   getHealthTracker().recordFailure(account.index);
@@ -1362,7 +1371,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             let projectContext: ProjectContextResult;
             try {
-              projectContext = await ensureProjectContext(authRecord);
+               projectContext = await ensureProjectContext(authRecord, account.proxyUrl);
               resetAccountFailureState(account.index);
             } catch (error) {
               const { failures, shouldCooldown, cooldownMs } = trackAccountFailure(account.index);
@@ -1430,7 +1439,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
               try {
                 pushDebug("thinking-warmup: start");
-                const warmupResponse = await fetch(warmupUrl, warmupInit);
+                const warmupResponse = await fetchWithProxy(warmupUrl, warmupInit, account.proxyUrl);
                 const transformed = await transformAntigravityResponse(
                   warmupResponse,
                   true,
@@ -1596,7 +1605,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                const response = await fetch(prepared.request, prepared.init);
+                const response = await fetchWithProxy(resolvedUrl, prepared.init, account.proxyUrl);
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
 
@@ -2521,6 +2530,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         refreshToken: parts.refreshToken,
                         projectId: parts.projectId ?? updatedAccounts[refreshAccountIndex]?.projectId,
                         managedProjectId: parts.managedProjectId ?? updatedAccounts[refreshAccountIndex]?.managedProjectId,
+                        proxyUrl: process.env.ANTIGRAVITY_LOGIN_PROXY ?? updatedAccounts[refreshAccountIndex]?.proxyUrl,
                         addedAt: updatedAccounts[refreshAccountIndex]?.addedAt ?? Date.now(),
                         lastUsed: Date.now(),
                       };

@@ -61,6 +61,7 @@
         "@opencode-ai/plugin": "^0.15.30",
         "@openauthjs/openauth": "^0.4.3",
         "proper-lockfile": "^4.1.2",
+        "undici": "^6.23.0",
         "xdg-basedir": "^5.1.0",
         "zod": "^4.0.0"
     }
