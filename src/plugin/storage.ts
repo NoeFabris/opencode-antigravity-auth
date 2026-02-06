@@ -671,6 +671,35 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
   });
 }
 
+/**
+ * Save accounts storage by replacing the entire file (no merge).
+ * Use this for destructive operations like delete where we need to
+ * remove accounts that would otherwise be merged back from existing storage.
+ */
+export async function saveAccountsReplace(storage: AccountStorageV3): Promise<void> {
+  const path = getStoragePath();
+  const configDir = dirname(path);
+  await fs.mkdir(configDir, { recursive: true });
+  await ensureGitignore(configDir);
+
+  await withFileLock(path, async () => {
+    const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+    const content = JSON.stringify(storage, null, 2);
+
+    try {
+      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+      await fs.rename(tempPath, path);
+    } catch (error) {
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
+  });
+}
+
 async function loadAccountsUnsafe(): Promise<AccountStorageV3 | null> {
   try {
     const path = getStoragePath();

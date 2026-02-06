@@ -32,7 +32,7 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts } from "./plugin/storage";
+import { clearAccounts, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
@@ -80,6 +80,9 @@ const MAX_TOAST_COOLDOWN_ENTRIES = 100;
 // Track if "all accounts blocked" toasts were shown to prevent spam in while loop
 let softQuotaToastShown = false;
 let rateLimitToastShown = false;
+
+// Module-level reference to AccountManager for access from auth.login
+let activeAccountManager: import("./plugin/accounts").AccountManager | null = null;
 
 function cleanupToastCooldowns(): void {
   if (rateLimitToastCooldowns.size > MAX_TOAST_COOLDOWN_ENTRIES) {
@@ -998,6 +1001,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
       // Note: AccountManager now ensures the current auth is always included in accounts
 
       const accountManager = await AccountManager.loadFromDisk(auth);
+      activeAccountManager = accountManager;
       if (accountManager.getAccountCount() > 0) {
         accountManager.requestSaveToDisk();
       }
@@ -2288,6 +2292,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     if (acc) {
                       acc.enabled = acc.enabled === false;
                       await saveAccounts(existingStorage);
+                      activeAccountManager?.setAccountEnabled(menuResult.toggleAccountIndex, acc.enabled);
                       console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
                     }
                   }
@@ -2310,12 +2315,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 const updatedAccounts = existingStorage.accounts.filter(
                   (_, idx) => idx !== menuResult.deleteAccountIndex
                 );
-                await saveAccounts({
+                // Use saveAccountsReplace to bypass merge (otherwise deleted account gets merged back)
+                await saveAccountsReplace({
                   version: 3,
                   accounts: updatedAccounts,
                   activeIndex: 0,
                   activeIndexByFamily: { claude: 0, gemini: 0 },
                 });
+                // Sync in-memory state so deleted account stops being used immediately
+                activeAccountManager?.removeAccountByIndex(menuResult.deleteAccountIndex);
                 console.log("\nAccount deleted.\n");
 
                 if (updatedAccounts.length > 0) {

@@ -4,6 +4,16 @@ import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReaso
 import type { AccountStorageV3 } from "./storage";
 import type { OAuthAuthDetails } from "./types";
 
+// Mock storage to prevent test data from leaking to real config files
+vi.mock("./storage", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./storage")>();
+  return {
+    ...original,
+    saveAccounts: vi.fn().mockResolvedValue(undefined),
+    saveAccountsReplace: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 describe("AccountManager", () => {
   beforeEach(() => {
     vi.useRealTimers();
