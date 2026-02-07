@@ -17,7 +17,7 @@ export interface SelectOptions {
   /** Override the help line shown at the bottom of the menu. */
   help?: string;
   /**
-   * Clear the terminal before first render.
+   * Clear the terminal before each render (opt-in).
    * Useful for nested flows where previous logs make menus feel cluttered.
    */
   clearScreen?: boolean;
@@ -25,9 +25,8 @@ export interface SelectOptions {
 
 const ESCAPE_TIMEOUT_MS = 50;
 
-const ANSI_ESCAPE_PATTERN = "\\x1b\\[[0-9;]*m";
-const ANSI_REGEX = new RegExp(ANSI_ESCAPE_PATTERN, "g");
-const ANSI_LEADING_REGEX = new RegExp(`^${ANSI_ESCAPE_PATTERN}`);
+const ANSI_REGEX = new RegExp("\\x1b\\[[0-9;]*m", "g");
+const ANSI_LEADING_REGEX = new RegExp("^\\x1b\\[[0-9;]*m");
 
 function stripAnsi(input: string): string {
   return input.replace(ANSI_REGEX, '');
@@ -108,7 +107,7 @@ export async function select<T>(
   const render = () => {
     const columns = stdout.columns ?? 80;
     const rows = stdout.rows ?? 24;
-    const shouldClearScreen = options.clearScreen !== false;
+    const shouldClearScreen = options.clearScreen === true;
 
     // For nested/stacked flows, rely on full clears instead of cursor-up rewrites.
     // Cursor-up is fragile when terminals wrap unexpectedly (width mismatches, unicode, etc).

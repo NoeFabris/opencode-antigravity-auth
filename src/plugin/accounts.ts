@@ -809,6 +809,8 @@ export class AccountManager {
     this.sessionOffsetApplied = { claude: false, gemini: false };
     this.lastToastAccountIndex = -1;
     this.lastToastTime = 0;
+    this.pendingAddedRefreshTokens.clear();
+    this.pendingRemovedRefreshTokens.clear();
 
     if (!stored || stored.accounts.length === 0) {
       this.accounts = [];
@@ -929,8 +931,14 @@ export class AccountManager {
   }
 
   async saveToDisk(): Promise<void> {
-    const claudeIndex = Math.max(0, this.currentAccountIndexByFamily.claude);
-    const geminiIndex = Math.max(0, this.currentAccountIndexByFamily.gemini);
+    const accountCount = this.accounts.length;
+    const clampStoredIndex = (value: number): number => {
+      if (accountCount <= 0) return 0;
+      return Math.min(Math.max(0, value), accountCount - 1);
+    };
+
+    const claudeIndex = clampStoredIndex(this.currentAccountIndexByFamily.claude);
+    const geminiIndex = clampStoredIndex(this.currentAccountIndexByFamily.gemini);
     
     const storage: AccountStorageV3 = {
       version: 3,

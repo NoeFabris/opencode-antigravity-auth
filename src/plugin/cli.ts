@@ -7,6 +7,7 @@ import {
   type AccountInfo,
   type AccountStatus,
 } from "./ui/auth-menu";
+import { updateOpencodeConfig } from "./config/updater";
 
 export async function promptProjectId(): Promise<string> {
   const rl = createInterface({ input, output });
@@ -129,6 +130,16 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
 
       case "delete-all":
         return { mode: "fresh", deleteAll: true };
+
+      case "configure-models": {
+        const result = await updateOpencodeConfig();
+        if (result.success) {
+          console.log(`\n✓ Models configured in ${result.configPath}\n`);
+        } else {
+          console.log(`\n✗ Failed to configure models: ${result.error}\n`);
+        }
+        continue;
+      }
 
       case "cancel":
         return { mode: "cancel" };

@@ -107,12 +107,29 @@ jobs:
             try {
               parsed = JSON.parse(rawOutput.trim());
             } catch (e) {
-              // Try to extract JSON from code blocks first, then raw JSON
+              // Try to extract JSON from code blocks first
               const codeBlockMatch = rawOutput.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-              // Use greedy match to capture full nested JSON object
-              const rawJsonMatch = rawOutput.match(/\{[\s\S]*\}/);
               
-              const jsonStr = codeBlockMatch?.[1] || rawJsonMatch?.[0];
+              // Find the LAST JSON object containing triage fields (avoid matching code snippets)
+              // Match JSON objects that contain "type_label" to ensure we get the triage output
+              const triageJsonMatch = rawOutput.match(/\{"type_label"[\s\S]*?\}(?=\s*$|\s*```|\s*\n\n)/);
+              
+              // Fallback: find all potential JSON objects and try parsing from the end
+              let jsonStr = codeBlockMatch?.[1] || triageJsonMatch?.[0];
+              
+              if (!jsonStr) {
+                // Last resort: find all { } pairs and try parsing from the last one
+                const allMatches = [...rawOutput.matchAll(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g)];
+                for (let i = allMatches.length - 1; i >= 0; i--) {
+                  try {
+                    const candidate = JSON.parse(allMatches[i][0]);
+                    if (candidate.type_label && candidate.area_label) {
+                      jsonStr = allMatches[i][0];
+                      break;
+                    }
+                  } catch {}
+                }
+              }
               
               if (jsonStr) {
                 try {

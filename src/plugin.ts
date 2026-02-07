@@ -1,4 +1,4 @@
-import { exec, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import { tool } from "@opencode-ai/plugin";
 import {
@@ -741,26 +741,47 @@ function shouldSkipLocalServer(): boolean {
 }
 
 async function openBrowser(url: string): Promise<boolean> {
+  const tryOpen = (command: string, args: string[]): boolean => {
+    try {
+      const child = spawn(command, args, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   try {
     if (process.platform === "darwin") {
-      exec(`open "${url}"`);
-      return true;
+      return tryOpen("open", [url]);
     }
     if (process.platform === "win32") {
-      exec(`start "" "${url}"`);
-      return true;
+      if (tryOpen("rundll32", ["url.dll,FileProtocolHandler", url])) {
+        return true;
+      }
+      return tryOpen("powershell", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Start-Process",
+        url,
+      ]);
     }
     if (isWSL()) {
-      try {
-        exec(`wslview "${url}"`);
+      if (tryOpen("wslview", [url])) {
         return true;
-      } catch {}
+      }
     }
     if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
       return false;
     }
-    exec(`xdg-open "${url}"`);
-    return true;
+    return tryOpen("xdg-open", [url]);
   } catch {
     return false;
   }
@@ -2697,14 +2718,34 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     });
 
                     let needsSave = false;
+                    const addedRefreshTokens = new Set<string>();
+                    const removedRefreshTokens = new Set<string>();
                     for (const res of results) {
                       if (res.updatedAccount) {
+                        const previous = existingStorage.accounts[res.index];
+                        const previousRefreshToken = previous?.refreshToken;
+                        const nextRefreshToken = res.updatedAccount.refreshToken;
+                        if (
+                          typeof previousRefreshToken === "string"
+                          && previousRefreshToken
+                          && typeof nextRefreshToken === "string"
+                          && nextRefreshToken
+                          && previousRefreshToken !== nextRefreshToken
+                        ) {
+                          removedRefreshTokens.add(previousRefreshToken);
+                          addedRefreshTokens.add(nextRefreshToken);
+                        }
                         existingStorage.accounts[res.index] = res.updatedAccount;
                         needsSave = true;
                       }
                     }
                     if (needsSave) {
-                      await saveAccounts(existingStorage, { merge: true, preserveDeletions: true });
+                      await saveAccounts(existingStorage, {
+                        merge: true,
+                        preserveDeletions: true,
+                        addedRefreshTokens: Array.from(addedRefreshTokens),
+                        removedRefreshTokens: Array.from(removedRefreshTokens),
+                      });
                     }
 
                     return results;
