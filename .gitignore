@@ -49,6 +49,9 @@ antigravity-debug-*.log
 # Test artifacts
 test-file.ts
 
+# Local scratch files
+.tmp-origin-accounts.ts
+
 # Local subrepos (not part of this project)
 CLIProxyAPI/
 LLM-API-Key-Proxy/

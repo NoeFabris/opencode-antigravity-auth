@@ -1597,30 +1597,32 @@ export async function transformAntigravityResponse(
           headers.set("x-antigravity-context-error", "tool_pairing");
         }
 
+        // Extract google.rpc.RetryInfo (if present) BEFORE returning the error response.
+        // This lets the caller honor Retry-After on capacity/rate limiting errors.
+        if (errorBody?.error?.details && Array.isArray(errorBody.error.details)) {
+          const retryInfo = errorBody.error.details.find(
+            (detail: any) => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
+          );
+
+          if (retryInfo?.retryDelay) {
+            const match = retryInfo.retryDelay.match(/^([\d.]+)s$/);
+            if (match && match[1]) {
+              const retrySeconds = parseFloat(match[1]);
+              if (!isNaN(retrySeconds) && retrySeconds > 0) {
+                const retryAfterSec = Math.ceil(retrySeconds).toString();
+                const retryAfterMs = Math.ceil(retrySeconds * 1000).toString();
+                headers.set('Retry-After', retryAfterSec);
+                headers.set('retry-after-ms', retryAfterMs);
+              }
+            }
+          }
+        }
+
         return new Response(JSON.stringify(errorBody), {
           status: response.status,
           statusText: response.statusText,
           headers
         });
-      }
-
-      if (errorBody?.error?.details && Array.isArray(errorBody.error.details)) {
-        const retryInfo = errorBody.error.details.find(
-          (detail: any) => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
-        );
-
-        if (retryInfo?.retryDelay) {
-          const match = retryInfo.retryDelay.match(/^([\d.]+)s$/);
-          if (match && match[1]) {
-            const retrySeconds = parseFloat(match[1]);
-            if (!isNaN(retrySeconds) && retrySeconds > 0) {
-              const retryAfterSec = Math.ceil(retrySeconds).toString();
-              const retryAfterMs = Math.ceil(retrySeconds * 1000).toString();
-              headers.set('Retry-After', retryAfterSec);
-              headers.set('retry-after-ms', retryAfterMs);
-            }
-          }
-        }
       }
     }
 

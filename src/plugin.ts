@@ -740,6 +740,25 @@ function shouldSkipLocalServer(): boolean {
   return isWSL2() || isRemoteEnvironment();
 }
 
+function sanitizeBrowserUrl(input: string): string {
+  const raw = (input || "").trim();
+  if (!raw) {
+    throw new Error("empty url");
+  }
+
+  const parsed = new URL(raw);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`unsupported url protocol: ${parsed.protocol}`);
+  }
+
+  // Prevent accidental control chars from leaking into process args.
+  const normalized = parsed.toString().replace(/[\r\n\t]/g, "");
+  if (!normalized) {
+    throw new Error("invalid url");
+  }
+  return normalized;
+}
+
 async function openBrowser(url: string): Promise<boolean> {
   const tryOpen = (command: string, args: string[]): boolean => {
     try {
@@ -756,32 +775,26 @@ async function openBrowser(url: string): Promise<boolean> {
   };
 
   try {
+    const safeUrl = sanitizeBrowserUrl(url);
     if (process.platform === "darwin") {
-      return tryOpen("open", [url]);
+      return tryOpen("open", [safeUrl]);
     }
     if (process.platform === "win32") {
-      if (tryOpen("rundll32", ["url.dll,FileProtocolHandler", url])) {
+      if (tryOpen("rundll32", ["url.dll,FileProtocolHandler", safeUrl])) {
         return true;
       }
-      return tryOpen("powershell", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "Start-Process",
-        url,
-      ]);
+      // `explorer.exe` can open URLs without involving a shell (more reliable for `&` in query strings).
+      return tryOpen("explorer.exe", [safeUrl]);
     }
     if (isWSL()) {
-      if (tryOpen("wslview", [url])) {
+      if (tryOpen("wslview", [safeUrl])) {
         return true;
       }
     }
     if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
       return false;
     }
-    return tryOpen("xdg-open", [url]);
+    return tryOpen("xdg-open", [safeUrl]);
   } catch {
     return false;
   }
@@ -1601,10 +1614,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
           };
           
           const hasOtherAccountWithAntigravity = (currentAccount: any): boolean => {
-            if (family !== "gemini") return false;
-            const otherAccounts = accountManager.getAccounts().filter(acc => acc.index !== currentAccount.index);
-            return otherAccounts.some(acc => 
-              !accountManager.isRateLimitedForHeaderStyle(acc, family, "antigravity", model)
+            return accountManager.hasOtherAccountWithAntigravityAvailable(
+              currentAccount.index,
+              family,
+              model,
             );
           };
 
@@ -1897,17 +1910,23 @@ export const createAntigravityPlugin = (providerId: string) => async (
             
             // Check if this header style is rate-limited for this account
             if (accountManager.isRateLimitedForHeaderStyle(account, family, headerStyle, model)) {
-              // Quota fallback: try alternate quota on same account (if enabled and not explicit)
-              if (config.quota_fallback && !explicitQuota && family === "gemini") {
+              // Quota fallback: try alternate quota on same account (direction depends on cli_first).
+              if (family === "gemini") {
                 const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
-                if (alternateStyle && alternateStyle !== headerStyle) {
+                const fallbackStyle = resolveQuotaFallbackHeaderStyle({
+                  quotaFallback: config.quota_fallback,
+                  cliFirst: config.cli_first,
+                  explicitQuota,
+                  family,
+                  headerStyle,
+                  alternateStyle,
+                });
+
+                if (fallbackStyle) {
                   const quotaName = headerStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
-                  const altQuotaName = alternateStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
-                  await showToast(
-                    `${quotaName} quota exhausted, using ${altQuotaName} quota`,
-                    "warning"
-                  );
-                  headerStyle = alternateStyle;
+                  const altQuotaName = fallbackStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
+                  await showToast(`${quotaName} quota exhausted, using ${altQuotaName} quota`, "warning");
+                  headerStyle = fallbackStyle;
                   pushDebug(`quota fallback: ${headerStyle}`);
                 } else {
                   shouldSwitchAccount = true;
@@ -3781,3 +3800,40 @@ function isExplicitQuotaFromUrl(urlString: string): boolean {
   const { explicitQuota } = resolveModelWithTier(modelWithSuffix);
   return explicitQuota ?? false;
 }
+
+function resolveQuotaFallbackHeaderStyle(input: {
+  quotaFallback: boolean;
+  cliFirst: boolean;
+  explicitQuota: boolean;
+  family: ModelFamily;
+  headerStyle: HeaderStyle;
+  alternateStyle: HeaderStyle | null;
+}): HeaderStyle | null {
+  const {
+    quotaFallback,
+    cliFirst,
+    explicitQuota,
+    family,
+    headerStyle,
+    alternateStyle,
+  } = input;
+
+  if (!quotaFallback) return null;
+  if (explicitQuota) return null;
+  if (family !== "gemini") return null;
+  if (!alternateStyle) return null;
+  if (alternateStyle === headerStyle) return null;
+
+  // Direction matters:
+  // - cli_first=true: start on gemini-cli, allow fallback to antigravity only
+  // - cli_first=false: start on antigravity, allow fallback to gemini-cli only
+  if (cliFirst) {
+    return headerStyle === "gemini-cli" && alternateStyle === "antigravity" ? alternateStyle : null;
+  }
+  return headerStyle === "antigravity" && alternateStyle === "gemini-cli" ? alternateStyle : null;
+}
+
+// Exported only for unit tests.
+export const __testExports = {
+  resolveQuotaFallbackHeaderStyle,
+};

@@ -117,7 +117,7 @@ export async function showAccountDetails(account: AccountInfo): Promise<AccountA
       { label: 'Refresh token', value: 'refresh' as const, color: 'cyan' },
       { label: 'Delete this account', value: 'delete' as const, color: 'red' },
     ], { 
-      message: `Account ${account.index + 1}: ${header}`,
+      message: header,
       subtitle: subtitleParts.join(' | '),
       clearScreen: true,
     });
