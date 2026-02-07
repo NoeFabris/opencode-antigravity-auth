@@ -25,7 +25,9 @@ export interface SelectOptions {
 
 const ESCAPE_TIMEOUT_MS = 50;
 
-const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
+const ANSI_ESCAPE_PATTERN = "\\x1b\\[[0-9;]*m";
+const ANSI_REGEX = new RegExp(ANSI_ESCAPE_PATTERN, "g");
+const ANSI_LEADING_REGEX = new RegExp(`^${ANSI_ESCAPE_PATTERN}`);
 
 function stripAnsi(input: string): string {
   return input.replace(ANSI_REGEX, '');
@@ -47,7 +49,7 @@ function truncateAnsi(input: string, maxVisibleChars: number): string {
   while (i < input.length && kept < keep) {
     // Preserve ANSI sequences without counting them.
     if (input[i] === '\x1b') {
-      const m = input.slice(i).match(/^\x1b\[[0-9;]*m/);
+      const m = input.slice(i).match(ANSI_LEADING_REGEX);
       if (m) {
         out += m[0];
         i += m[0].length;

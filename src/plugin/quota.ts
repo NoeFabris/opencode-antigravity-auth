@@ -243,6 +243,15 @@ export async function checkAccountsQuota(
 
   const checkOne = async (account: AccountMetadataV3, index: number): Promise<AccountQuotaResult> => {
     const disabled = account.enabled === false;
+    if (disabled) {
+      return {
+        index,
+        email: account.email,
+        status: "disabled",
+        disabled: true,
+      };
+    }
+
     let auth = buildAuthFromAccount(account);
 
     try {
@@ -281,7 +290,7 @@ export async function checkAccountsQuota(
         index,
         email: account.email,
         status: "ok",
-        disabled,
+        disabled: false,
         quota: quotaResult,
         updatedAccount,
       };
@@ -290,7 +299,7 @@ export async function checkAccountsQuota(
         index,
         email: account.email,
         status: "error",
-        disabled,
+        disabled: false,
         error: error instanceof Error ? error.message : String(error),
       };
     }

@@ -602,7 +602,7 @@ export async function saveAccounts(
 
   await withFileLock(path, async () => {
     const shouldMerge = options.merge !== false;
-    const preserveDeletions = options.preserveDeletions === true;
+    const preserveDeletions = options.preserveDeletions !== false;
     const existing = shouldMerge ? await loadAccountsUnsafe() : null;
 
     let merged = existing ? mergeAccountStorage(existing, storage) : storage;

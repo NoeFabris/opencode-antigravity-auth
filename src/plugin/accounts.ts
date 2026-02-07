@@ -326,47 +326,50 @@ export class AccountManager {
         .filter((a): a is ManagedAccount => a !== null);
 
       this.cursor = clampNonNegativeInt(stored.activeIndex, 0);
+
+      // Merge currently authenticated account into persisted storage if missing.
+      // This handles cases where a fresh OAuth login was performed in another process.
+      if (authFallback && authParts?.refreshToken) {
+        const hasMatching = this.accounts.some(
+          (acc) => acc.parts.refreshToken === authParts.refreshToken
+        );
+        if (!hasMatching) {
+          const now = nowMs();
+          const newAccount: ManagedAccount = {
+            index: this.accounts.length,
+            email: undefined,
+            addedAt: now,
+            lastUsed: 0,
+            parts: authParts,
+            access: authFallback.access,
+            expires: authFallback.expires,
+            enabled: true,
+            rateLimitResetTimes: {},
+            touchedForQuota: {},
+            fingerprint: generateFingerprint(),
+          };
+          this.accounts.push(newAccount);
+          this.pendingAddedRefreshTokens.add(authParts.refreshToken);
+          this.requestSaveToDisk();
+        }
+      }
+
       if (this.accounts.length > 0) {
         this.cursor = this.cursor % this.accounts.length;
         const defaultIndex = this.cursor;
-        this.currentAccountIndexByFamily.claude = clampNonNegativeInt(
-          stored.activeIndexByFamily?.claude,
-          defaultIndex
-        ) % this.accounts.length;
-        this.currentAccountIndexByFamily.gemini = clampNonNegativeInt(
-          stored.activeIndexByFamily?.gemini,
-          defaultIndex
-        ) % this.accounts.length;
+        this.currentAccountIndexByFamily.claude =
+          clampNonNegativeInt(stored.activeIndexByFamily?.claude, defaultIndex) %
+          this.accounts.length;
+        this.currentAccountIndexByFamily.gemini =
+          clampNonNegativeInt(stored.activeIndexByFamily?.gemini, defaultIndex) %
+          this.accounts.length;
+      } else {
+        this.cursor = 0;
+        this.currentAccountIndexByFamily.claude = -1;
+        this.currentAccountIndexByFamily.gemini = -1;
       }
 
       return;
-    }
-
-    // If we have stored accounts, check if we need to add the current auth
-    if (authFallback && this.accounts.length > 0) {
-      const authParts = parseRefreshParts(authFallback.refresh);
-      const hasMatching = this.accounts.some(acc => acc.parts.refreshToken === authParts.refreshToken);
-      if (!hasMatching && authParts.refreshToken) {
-        const now = nowMs();
-        const newAccount: ManagedAccount = {
-          index: this.accounts.length,
-          email: undefined,
-          addedAt: now,
-          lastUsed: 0,
-          parts: authParts,
-          access: authFallback.access,
-          expires: authFallback.expires,
-          enabled: true,
-          rateLimitResetTimes: {},
-          touchedForQuota: {},
-        };
-        this.accounts.push(newAccount);
-        this.pendingAddedRefreshTokens.add(authParts.refreshToken);
-        this.requestSaveToDisk();
-        // Update indices to include the new account
-        this.currentAccountIndexByFamily.claude = Math.min(this.currentAccountIndexByFamily.claude, this.accounts.length - 1);
-        this.currentAccountIndexByFamily.gemini = Math.min(this.currentAccountIndexByFamily.gemini, this.accounts.length - 1);
-      }
     }
 
     if (authFallback) {

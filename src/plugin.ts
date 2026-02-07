@@ -610,14 +610,8 @@ async function scanAllAccountsForVerification(
   return results.filter((r): r is VerificationScanResult => Boolean(r));
 }
 
-function openUrlInDefaultBrowser(url: string): void {
-  // Best-effort: launch default browser on Windows. Avoid blocking request flow.
-  try {
-    const safe = url.replace(/"/g, '""');
-    exec(`cmd /c start "" "${safe}"`, { windowsHide: true }, () => {});
-  } catch (err) {
-    log.debug("Failed to open URL in browser", { err });
-  }
+async function openUrlInDefaultBrowser(url: string): Promise<boolean> {
+  return openBrowser(url);
 }
 
 function copyTextToClipboard(text: string): boolean {
@@ -2695,7 +2689,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         const label = result.email || `Account ${result.index + 1}`;
                         const disabledStr = result.disabled ? " (disabled)" : "";
                         const err = quotaErrorOf(result);
-                        const status = err ? `ERROR (${err})` : "OK";
+                        const status = result.status === "disabled"
+                          ? "DISABLED"
+                          : err ? `ERROR (${err})` : "OK";
                         console.log(`[${done}/${total}] ${label}${disabledStr}: ${status}`);
                       },
                     });
@@ -3194,8 +3190,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       }
 
                       if (action.type === "openSignin") {
-                        openUrlInDefaultBrowser(signinFirstLink);
-                        console.log("\nOpened sign-in page (email prefilled). After password, Google should continue to verification.\n");
+                        const opened = await openUrlInDefaultBrowser(signinFirstLink);
+                        if (opened) {
+                          console.log("\nOpened sign-in page (email prefilled). After password, Google should continue to verification.\n");
+                        } else {
+                          console.log("\nCould not open browser automatically. Use this sign-in link:\n");
+                          console.log(`${signinFirstLink}\n`);
+                        }
                         continue;
                       }
 
@@ -3211,8 +3212,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       }
 
                       if (action.type === "openDirect") {
-                        openUrlInDefaultBrowser(verifyLink);
-                        console.log("\nOpened direct verification link in browser.\n");
+                        const opened = await openUrlInDefaultBrowser(verifyLink);
+                        if (opened) {
+                          console.log("\nOpened direct verification link in browser.\n");
+                        } else {
+                          console.log("\nCould not open browser automatically. Use this verification link:\n");
+                          console.log(`${verifyLink}\n`);
+                        }
                         continue;
                       }
 
