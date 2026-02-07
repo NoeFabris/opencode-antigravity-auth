@@ -774,13 +774,16 @@ async function loadAccountsUnsafe(): Promise<AccountStorageV3 | null> {
   try {
     const path = getStoragePath();
     const content = await fs.readFile(path, "utf-8");
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(content) as any;
 
     if (parsed.version === 1) {
       return migrateV2ToV3(migrateV1ToV2(parsed));
     }
     if (parsed.version === 2) {
       return migrateV2ToV3(parsed);
+    }
+    if (parsed.version !== 3 || !Array.isArray(parsed.accounts)) {
+      return null;
     }
 
     return {
