@@ -87,8 +87,24 @@ export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
     modalities: DEFAULT_MODALITIES,
     variants: {
       low: { thinkingConfig: { thinkingBudget: 8192 } },
+      medium: { thinkingConfig: { thinkingBudget: 16384 } },
       max: { thinkingConfig: { thinkingBudget: 32768 } },
     },
+  },
+  "antigravity-gpt-5-2": {
+    name: "GPT 5.2 (Antigravity)",
+    limit: { context: 200000, output: 64000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gpt-5-1-codex": {
+    name: "GPT 5.1 Codex (Antigravity)",
+    limit: { context: 200000, output: 64000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-minimax-m2-1": {
+    name: "Minimax M2.1 (Antigravity)",
+    limit: { context: 200000, output: 64000 },
+    modalities: DEFAULT_MODALITIES,
   },
   "gemini-2.5-flash": {
     name: "Gemini 2.5 Flash (Gemini CLI)",
