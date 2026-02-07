@@ -47,6 +47,7 @@ export interface LoginMenuResult {
   deleteAccountIndex?: number;
   refreshAccountIndex?: number;
   toggleAccountIndex?: number;
+  clearVerificationAccountIndex?: number;
   deleteAll?: boolean;
 }
 
@@ -124,6 +125,9 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         }
         if (accountAction === "toggle") {
           return { mode: "manage", toggleAccountIndex: action.account.index };
+        }
+        if (accountAction === "clear-verification") {
+          return { mode: "manage", clearVerificationAccountIndex: action.account.index };
         }
         continue;
       }
