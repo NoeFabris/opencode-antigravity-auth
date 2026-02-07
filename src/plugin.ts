@@ -84,6 +84,10 @@ const warmupSucceededSessionIds = new Set<string>();
 
 const log = createLogger("plugin");
 
+// Used to filter toasts based on toast_scope config.
+let isChildSession = false;
+let childSessionParentID: string | undefined = undefined;
+
 function summarizeUpstreamValidationMessage(message: string): string {
   const raw = (message || "").trim();
   if (!raw) return "403 VALIDATION_REQUIRED (Antigravity)";
@@ -901,6 +905,12 @@ async function persistAccountPool(
   const stored = replaceAll ? null : await loadAccounts();
   const accounts = stored?.accounts ? [...stored.accounts] : [];
 
+  // When preserving deletions, `saveAccounts` will drop refresh tokens that are only present
+  // in our in-memory storage unless they are explicitly marked as "added". Track those here
+  // so login/refresh flows don't get pruned.
+  const addedRefreshTokens = new Set<string>();
+  const removedRefreshTokens = new Set<string>();
+
   const indexByRefreshToken = new Map<string, number>();
   const indexByEmail = new Map<string, number>();
   for (let i = 0; i < accounts.length; i++) {
@@ -934,6 +944,8 @@ async function persistAccountPool(
       if (result.email) {
         indexByEmail.set(result.email, newIndex);
       }
+      addedRefreshTokens.add(parts.refreshToken);
+      removedRefreshTokens.delete(parts.refreshToken);
       accounts.push({
         email: result.email,
         refreshToken: parts.refreshToken,
@@ -967,6 +979,10 @@ async function persistAccountPool(
     if (oldToken !== parts.refreshToken) {
       indexByRefreshToken.delete(oldToken);
       indexByRefreshToken.set(parts.refreshToken, existingIndex);
+      removedRefreshTokens.add(oldToken);
+      addedRefreshTokens.delete(oldToken);
+      addedRefreshTokens.add(parts.refreshToken);
+      removedRefreshTokens.delete(parts.refreshToken);
     }
   }
 
@@ -979,15 +995,25 @@ async function persistAccountPool(
     ? 0 
     : (typeof stored?.activeIndex === "number" && Number.isFinite(stored.activeIndex) ? stored.activeIndex : 0);
 
-  await saveAccounts({
-    version: 3,
-    accounts,
-    activeIndex: clampInt(activeIndex, 0, accounts.length - 1),
-    activeIndexByFamily: {
-      claude: clampInt(activeIndex, 0, accounts.length - 1),
-      gemini: clampInt(activeIndex, 0, accounts.length - 1),
+  await saveAccounts(
+    {
+      version: 3,
+      accounts,
+      activeIndex: clampInt(activeIndex, 0, accounts.length - 1),
+      activeIndexByFamily: {
+        claude: clampInt(activeIndex, 0, accounts.length - 1),
+        gemini: clampInt(activeIndex, 0, accounts.length - 1),
+      },
     },
-  });
+    replaceAll
+      ? { merge: false }
+      : {
+          merge: true,
+          preserveDeletions: true,
+          addedRefreshTokens: Array.from(addedRefreshTokens),
+          removedRefreshTokens: Array.from(removedRefreshTokens),
+        },
+  );
 }
 
 function retryAfterMsFromResponse(response: Response, defaultRetryMs: number = 60_000): number {
@@ -1377,6 +1403,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
   const eventHandler = async (input: { event: { type: string; properties?: unknown } }) => {
     // Forward to update checker
     await updateChecker.event(input);
+
+    // Track if this is a child session (subagent, background task).
+    // This is used to filter toasts based on toast_scope config.
+    if (input.event.type === "session.created") {
+      const props = input.event.properties as { info?: { parentID?: string } } | undefined;
+      if (props?.info?.parentID) {
+        isChildSession = true;
+        childSessionParentID = props.info.parentID;
+        log.debug("child-session-detected", { parentID: props.info.parentID });
+      } else {
+        // Reset for root sessions - important when plugin instance is reused.
+        isChildSession = false;
+        childSessionParentID = undefined;
+        log.debug("root-session-detected", {});
+      }
+    }
     
     // Handle session recovery
     if (sessionRecovery && input.event.type === "session.error") {
@@ -1406,15 +1448,25 @@ export const createAntigravityPlugin = (providerId: string) => async (
             query: { directory },
           }).catch(() => {});
           
-          // Show success toast
+          // Show success toast (respects quiet_mode + toast_scope for child sessions)
           const successToast = getRecoverySuccessToast();
-          await client.tui.showToast({
-            body: {
-              title: successToast.title,
-              message: successToast.message,
-              variant: "success",
-            },
-          }).catch(() => {});
+          const toastScope = config.toast_scope;
+          log.debug("recovery-toast", {
+            ...successToast,
+            isChildSession,
+            toastScope,
+            parentID: childSessionParentID,
+          });
+
+          if (!config.quiet_mode && !(toastScope === "root_only" && isChildSession)) {
+            await client.tui.showToast({
+              body: {
+                title: successToast.title,
+                message: successToast.message,
+                variant: "success",
+              },
+            }).catch(() => {});
+          }
         }
       }
     }
@@ -1521,9 +1573,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
         const logPath = getLogFilePath();
         if (logPath) {
           try {
-            await client.tui.showToast({
-              body: { message: `Debug log: ${logPath}`, variant: "info" },
-            });
+            const toastScope = config.toast_scope;
+            if (!config.quiet_mode && !(toastScope === "root_only" && isChildSession)) {
+              await client.tui.showToast({
+                body: { message: `Debug log: ${logPath}`, variant: "info" },
+              });
+            }
           } catch {
             // TUI may not be available
           }
@@ -1597,7 +1652,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
           const showToast = async (message: string, variant: "info" | "warning" | "success" | "error") => {
             if (quietMode) return;
             if (abortSignal?.aborted) return;
-            
+            if (config.toast_scope === "root_only" && isChildSession) return;
+             
             if (variant === "warning" && message.toLowerCase().includes("rate")) {
               if (!shouldShowRateLimitToast(message)) {
                 return;
@@ -3496,21 +3552,38 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   if (currentStorage) {
                     const updatedAccounts = [...currentStorage.accounts];
                     const parts = parseRefreshParts(result.refresh);
-                    if (parts.refreshToken) {
+                    const previous = updatedAccounts[refreshAccountIndex];
+                    const previousRefreshToken =
+                      typeof previous?.refreshToken === "string" ? previous.refreshToken : undefined;
+                    const nextRefreshToken = parts.refreshToken;
+
+                    if (nextRefreshToken) {
                       updatedAccounts[refreshAccountIndex] = {
-                        email: result.email ?? updatedAccounts[refreshAccountIndex]?.email,
-                        refreshToken: parts.refreshToken,
-                        projectId: parts.projectId ?? updatedAccounts[refreshAccountIndex]?.projectId,
-                        managedProjectId: parts.managedProjectId ?? updatedAccounts[refreshAccountIndex]?.managedProjectId,
-                        addedAt: updatedAccounts[refreshAccountIndex]?.addedAt ?? Date.now(),
+                        ...(previous ?? {}),
+                        email: result.email ?? previous?.email,
+                        refreshToken: nextRefreshToken,
+                        projectId: parts.projectId ?? previous?.projectId,
+                        managedProjectId: parts.managedProjectId ?? previous?.managedProjectId,
+                        addedAt: previous?.addedAt ?? Date.now(),
                         lastUsed: Date.now(),
                       };
-                      await saveAccounts({
-                        version: 3,
-                        accounts: updatedAccounts,
-                        activeIndex: currentStorage.activeIndex,
-                        activeIndexByFamily: currentStorage.activeIndexByFamily,
-                      });
+                      await saveAccounts(
+                        {
+                          version: 3,
+                          accounts: updatedAccounts,
+                          activeIndex: currentStorage.activeIndex,
+                          activeIndexByFamily: currentStorage.activeIndexByFamily,
+                        },
+                        {
+                          merge: true,
+                          preserveDeletions: true,
+                          addedRefreshTokens: [nextRefreshToken],
+                          removedRefreshTokens:
+                            previousRefreshToken && previousRefreshToken !== nextRefreshToken
+                              ? [previousRefreshToken]
+                              : undefined,
+                        },
+                      );
                     }
                   }
                 } else {

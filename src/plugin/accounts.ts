@@ -16,10 +16,13 @@ import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
 import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
 import { getModelFamily } from "./transform/model-resolver";
+import { createLogger } from "./logger";
 import { ANTIGRAVITY_VERSION } from "../constants";
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
 export type { AccountSelectionStrategy } from "./config/schema";
+
+const log = createLogger("accounts");
 
 /**
  * Update fingerprint userAgent to current version if outdated.
@@ -1024,6 +1027,14 @@ export class AccountManager {
     const refreshToken = account.parts.refreshToken;
     if (!refreshToken) return false;
 
+    // Capture state for rollback in case persisting blocked storage fails.
+    // Losing the account is worse than leaving it in rotation.
+    const restoreIndex = this.accounts.indexOf(account);
+    const previousCursor = this.cursor;
+    const previousAccountIndexByFamily = { ...this.currentAccountIndexByFamily };
+    const previousPendingAddedRefreshTokens = new Set(this.pendingAddedRefreshTokens);
+    const previousPendingRemovedRefreshTokens = new Set(this.pendingRemovedRefreshTokens);
+
     const record: BlockedAccountMetadataV1 = {
       email: account.email,
       refreshToken,
@@ -1054,14 +1065,55 @@ export class AccountManager {
       }
       map.set(record.refreshToken, record);
       await saveBlockedAccounts({ version: 1, accounts: Array.from(map.values()) });
-    } catch {
+    } catch (error) {
       // Best-effort: quarantining should not crash the request path.
+      log.warn("Failed to persist blocked account storage; restoring account", {
+        email: account.email,
+        refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}...` : undefined,
+        verifyUrl,
+        error: String(error),
+      });
+
+      // Roll back in-memory removal and pending token deltas so we don't drop
+      // the account from disk on a later save.
+      try {
+        if (restoreIndex >= 0) {
+          const insertAt = Math.min(Math.max(0, restoreIndex), this.accounts.length);
+          this.accounts.splice(insertAt, 0, account);
+          this.accounts.forEach((acc, index) => {
+            acc.index = index;
+          });
+        } else if (!this.accounts.includes(account)) {
+          this.accounts.push(account);
+          this.accounts.forEach((acc, index) => {
+            acc.index = index;
+          });
+        }
+
+        this.cursor = previousCursor;
+        this.currentAccountIndexByFamily = { ...previousAccountIndexByFamily };
+        this.pendingAddedRefreshTokens = previousPendingAddedRefreshTokens;
+        this.pendingRemovedRefreshTokens = previousPendingRemovedRefreshTokens;
+      } catch (restoreError) {
+        log.warn("Failed to restore account after blocked-storage write failure", {
+          email: account.email,
+          refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}...` : undefined,
+          error: String(restoreError),
+        });
+      }
+
+      return false;
     }
 
     try {
       await this.saveToDisk();
-    } catch {
+    } catch (error) {
       // Best-effort persistence.
+      log.warn("Failed to persist active account removal after quarantining", {
+        email: account.email,
+        refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}...` : undefined,
+        error: String(error),
+      });
     }
 
     return true;
