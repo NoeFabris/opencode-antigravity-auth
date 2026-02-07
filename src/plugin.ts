@@ -1,9 +1,17 @@
-import { exec } from "node:child_process";
+import { exec, spawnSync } from "node:child_process";
+import * as crypto from "node:crypto";
 import { tool } from "@opencode-ai/plugin";
-import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_PROVIDER_ID, type HeaderStyle } from "./constants";
+import {
+  ANTIGRAVITY_ENDPOINT_FALLBACKS,
+  ANTIGRAVITY_DEFAULT_PROJECT_ID,
+  ANTIGRAVITY_ENDPOINT_PROD,
+  ANTIGRAVITY_HEADERS,
+  ANTIGRAVITY_PROVIDER_ID,
+  type HeaderStyle,
+} from "./constants";
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
-import { accessTokenExpired, isOAuthAuth, parseRefreshParts } from "./plugin/auth";
+import { accessTokenExpired, formatRefreshParts, isOAuthAuth, parseRefreshParts } from "./plugin/auth";
 import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
@@ -32,20 +40,30 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts } from "./plugin/storage";
+import {
+  clearAccounts,
+  clearBlockedAccounts,
+  loadAccounts,
+  loadBlockedAccounts,
+  saveAccounts,
+  saveBlockedAccounts,
+} from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
 import { createSessionRecoveryHook, getRecoverySuccessToast } from "./plugin/recovery";
-import { checkAccountsQuota } from "./plugin/quota";
+import { checkAccountsQuota, type AccountQuotaResult } from "./plugin/quota";
 import { initDiskSignatureCache } from "./plugin/cache";
 import { createProactiveRefreshQueue, type ProactiveRefreshQueue } from "./plugin/refresh-queue";
 import { initLogger, createLogger } from "./plugin/logger";
 import { initHealthTracker, getHealthTracker, initTokenTracker, getTokenTracker } from "./plugin/rotation";
 import { executeSearch } from "./plugin/search";
+import { select, type MenuItem } from "./plugin/ui/select";
 import type {
   GetAuth,
   LoaderResult,
+  OAuthAuthDetails,
+  PluginClient,
   PluginContext,
   PluginResult,
   ProjectContextResult,
@@ -65,6 +83,559 @@ const warmupAttemptedSessionIds = new Set<string>();
 const warmupSucceededSessionIds = new Set<string>();
 
 const log = createLogger("plugin");
+
+function summarizeUpstreamValidationMessage(message: string): string {
+  const raw = (message || "").trim();
+  if (!raw) return "403 VALIDATION_REQUIRED (Antigravity)";
+
+  // Strip any appended debug sections and links; the actionable link is handled separately.
+  const withoutDebug = raw.split(/\n\s*\[Debug Info\][\s\S]*$/i)[0]?.trim() ?? raw;
+  const firstLine = withoutDebug.split(/\r?\n/).find((l) => l.trim())?.trim() ?? withoutDebug;
+  const withoutUrls = firstLine.replace(/https?:\/\/\S+/gi, "[link]");
+
+  // Keep it terse; the user already knows it is a verification error.
+  return withoutUrls.length > 160 ? `${withoutUrls.slice(0, 157)}...` : withoutUrls;
+}
+
+function isGeminiCodeAssistLicenseError(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  if (!t) return false;
+  // Observed upstream error: "lack a Gemini Code Assist license... (#3501)"
+  return (
+    t.includes("#3501")
+    || (t.includes("gemini code assist") && t.includes("license"))
+    || t.includes("lack a gemini code assist license")
+  );
+}
+
+function summarizeUpstreamLicenseMessage(message: string): string {
+  const raw = (message || "").trim();
+  if (!raw) return "Gemini Code Assist license missing (#3501)";
+  const withoutDebug = raw.split(/\n\s*\[Debug Info\][\s\S]*$/i)[0]?.trim() ?? raw;
+  const firstLine = withoutDebug.split(/\r?\n/).find((l) => l.trim())?.trim() ?? withoutDebug;
+  return firstLine.length > 180 ? `${firstLine.slice(0, 177)}...` : firstLine;
+}
+
+const GEMINI_AUTH_SUCCESS_URL = "https://developers.google.com/gemini-code-assist/auth/auth_success_gemini";
+
+function isGoogleAccountsHost(hostname: string): boolean {
+  const h = (hostname || "").toLowerCase();
+  return h === "accounts.google.com" || h.endsWith(".accounts.google.com");
+}
+
+function ensureSigninContinueUrl(url: URL): URL {
+  const out = new URL(url.toString());
+  if (!out.searchParams.get("sarp")) out.searchParams.set("sarp", "1");
+  if (!out.searchParams.get("scc")) out.searchParams.set("scc", "1");
+  if (!out.searchParams.get("continue")) out.searchParams.set("continue", GEMINI_AUTH_SUCCESS_URL);
+  if (!out.searchParams.get("flowName")) out.searchParams.set("flowName", "GlifWebSignIn");
+  return out;
+}
+
+function cleanAuthuserValue(input: string | null | undefined): string {
+  const raw = (input || "").trim();
+  if (!raw) return "";
+  return raw.replace(/^[\s"',]+|[\s"',]+$/g, "");
+}
+
+function sanitizeGoogleSigninParams(url: URL, accountEmail?: string): URL {
+  const out = new URL(url.toString());
+
+  // Some upstream responses occasionally include malformed authuser keys like
+  // `authuser%2522%2C`, which can lead to broken 400 links in browsers.
+  const weirdAuthuserKeys: string[] = [];
+  for (const [key, value] of out.searchParams.entries()) {
+    const normalizedKey = key.toLowerCase().replace(/%25/g, "%");
+    if (normalizedKey.startsWith("authuser") && key !== "authuser") {
+      weirdAuthuserKeys.push(key);
+      const cleaned = cleanAuthuserValue(value);
+      if (cleaned && !out.searchParams.get("authuser")) {
+        out.searchParams.set("authuser", cleaned);
+      }
+    }
+  }
+  for (const key of weirdAuthuserKeys) {
+    out.searchParams.delete(key);
+  }
+
+  const cleanedAuthuser = cleanAuthuserValue(out.searchParams.get("authuser"));
+  if (cleanedAuthuser) {
+    out.searchParams.set("authuser", cleanedAuthuser);
+  } else {
+    out.searchParams.delete("authuser");
+  }
+
+  if (accountEmail && accountEmail.trim()) {
+    const trimmedEmail = accountEmail.trim();
+    if (!out.searchParams.get("Email")) out.searchParams.set("Email", trimmedEmail);
+    if (!out.searchParams.get("authuser")) out.searchParams.set("authuser", trimmedEmail);
+  }
+
+  return out;
+}
+
+function normalizeGoogleVerificationUrl(rawUrl: string, accountEmail?: string): string {
+  const raw = (rawUrl || "").trim();
+  if (!raw) return "";
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return raw;
+  }
+
+  if (!isGoogleAccountsHost(parsed.hostname)) {
+    return raw;
+  }
+
+  const path = parsed.pathname.toLowerCase();
+
+  // Keep Google-provided sign-in links intact; they often include opaque tokens
+  // (e.g. `plt=`) and rewriting them into synthesized chooser links can break flow.
+  if (path.includes("/signin/continue")) {
+    return ensureSigninContinueUrl(sanitizeGoogleSigninParams(parsed, accountEmail)).toString();
+  }
+
+  if (path.includes("/accountchooser")) {
+    const nested = parsed.searchParams.get("continue");
+    if (nested) {
+      try {
+        const nestedUrl = new URL(nested);
+        if (isGoogleAccountsHost(nestedUrl.hostname) && nestedUrl.pathname.toLowerCase().includes("/signin/continue")) {
+          parsed.searchParams.set("continue", ensureSigninContinueUrl(nestedUrl).toString());
+        }
+      } catch {
+        // Keep existing continue param when it is not parseable.
+      }
+    }
+
+    if (accountEmail && !parsed.searchParams.get("Email")) {
+      parsed.searchParams.set("Email", accountEmail);
+    }
+
+    return sanitizeGoogleSigninParams(parsed, accountEmail).toString();
+  }
+
+  return raw;
+}
+
+function buildGoogleSigninFirstUrl(verificationUrl: string, accountEmail?: string): string {
+  const verify = (verificationUrl || "").trim();
+  if (!verify) return "";
+
+  try {
+    const continueUrl = new URL(verify).toString();
+    // Force add-session flow so browser consistently prompts sign-in first,
+    // then redirects to the verification continue URL after authentication.
+    const signin = new URL("https://accounts.google.com/signin/v2/identifier");
+    signin.searchParams.set("continue", continueUrl);
+    signin.searchParams.set("followup", continueUrl);
+    signin.searchParams.set("service", "mail");
+    signin.searchParams.set("emr", "1");
+    signin.searchParams.set("flowName", "GlifWebSignIn");
+    signin.searchParams.set("flowEntry", "AddSession");
+    if (accountEmail && accountEmail.trim()) {
+      const trimmedEmail = accountEmail.trim();
+      signin.searchParams.set("Email", trimmedEmail);
+      signin.searchParams.set("login_hint", trimmedEmail);
+    }
+    return signin.toString();
+  } catch {
+    return verify;
+  }
+}
+
+type VerificationScanStatus = "ok" | "blocked" | "license" | "error" | "skipped";
+
+type VerificationAccountOrigin = "active" | "quarantined";
+
+type VerificationScanResult = {
+  index: number;
+  origin: VerificationAccountOrigin;
+  refreshToken: string;
+  email?: string;
+  enabled: boolean;
+  status: VerificationScanStatus;
+  message?: string;
+  verifyUrl?: string;
+};
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function extractValidationUrlAndMessage(
+  bodyText: string,
+  accountEmail?: string,
+): { isValidationRequired: boolean; validationUrl?: string; message?: string } {
+  let upstreamMessage = bodyText;
+  const urlCandidates: string[] = [];
+  let isValidationRequired = false;
+
+  const normalizeUrlCandidate = (input: string): string => {
+    let out = input.trim();
+    if (!out) return "";
+
+    // Common HTML entity in some upstream logs.
+    out = out.replace(/&amp;/g, "&");
+
+    // If we captured a JSON-escaped URL string (e.g. "...sarp=1\\u0026scc=1..."),
+    // decode any \uXXXX sequences to avoid broken links (400 malformed request).
+    // Apply twice to handle rare double-escaped strings.
+    for (let i = 0; i < 2; i++) {
+      const next = out.replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex) => {
+        const code = Number.parseInt(hex, 16);
+        return Number.isFinite(code) ? String.fromCharCode(code) : _m;
+      });
+      if (next === out) break;
+      out = next;
+    }
+
+    return normalizeGoogleVerificationUrl(out, accountEmail);
+  };
+
+  const pushUrlCandidate = (input: string) => {
+    const normalized = normalizeUrlCandidate(input);
+    if (!normalized) return;
+    urlCandidates.push(normalized);
+  };
+
+  const collectFromParsed = (parsed: any) => {
+    if (!parsed || typeof parsed !== "object") return;
+
+    if (typeof parsed?.error?.message === "string") {
+      upstreamMessage = parsed.error.message;
+    }
+
+    const details = parsed?.error?.details;
+    if (!Array.isArray(details)) return;
+
+    for (const detail of details) {
+      if (!detail || typeof detail !== "object") continue;
+      if (typeof detail?.reason === "string" && detail.reason.toUpperCase() === "VALIDATION_REQUIRED") {
+        isValidationRequired = true;
+      }
+      const metadata = detail?.metadata;
+      const url = metadata?.validation_url ?? metadata?.validationUrl ?? metadata?.validationURL;
+      if (typeof url === "string" && url.trim()) {
+        pushUrlCandidate(url);
+      }
+    }
+  };
+
+  // Some endpoints return `text/event-stream` (SSE) even for errors (403 VALIDATION_REQUIRED).
+  // Parse both raw JSON and SSE `data:` lines to capture the full validation_url (often includes `plt=`).
+  try {
+    collectFromParsed(JSON.parse(bodyText));
+  } catch {
+    // ignore JSON parsing; fall back to SSE + string scanning below
+  }
+
+  for (const line of bodyText.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+    const payload = trimmed.slice("data:".length).trim();
+    if (!payload || payload === "[DONE]") continue;
+    try {
+      collectFromParsed(JSON.parse(payload));
+    } catch {
+      // ignore malformed SSE chunks
+    }
+  }
+
+  const lower = `${upstreamMessage}\n${bodyText}`.toLowerCase();
+  if (
+    lower.includes("validation_required") ||
+    lower.includes("verify your account") ||
+    lower.includes("verify your google account")
+  ) {
+    isValidationRequired = true;
+  }
+
+  const combined = `${upstreamMessage}\n${bodyText}`;
+  for (const match of combined.matchAll(/https?:\/\/accounts\.google\.com\/\S+/gi)) {
+    const raw = match[0]?.trim();
+    if (!raw) continue;
+    // Trim common trailing punctuation from logs.
+    pushUrlCandidate(raw.replace(/[)\]]+$/, ""));
+  }
+
+  // Prefer the most "complete" looking URL (often includes a long `plt=` token).
+  const scoreUrl = (u: string): number => {
+    const lower = u.toLowerCase();
+    let score = u.length;
+    if (lower.includes("plt=")) score += 10_000;
+    if (lower.includes("flowname=glifwebsignin")) score += 500;
+    if (lower.includes("signin/continue")) score += 100;
+    return score;
+  };
+
+  let validationUrl: string | undefined;
+  for (const u of urlCandidates) {
+    if (!u) continue;
+    if (!validationUrl || scoreUrl(u) > scoreUrl(validationUrl)) {
+      validationUrl = u;
+    }
+  }
+
+  return { isValidationRequired, validationUrl, message: upstreamMessage };
+}
+
+async function scanAccountForVerification(
+  account: any,
+  client: PluginClient,
+  providerId: string,
+): Promise<VerificationScanResult> {
+  const enabled = account.enabled !== false;
+  const email = account.email as string | undefined;
+  const index = account.index as number;
+  const origin = (account.origin as VerificationAccountOrigin) ?? "active";
+  const refreshToken = account.refreshToken as string | undefined;
+
+  if (!refreshToken) {
+    return { index, origin, refreshToken: "", email, enabled, status: "error", message: "missing refreshToken" };
+  }
+
+  // For quarantined accounts, we still scan even if the user previously disabled them,
+  // since they are already out of the active rotation pool.
+  if (!enabled && origin !== "quarantined") {
+    return { index, origin, refreshToken, email, enabled, status: "skipped", message: "disabled" };
+  }
+
+  let authRecord: OAuthAuthDetails = {
+    type: "oauth" as const,
+    refresh: formatRefreshParts({
+      refreshToken,
+      projectId: account.projectId,
+      managedProjectId: account.managedProjectId,
+    }),
+    access: undefined,
+    expires: undefined,
+  };
+
+  try {
+    if (accessTokenExpired(authRecord)) {
+      const refreshed = await withTimeout(
+        refreshAccessToken(authRecord, client, providerId),
+        10_000,
+        "token refresh timed out",
+      );
+      if (!refreshed) {
+        return { index, origin, refreshToken, email, enabled, status: "error", message: "token refresh failed" };
+      }
+      authRecord = refreshed;
+    }
+
+    // IMPORTANT: Do not call ensureProjectContext() here.
+    // This scan is a best-effort health check and must not block on managed-project onboarding.
+    const parts = parseRefreshParts(authRecord.refresh);
+    const effectiveProjectId = parts.managedProjectId || parts.projectId || ANTIGRAVITY_DEFAULT_PROJECT_ID;
+
+    const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
+    const quotaUserAgent = ANTIGRAVITY_HEADERS["User-Agent"] || "antigravity/windows/amd64";
+    // Use a real generateContent call to reliably trigger account verification blocks
+    // (VALIDATION_REQUIRED) and license errors (#3501). fetchAvailableModels can succeed
+    // even when generate requests are blocked.
+    //
+    // Use the streaming endpoint to match runtime behavior and ensure we receive the full
+    // validation URL (often includes a long `plt=` token).
+    const url = `${endpoint}/v1internal:streamGenerateContent?alt=sse`;
+    const body = {
+      project: effectiveProjectId,
+      model: "gemini-3-flash",
+      userAgent: "antigravity",
+      requestId: "verify-scan-" + crypto.randomUUID(),
+      requestType: "agent",
+      request: {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: "ping" }],
+          },
+        ],
+        generationConfig: {
+          maxOutputTokens: 1,
+          temperature: 0,
+        },
+      },
+    };
+
+    const resp = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${authRecord.access ?? ""}`,
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": quotaUserAgent,
+      },
+      body: JSON.stringify(body),
+    }, 10_000);
+
+    if (resp.ok) {
+      try {
+        await resp.body?.cancel();
+      } catch {
+        // ignore; best-effort
+      }
+      return { index, origin, refreshToken, email, enabled, status: "ok" };
+    }
+
+    const text = await resp.text().catch(() => "");
+    if (resp.status === 429) {
+      return { index, origin, refreshToken, email, enabled, status: "error", message: "rate-limited (429)" };
+    }
+    if (isGeminiCodeAssistLicenseError(text)) {
+      return { index, origin, refreshToken, email, enabled, status: "license", message: summarizeUpstreamLicenseMessage(text) };
+    }
+
+    const extracted = extractValidationUrlAndMessage(text, email);
+    if (resp.status === 403 && extracted.isValidationRequired) {
+      return {
+        index,
+        origin,
+        refreshToken,
+        email,
+        enabled,
+        status: "blocked",
+        message: summarizeUpstreamValidationMessage(extracted.message ?? text),
+        verifyUrl: extracted.validationUrl,
+      };
+    }
+
+    return {
+      index,
+      origin,
+      refreshToken,
+      email,
+      enabled,
+      status: "error",
+      message: `${resp.status}: ${(extracted.message ?? text).trim().slice(0, 200)}`,
+    };
+  } catch (err) {
+    return { index, origin, refreshToken, email, enabled, status: "error", message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function formatVerificationScanStatusForDisplay(result: VerificationScanResult): string {
+  switch (result.status) {
+    case "ok":
+      return "OK";
+    case "blocked":
+      return "BLOCKED";
+    case "license":
+      return "NO LICENSE (#3501)";
+    case "skipped":
+      return "SKIPPED";
+    case "error":
+    default:
+      return result.message ? `ERROR (${result.message})` : "ERROR";
+  }
+}
+
+async function scanAllAccountsForVerification(
+  accounts: any[],
+  client: PluginClient,
+  providerId: string,
+  opts: {
+    concurrency?: number;
+    perAccountTimeoutMs?: number;
+    onProgress?: (p: { done: number; total: number; result: VerificationScanResult }) => void;
+  } = {},
+  origin: VerificationAccountOrigin = "active",
+): Promise<VerificationScanResult[]> {
+  const total = accounts.length;
+  const results: VerificationScanResult[] = new Array(total);
+
+  const concurrency = Math.max(1, Math.min(opts.concurrency ?? 3, Math.max(1, total)));
+  const perAccountTimeoutMs = Math.max(1_000, opts.perAccountTimeoutMs ?? 25_000);
+
+  let nextIndex = 0;
+  let done = 0;
+
+  const worker = async () => {
+    while (true) {
+      const idx = nextIndex++;
+      if (idx >= total) return;
+
+      const acc = accounts[idx];
+      const email = acc?.email as string | undefined;
+      const enabled = acc?.enabled !== false;
+      const refreshToken = typeof acc?.refreshToken === "string" ? (acc.refreshToken as string) : "";
+
+      let result: VerificationScanResult;
+      try {
+        result = await withTimeout(
+          scanAccountForVerification({ ...acc, index: idx, origin }, client, providerId),
+          perAccountTimeoutMs,
+          `scan timed out after ${perAccountTimeoutMs}ms`,
+        );
+      } catch (err) {
+        result = {
+          index: idx,
+          origin,
+          refreshToken,
+          email,
+          enabled,
+          status: enabled ? "error" : "skipped",
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+
+      results[idx] = result;
+      done += 1;
+      opts.onProgress?.({ done, total, result });
+    }
+  };
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return results.filter((r): r is VerificationScanResult => Boolean(r));
+}
+
+function openUrlInDefaultBrowser(url: string): void {
+  // Best-effort: launch default browser on Windows. Avoid blocking request flow.
+  try {
+    const safe = url.replace(/"/g, '""');
+    exec(`cmd /c start "" "${safe}"`, { windowsHide: true }, () => {});
+  } catch (err) {
+    log.debug("Failed to open URL in browser", { err });
+  }
+}
+
+function copyTextToClipboard(text: string): boolean {
+  // Best-effort: copy text to Windows clipboard using built-in tools.
+  // Use stdin piping (spawnSync input) to avoid shell escaping issues.
+  try {
+    const input = text.endsWith("\n") ? text : `${text}\n`;
+    const result = spawnSync("cmd", ["/c", "clip"], {
+      input,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    return result.status === 0;
+  } catch (err) {
+    log.debug("Failed to copy URL to clipboard", { err });
+    return false;
+  }
+}
 
 // Module-level toast debounce to persist across requests (fixes toast spam)
 const rateLimitToastCooldowns = new Map<string, number>();
@@ -884,14 +1455,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
       const auth = await getAuth();
       
       // If OpenCode has no valid OAuth auth, clear any stale account storage
-      if (!isOAuthAuth(auth)) {
-        try {
-          await clearAccounts();
-        } catch {
-          // ignore
-        }
-        return {};
-      }
+       if (!isOAuthAuth(auth)) {
+         try {
+           await clearAccounts();
+           await clearBlockedAccounts();
+         } catch {
+           // ignore
+         }
+         return {};
+       }
 
       // Validate that stored accounts are in sync with OpenCode's auth
       // If OpenCode's refresh token doesn't match any stored account, clear stale storage
@@ -1025,7 +1597,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // Check for abort at the start of each iteration
             checkAborted();
             
-            const accountCount = accountManager.getAccountCount();
+            let accountCount = accountManager.getAccountCount();
+            
+            if (accountCount === 0) {
+              // Accounts may have been restored/quarantined outside this process (e.g. via
+              // `opencode auth login`). Reload once so users don't need to restart OpenCode.
+              await accountManager.reloadFromDisk();
+              accountCount = accountManager.getAccountCount();
+            }
             
             if (accountCount === 0) {
               throw new Error("No Antigravity accounts available. Run `opencode auth login`.");
@@ -1388,7 +1967,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                const response = await fetch(prepared.request, prepared.init);
+                let response = await fetch(prepared.request, prepared.init);
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
 
@@ -1613,8 +2192,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 resetRateLimitState(account.index, quotaKey);
                 resetAccountFailureState(account.index);
 
+                // Only retry alternate endpoints for transient errors.
+                // A 403 is typically account-specific (e.g., VALIDATION_REQUIRED) and retrying
+                // other endpoints just hides the actionable verification link from the user.
                 const shouldRetryEndpoint = (
-                  response.status === 403 ||
                   response.status === 404 ||
                   response.status >= 500
                 );
@@ -1651,6 +2232,107 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 });
                 if (!response.ok) {
                   await logResponseBody(debugContext, response, response.status);
+
+                  // If an account is missing a Gemini Code Assist license (#3501),
+                  // automatically rotate to the next account (user requested behavior).
+                  //
+                  // This error is account/project-specific and will not be fixed by endpoint fallbacks.
+                  // Avoid returning this error to the user if other accounts can succeed.
+                  let errorBodyText = "";
+                  try {
+                    errorBodyText = await response.clone().text();
+                  } catch {
+                    errorBodyText = "";
+                  }
+                  if (isGeminiCodeAssistLicenseError(errorBodyText)) {
+                    const accountLabel = account.email ? account.email : `Account ${account.index + 1}`;
+                    const upstreamMsg = summarizeUpstreamLicenseMessage(errorBodyText);
+                    await showToast(`No Gemini Code Assist license (${accountLabel})`, "warning");
+
+                    // Cool down this account for a while to avoid repeated selection loops.
+                    const cooldownMs = 10 * 60 * 1000;
+                    // Treat license errors as a project-scoped configuration problem.
+                    accountManager.markAccountCoolingDown(account, cooldownMs, "project-error");
+                    accountManager.markRateLimited(account, cooldownMs, family, headerStyle, model);
+                    accountManager.requestSaveToDisk();
+
+                    lastError = new Error(upstreamMsg);
+                    lastFailure = {
+                      response,
+                      streaming: prepared.streaming,
+                      debugContext,
+                      requestedModel: prepared.requestedModel,
+                      projectId: prepared.projectId,
+                      endpoint: prepared.endpoint,
+                      effectiveModel: prepared.effectiveModel,
+                      sessionId: prepared.sessionId,
+                      toolDebugMissing: prepared.toolDebugMissing,
+                      toolDebugSummary: prepared.toolDebugSummary,
+                      toolDebugPayload: prepared.toolDebugPayload,
+                    };
+
+                    shouldSwitchAccount = true;
+                    break;
+                  }
+
+                  // 403 VALIDATION_REQUIRED: Google account needs manual verification.
+                  // Runtime/TUI behavior must be minimal: quarantine the account so it won't be
+                  // selected again, and tell the user to verify via `opencode auth login`.
+                  if (response.status === 403) {
+                    const extracted = extractValidationUrlAndMessage(errorBodyText, account.email);
+                    if (extracted.isValidationRequired) {
+                      const accountLabel = account.email ? account.email : `Account ${account.index + 1}`;
+                      await showToast(
+                        `Verification required (${accountLabel}). Run \`opencode auth login\` to verify.`,
+                        "warning",
+                      );
+
+                      // Remove from the active pool (and persist) so rotation doesn't keep hitting it.
+                      await accountManager.quarantineAccountForVerification(
+                        account,
+                        summarizeUpstreamValidationMessage(extracted.message ?? errorBodyText),
+                        extracted.validationUrl,
+                      );
+
+                      if (accountManager.getAccountCount() === 0) {
+                        const errorMessage = [
+                          "Antigravity account verification required.",
+                          "",
+                          `Blocked account: ${accountLabel}`,
+                          "",
+                          "Run: opencode auth login",
+                          "Then: Verify blocked accounts",
+                          "",
+                          "After verification completes, retry your last prompt. (No restart required.)",
+                        ].join("\n");
+                        const synthetic = createSyntheticErrorResponse(
+                          errorMessage,
+                          prepared.requestedModel ?? prepared.effectiveModel ?? "unknown",
+                          "validation_required",
+                        );
+                        return await transformAntigravityResponse(
+                          synthetic,
+                          true,
+                          debugContext,
+                          prepared.requestedModel,
+                          prepared.projectId,
+                          prepared.endpoint,
+                          prepared.effectiveModel,
+                          prepared.sessionId,
+                          prepared.toolDebugMissing,
+                          prepared.toolDebugSummary,
+                          prepared.toolDebugPayload,
+                          debugLines,
+                        );
+                      }
+
+                      lastError = new Error(
+                        "Antigravity account verification required. Run `opencode auth login` and choose \"Verify blocked accounts\".",
+                      );
+                      shouldSwitchAccount = true;
+                      break;
+                    }
+                  }
                   
                   // Handle 400 "Prompt too long" with synthetic response to avoid session lock
                   if (response.status === 400) {
@@ -1662,7 +2344,21 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         "warning"
                       );
                       const errorMessage = `[Antigravity Error] Context is too long for this model.\n\nPlease use /compact to reduce context size, then retry your request.\n\nAlternatively, you can:\n- Use /clear to start fresh\n- Use /undo to remove recent messages\n- Switch to a model with larger context window`;
-                      return createSyntheticErrorResponse(errorMessage, prepared.requestedModel);
+                      const synthetic = createSyntheticErrorResponse(errorMessage, prepared.requestedModel);
+                      return await transformAntigravityResponse(
+                        synthetic,
+                        true,
+                        debugContext,
+                        prepared.requestedModel,
+                        prepared.projectId,
+                        prepared.endpoint,
+                        prepared.effectiveModel,
+                        prepared.sessionId,
+                        prepared.toolDebugMissing,
+                        prepared.toolDebugSummary,
+                        prepared.toolDebugPayload,
+                        debugLines,
+                      );
                     }
                   }
                 }
@@ -1865,8 +2561,16 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // Check for existing accounts and prompt user for login mode
             let startFresh = true;
             let refreshAccountIndex: number | undefined;
-            const existingStorage = await loadAccounts();
-            if (existingStorage && existingStorage.accounts.length > 0) {
+            let existingStorage = await loadAccounts();
+            let blockedStorage = await loadBlockedAccounts();
+            const hasActiveAccounts = (existingStorage?.accounts?.length ?? 0) > 0;
+            const hasQuarantinedAccounts = blockedStorage.accounts.length > 0;
+
+            if (!existingStorage) {
+              existingStorage = { version: 3, accounts: [], activeIndex: 0 };
+            }
+
+            if (hasActiveAccounts || hasQuarantinedAccounts) {
               let menuResult;
               while (true) {
                 const now = Date.now();
@@ -1904,38 +2608,656 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 
                 menuResult = await promptLoginMode(existingAccounts);
 
+                if (menuResult.deleteAccountIndex !== undefined) {
+                  const deleteIndex = menuResult.deleteAccountIndex;
+                  const toDelete = existingStorage.accounts[deleteIndex];
+                  const label = toDelete?.email || `Account ${deleteIndex + 1}`;
+                  const refreshToken = typeof toDelete?.refreshToken === "string" ? toDelete.refreshToken : undefined;
+
+                  const updatedAccounts = existingStorage.accounts.filter((_, idx) => idx !== deleteIndex);
+                  existingStorage.accounts = updatedAccounts;
+
+                  // Clamp active index after deletion.
+                  const nextActive = updatedAccounts.length > 0
+                    ? Math.min(existingStorage.activeIndex ?? 0, updatedAccounts.length - 1)
+                    : 0;
+                  existingStorage.activeIndex = nextActive;
+
+                  // Merge+preserve deletions so concurrent OpenCode processes don't resurrect the account.
+                  await saveAccounts(existingStorage, {
+                    merge: true,
+                    preserveDeletions: true,
+                    removedRefreshTokens: refreshToken ? [refreshToken] : undefined,
+                  });
+                  // Also remove from blocked/quarantine storage if present.
+                  if (refreshToken) {
+                    blockedStorage.accounts = (blockedStorage.accounts ?? []).filter((a: any) => a?.refreshToken !== refreshToken);
+                    await saveBlockedAccounts(blockedStorage);
+                  }
+                  console.log(`\nDeleted ${label}.\n`);
+                  continue;
+                }
+
                 if (menuResult.mode === "check") {
-                  console.log("\nChecking quotas for all accounts...");
-                  const results = await checkAccountsQuota(existingStorage.accounts, client, providerId);
-                  for (const res of results) {
-                    const label = res.email || `Account ${res.index + 1}`;
-                    const disabledStr = res.disabled ? " (disabled)" : "";
-                    console.log(`\n${res.index + 1}. ${label}${disabledStr}`);
-                    if (res.status === "error") {
-                      console.log(`   Error: ${res.error}`);
+                  type QuotaMenuChoice =
+                    | { type: "back" }
+                    | { type: "rescan" }
+                    | { type: "account"; index: number };
+
+                  type QuotaAction = { type: "back" } | { type: "copy" };
+
+                  const isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
+                  const pct = (value?: number) =>
+                    typeof value === "number" && Number.isFinite(value)
+                      ? `${Math.round(value * 100)}%`
+                      : "UNKNOWN";
+
+                  const resetHint = (resetTime?: string) => {
+                    if (!resetTime) return "";
+                    const delta = Date.parse(resetTime) - Date.now();
+                    if (!Number.isFinite(delta)) return "";
+                    return `, resets in ${formatWaitTime(delta)}`;
+                  };
+
+                  const summarizeGroups = (res: AccountQuotaResult): string => {
+                    const groups = res.quota?.groups;
+                    if (!groups) return "";
+                    const parts: string[] = [];
+                    if (groups.claude) parts.push(`C:${pct(groups.claude.remainingFraction)}`);
+                    if (groups["gemini-pro"]) parts.push(`P:${pct(groups["gemini-pro"].remainingFraction)}`);
+                    if (groups["gemini-flash"]) parts.push(`F:${pct(groups["gemini-flash"].remainingFraction)}`);
+                    return parts.join(" ");
+                  };
+
+                  const quotaErrorOf = (res: AccountQuotaResult): string | undefined => {
+                    if (res.status === "error") return res.error || "Unknown error";
+                    if (res.quota?.error) return res.quota.error;
+                    return undefined;
+                  };
+
+                  const badgeOf = (res: AccountQuotaResult): string => {
+                    if (res.disabled) return "[disabled]";
+                    return quotaErrorOf(res) ? "[error]" : "[ok]";
+                  };
+
+                  const colorOf = (res: AccountQuotaResult): MenuItem<QuotaMenuChoice>["color"] => {
+                    if (res.disabled) return undefined;
+                    return quotaErrorOf(res) ? "red" : "green";
+                  };
+
+                  const runCheck = async (): Promise<AccountQuotaResult[]> => {
+                    console.log("\nChecking quotas for all accounts...\n");
+                    const results = await checkAccountsQuota(existingStorage.accounts, client, providerId, {
+                      concurrency: 3,
+                      perAccountTimeoutMs: 25_000,
+                      onProgress: ({ done, total, result }) => {
+                        const label = result.email || `Account ${result.index + 1}`;
+                        const disabledStr = result.disabled ? " (disabled)" : "";
+                        const err = quotaErrorOf(result);
+                        const status = err ? `ERROR (${err})` : "OK";
+                        console.log(`[${done}/${total}] ${label}${disabledStr}: ${status}`);
+                      },
+                    });
+
+                    let needsSave = false;
+                    for (const res of results) {
+                      if (res.updatedAccount) {
+                        existingStorage.accounts[res.index] = res.updatedAccount;
+                        needsSave = true;
+                      }
+                    }
+                    if (needsSave) {
+                      await saveAccounts(existingStorage, { merge: true, preserveDeletions: true });
+                    }
+
+                    return results;
+                  };
+
+                  let results = await runCheck();
+
+                  if (!isInteractive) {
+                    for (const res of results) {
+                      const label = res.email || `Account ${res.index + 1}`;
+                      const disabledStr = res.disabled ? " (disabled)" : "";
+                      console.log(`\n${res.index + 1}. ${label}${disabledStr}`);
+
+                      const err = quotaErrorOf(res);
+                      if (err) {
+                        console.log(`   Error: ${err}`);
+                        continue;
+                      }
+
+                      if (!res.quota || Object.keys(res.quota.groups).length === 0) {
+                        console.log("   No quota information available.");
+                        continue;
+                      }
+
+                      const printGrp = (name: string, group: any) => {
+                        if (!group) return;
+                        console.log(
+                          `   ${name}: ${pct(group.remainingFraction)}${resetHint(group.resetTime)}`,
+                        );
+                      };
+                      printGrp("Claude", res.quota.groups.claude);
+                      printGrp("Gemini 3 Pro", res.quota.groups["gemini-pro"]);
+                      printGrp("Gemini 3 Flash", res.quota.groups["gemini-flash"]);
+                    }
+
+                    console.log("");
+                    continue;
+                  }
+
+                  const summaryCounts = (results: AccountQuotaResult[]) => {
+                    const disabled = results.filter((r) => r.disabled).length;
+                    const errored = results.filter((r) => !r.disabled && !!quotaErrorOf(r)).length;
+                    const ok = Math.max(0, results.length - disabled - errored);
+                    return { ok, errored, disabled };
+                  };
+
+                  while (true) {
+                    const counts = summaryCounts(results);
+
+                    const items: MenuItem<QuotaMenuChoice>[] = [
+                      { label: "Actions", value: { type: "back" }, kind: "heading" },
+                      { label: "Rescan accounts", value: { type: "rescan" }, color: "cyan" },
+                      { label: "Back", value: { type: "back" } },
+                      { label: "", value: { type: "back" }, separator: true },
+                      { label: "Accounts", value: { type: "back" }, kind: "heading" },
+                      ...results.map((res) => {
+                        const label = res.email || `Account ${res.index + 1}`;
+                        const numbered = `${res.index + 1}. ${label}`;
+                        const hint = quotaErrorOf(res) ? "" : summarizeGroups(res);
+                        return {
+                          label: `${numbered} ${badgeOf(res)}`,
+                          hint,
+                          value: { type: "account" as const, index: res.index },
+                          color: colorOf(res),
+                        };
+                      }),
+                    ];
+
+                    const choice = await select(items, {
+                      message: "Check quotas",
+                      subtitle: `Results: ${counts.ok} ok, ${counts.errored} error, ${counts.disabled} disabled`,
+                      help: "Up/Down to select | Enter: details | Esc: back",
+                      clearScreen: true,
+                    });
+
+                    if (!choice || choice.type === "back") break;
+
+                    if (choice.type === "rescan") {
+                      results = await runCheck();
                       continue;
                     }
-                    if (!res.quota || Object.keys(res.quota.groups).length === 0) {
-                      console.log("   No quota information available.");
-                      if (res.quota?.error) console.log(`   Error: ${res.quota.error}`);
-                      continue;
+
+                    const selected = results.find((r) => r.index === choice.index);
+                    if (!selected) continue;
+
+                    const label = selected.email || `Account ${selected.index + 1}`;
+                    const err = quotaErrorOf(selected);
+
+                    const detailLines: string[] = [];
+                    if (selected.disabled) {
+                      detailLines.push("This account is disabled and will not be used for requests.");
                     }
-                    const printGrp = (name: string, group: any) => {
-                      if (!group) return;
-                      const remaining = typeof group.remainingFraction === 'number' 
-                        ? `${Math.round(group.remainingFraction * 100)}%` 
-                        : 'UNKNOWN';
-                      const resetStr = group.resetTime ? `, resets in ${formatWaitTime(Date.parse(group.resetTime) - Date.now())}` : '';
-                      console.log(`   ${name}: ${remaining}${resetStr}`);
-                    };
-                    printGrp("Claude", res.quota.groups.claude);
-                    printGrp("Gemini 3 Pro", res.quota.groups["gemini-pro"]);
-                    printGrp("Gemini 3 Flash", res.quota.groups["gemini-flash"]);
-                    if (res.updatedAccount) {
-                      existingStorage.accounts[res.index] = res.updatedAccount;
-                      await saveAccounts(existingStorage);
+                    if (err) {
+                      detailLines.push(`Error: ${err}`);
+                    }
+
+                    const quota = selected.quota;
+                    if (!quota || Object.keys(quota.groups).length === 0) {
+                      if (!err) {
+                        detailLines.push("No quota information available.");
+                      }
+                    } else {
+                      const pushGrp = (name: string, group: any) => {
+                        if (!group) return;
+                        detailLines.push(`${name}: ${pct(group.remainingFraction)}${resetHint(group.resetTime)}`);
+                      };
+                      pushGrp("Claude", quota.groups.claude);
+                      pushGrp("Gemini 3 Pro", quota.groups["gemini-pro"]);
+                      pushGrp("Gemini 3 Flash", quota.groups["gemini-flash"]);
+                      if (quota.modelCount) detailLines.push(`Models counted: ${quota.modelCount}`);
+                    }
+
+                    const copyText = `Quota check for ${label}\n` + detailLines.map((l) => `- ${l}`).join("\n");
+
+                    const actionItems: MenuItem<QuotaAction>[] = [
+                      { label: "Details", value: { type: "back" }, kind: "heading" },
+                      ...detailLines.map(
+                        (l): MenuItem<QuotaAction> => ({ label: l, value: { type: "back" }, kind: "heading" }),
+                      ),
+                      { label: "", value: { type: "back" }, separator: true },
+                      { label: "Copy details", value: { type: "copy" }, color: "cyan" },
+                      { label: "Back", value: { type: "back" } },
+                    ];
+
+                    const action = await select(actionItems, {
+                      message: `Quota: ${label}`,
+                      subtitle: badgeOf(selected),
+                      help: "Up/Down to select | Enter: confirm | Esc: back",
+                      clearScreen: true,
+                    });
+
+                    if (!action || action.type === "back") continue;
+
+                    const copied = copyTextToClipboard(copyText);
+                    if (copied) {
+                      console.log("\nCopied quota details to clipboard.\n");
+                    } else {
+                      console.log(`\n${copyText}\n`);
                     }
                   }
+
+                  console.log("");
+                  continue;
+                }
+
+                if (menuResult.mode === "verify") {
+                  const labelOf = (r: VerificationScanResult) => r.email || `Account ${r.index + 1}`;
+
+                  let scanResults: VerificationScanResult[] = [];
+
+                  const runScan = async () => {
+                    // Reload quarantined accounts each scan so the UI reflects runtime quarantines.
+                    blockedStorage = await loadBlockedAccounts();
+
+                    const activeAccounts = existingStorage.accounts;
+                    const quarantinedAccounts = blockedStorage.accounts;
+
+                    const total = activeAccounts.length + quarantinedAccounts.length;
+                    let done = 0;
+
+                    console.log("\nScanning accounts for Google verification blocks...\n");
+
+                    const onProgress = (result: VerificationScanResult) => {
+                      done += 1;
+                      const label = labelOf(result);
+                      const disabledStr = result.enabled ? "" : " (disabled)";
+                      const originStr = result.origin === "quarantined" ? " (quarantined)" : "";
+                      console.log(
+                        `[${done}/${Math.max(1, total)}] ${label}${disabledStr}${originStr}: ${formatVerificationScanStatusForDisplay(result)}`,
+                      );
+                    };
+
+                    const activeResults = await scanAllAccountsForVerification(
+                      activeAccounts,
+                      client,
+                      providerId,
+                      {
+                        concurrency: 3,
+                        perAccountTimeoutMs: 25_000,
+                        onProgress: ({ result }) => onProgress(result),
+                      },
+                      "active",
+                    );
+
+                    const quarantinedResults = await scanAllAccountsForVerification(
+                      quarantinedAccounts,
+                      client,
+                      providerId,
+                      {
+                        concurrency: 3,
+                        perAccountTimeoutMs: 25_000,
+                        onProgress: ({ result }) => onProgress(result),
+                      },
+                      "quarantined",
+                    );
+
+                     scanResults = [...activeResults, ...quarantinedResults];
+
+                      // Prefer the verification URL captured at quarantine time (from runtime),
+                      // since the scan endpoint can sometimes return shortened URLs that 400.
+                      const quarantinedByToken = new Map(
+                        (blockedStorage.accounts ?? [])
+                          .filter((a: any) => a?.refreshToken)
+                          .map((a: any) => [a.refreshToken as string, a] as const),
+                      );
+                      for (const r of scanResults) {
+                        if (r.origin !== "quarantined") continue;
+                        const blockedAcc = quarantinedByToken.get(r.refreshToken);
+                        const storedUrl = blockedAcc?.verifyUrl;
+                        if (typeof storedUrl !== "string" || !storedUrl.trim()) continue;
+
+                        if (!r.verifyUrl) {
+                          r.verifyUrl = storedUrl.trim();
+                          continue;
+                        }
+
+                        const hasPlt = (u: string) => u.toLowerCase().includes("plt=");
+                        if (hasPlt(storedUrl) && !hasPlt(r.verifyUrl)) {
+                          r.verifyUrl = storedUrl.trim();
+                        }
+                      }
+
+                     // Auto-restore quarantined accounts that are now OK.
+                     const okQuarantined = scanResults.filter((r) => r.origin === "quarantined" && r.status === "ok");
+                     if (okQuarantined.length > 0) {
+                      const okSet = new Set(okQuarantined.map((r) => r.refreshToken));
+                      const toRestore = blockedStorage.accounts.filter((a) => okSet.has(a.refreshToken));
+                      const remainingBlocked = blockedStorage.accounts.filter((a) => !okSet.has(a.refreshToken));
+
+                      let restoredCount = 0;
+                       for (const blockedAcc of toRestore) {
+                         // Strip blocked-only fields before moving back into the active rotation pool.
+                         const { blockedAt, blockedReason, verifyUrl, ...rest } = blockedAcc as any;
+                         if (!rest?.refreshToken) continue;
+                         if (!existingStorage.accounts.some((a) => a.refreshToken === rest.refreshToken)) {
+                           existingStorage.accounts.push(rest);
+                           restoredCount += 1;
+                         }
+                       }
+
+                      blockedStorage.accounts = remainingBlocked as any;
+                      await saveAccounts(existingStorage, {
+                        merge: true,
+                        preserveDeletions: true,
+                        addedRefreshTokens: toRestore.map((a: any) => a?.refreshToken).filter(Boolean),
+                      });
+                      await saveBlockedAccounts(blockedStorage);
+
+                      if (restoredCount > 0) {
+                        console.log(`\nRestored ${restoredCount} verified account(s) to active rotation.\n`);
+                      }
+                    }
+
+                    const blocked = scanResults.filter((r) => r.status === "blocked");
+                    const license = scanResults.filter((r) => r.status === "license");
+                    const ok = scanResults.filter((r) => r.status === "ok");
+                    const skipped = scanResults.filter((r) => r.status === "skipped");
+                    const errors = scanResults.filter((r) => r.status === "error");
+
+                    console.log(
+                      `\nResults: ${ok.length} ok, ${blocked.length} blocked, ${license.length} no-license, ${errors.length} error, ${skipped.length} skipped\n`,
+                    );
+                  };
+
+                  await runScan();
+
+                  const isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+                  if (!isInteractive) {
+                    const blocked = scanResults.filter((r) => r.status === "blocked" && !!r.verifyUrl);
+                    if (blocked.length === 0) {
+                      console.log("\nNo blocked accounts detected.\n");
+                      continue;
+                    }
+
+                    console.log("\nBlocked accounts:\n");
+                    for (const b of blocked) {
+                      console.log(`- ${labelOf(b)}${b.origin === "quarantined" ? " (quarantined)" : ""}`);
+                      if (b.verifyUrl) console.log(`  ${b.verifyUrl}`);
+                    }
+                    console.log("");
+                    continue;
+                  }
+
+                  type VerifyMenuChoice =
+                    | { type: "back" }
+                    | { type: "rescan" }
+                    | { type: "toggleAll" }
+                    | { type: "account"; refreshToken: string };
+
+                  const badgeOf = (r: VerificationScanResult): string => {
+                    const originBadge = r.origin === "quarantined" ? "[quarantined]" : "";
+                    if (r.enabled === false || r.status === "skipped") {
+                      return originBadge ? `${originBadge} [disabled]` : "[disabled]";
+                    }
+                    const statusBadge = (() => {
+                      switch (r.status) {
+                        case "ok":
+                          return "[ok]";
+                        case "blocked":
+                          return "[blocked]";
+                        case "license":
+                          return "[no-license]";
+                        case "error":
+                        default:
+                          return "[error]";
+                      }
+                    })();
+                    return originBadge ? `${originBadge} ${statusBadge}` : statusBadge;
+                  };
+
+                  const colorOf = (r: VerificationScanResult): MenuItem<VerifyMenuChoice>["color"] => {
+                    if (r.enabled === false || r.status === "skipped") return undefined;
+                    switch (r.status) {
+                      case "ok":
+                        return "green";
+                      case "blocked":
+                        return "red";
+                      case "license":
+                        return "yellow";
+                      case "error":
+                      default:
+                        return "red";
+                    }
+                  };
+
+                  const rankOf = (r: VerificationScanResult): number => {
+                    // Prioritize actionable items first.
+                    switch (r.status) {
+                      case "blocked":
+                        return 0;
+                      case "error":
+                        return 1;
+                      case "license":
+                        return 2;
+                      case "ok":
+                        return 3;
+                      case "skipped":
+                      default:
+                        return 4;
+                    }
+                  };
+
+                  type BlockedAction =
+                    | { type: "back" }
+                    | { type: "copySignin" }
+                    | { type: "openSignin" }
+                    | { type: "copyDirect" }
+                    | { type: "openDirect" };
+                  type DetailAction = { type: "back" } | { type: "copy" };
+
+                  let showAll = false;
+
+                  const sortedForUi = (): VerificationScanResult[] =>
+                    [...scanResults].sort((a, b) => {
+                      const ra = rankOf(a);
+                      const rb = rankOf(b);
+                      if (ra !== rb) return ra - rb;
+                      const ao = a.origin === "quarantined" ? 0 : 1;
+                      const bo = b.origin === "quarantined" ? 0 : 1;
+                      if (ao !== bo) return ao - bo;
+                      return labelOf(a).localeCompare(labelOf(b));
+                    });
+
+                  while (true) {
+                    const sorted = sortedForUi();
+                    const blocked = sorted.filter((r) => r.status === "blocked");
+                    const issues = sorted.filter((r) => r.status === "license" || r.status === "error");
+                    const ok = sorted.filter((r) => r.status === "ok");
+                    const skipped = sorted.filter((r) => r.status === "skipped");
+
+                    const hasActionable = blocked.length > 0 || issues.length > 0;
+
+                    const items: MenuItem<VerifyMenuChoice>[] = [
+                      { label: "Actions", value: { type: "back" }, kind: "heading" },
+                      { label: "Rescan accounts", value: { type: "rescan" }, color: "cyan" },
+                      {
+                        label: showAll ? "Hide OK accounts" : "Show all accounts",
+                        value: { type: "toggleAll" },
+                        color: "cyan",
+                      },
+                      { label: "Back", value: { type: "back" } },
+                      { label: "", value: { type: "back" }, separator: true },
+                    ];
+
+                    if (!hasActionable && !showAll) {
+                      items.push({ label: "No blocked accounts detected.", value: { type: "back" }, kind: "heading" });
+                    }
+
+                    const pushGroup = (title: string, group: VerificationScanResult[]) => {
+                      if (group.length === 0) return;
+                      items.push({ label: title, value: { type: "back" }, kind: "heading" });
+                      for (const r of group) {
+                        items.push({
+                          label: `${r.index + 1}. ${labelOf(r)} ${badgeOf(r)}`,
+                          value: { type: "account" as const, refreshToken: r.refreshToken },
+                          color: colorOf(r),
+                        });
+                      }
+                      items.push({ label: "", value: { type: "back" }, separator: true });
+                    };
+
+                    if (hasActionable || showAll) {
+                      pushGroup("Blocked (verification required)", blocked);
+                      pushGroup("Other issues", issues);
+                    }
+                    if (showAll) {
+                      pushGroup("OK", ok);
+                      pushGroup("Disabled", skipped);
+                    }
+
+                    // Remove trailing separator if present.
+                    const last = items[items.length - 1];
+                    if (last?.separator) items.pop();
+
+                    const subtitle = showAll
+                      ? "All accounts (blocked first)"
+                      : hasActionable
+                        ? "Actionable accounts first"
+                        : "All accounts OK";
+
+                    const choice = await select(items, {
+                      message: "Verify blocked accounts",
+                      subtitle,
+                      help: "Up/Down to select | Enter: options | Esc: back",
+                      clearScreen: true,
+                    });
+
+                    if (!choice || choice.type === "back") break;
+
+                    if (choice.type === "toggleAll") {
+                      showAll = !showAll;
+                      continue;
+                    }
+
+                    if (choice.type === "rescan") {
+                      await runScan();
+                      continue;
+                    }
+
+                    const selected = scanResults.find((r) => r.refreshToken === choice.refreshToken);
+                    if (!selected) continue;
+
+                    const selectedLabel = labelOf(selected);
+                    const selectedStatus = formatVerificationScanStatusForDisplay(selected);
+
+                    if (selected.status === "blocked") {
+                      const verifyUrl = selected.verifyUrl ?? "";
+                      if (!verifyUrl) {
+                        console.log("\nBlocked account detected, but Google did not return a verification URL.\n");
+                        continue;
+                      }
+
+                      const verifyLink = normalizeGoogleVerificationUrl(verifyUrl.trim(), selected.email);
+                      const signinFirstLink = buildGoogleSigninFirstUrl(verifyLink, selected.email);
+
+                      const action = await select<BlockedAction>(
+                        [
+                          { label: "Open sign-in page (prefill email)", value: { type: "openSignin" }, color: "cyan" },
+                          { label: "Copy sign-in page link", value: { type: "copySignin" }, color: "cyan" },
+                          { label: "Open direct verification link", value: { type: "openDirect" } },
+                          { label: "Copy direct verification link", value: { type: "copyDirect" } },
+                          { label: "Back", value: { type: "back" } },
+                        ],
+                        {
+                          message: `Verify ${selectedLabel}`,
+                          subtitle: "Sign-in first prefills the blocked email, then continues to verification",
+                          help: "Up/Down to select | Enter: confirm | Esc: back",
+                          clearScreen: true,
+                        },
+                      );
+
+                      if (!action || action.type === "back") continue;
+
+                      if (action.type === "copySignin") {
+                        const ok = copyTextToClipboard(signinFirstLink);
+                        if (ok) {
+                          console.log("\nSign-in link copied to clipboard (email prefilled).\n");
+                        } else {
+                          console.log("\nFailed to copy sign-in link to clipboard.\n");
+                          console.log(`${signinFirstLink}\n`);
+                        }
+                        continue;
+                      }
+
+                      if (action.type === "openSignin") {
+                        openUrlInDefaultBrowser(signinFirstLink);
+                        console.log("\nOpened sign-in page (email prefilled). After password, Google should continue to verification.\n");
+                        continue;
+                      }
+
+                      if (action.type === "copyDirect") {
+                        const ok = copyTextToClipboard(verifyLink);
+                        if (ok) {
+                          console.log("\nDirect verification link copied to clipboard.\n");
+                        } else {
+                          console.log("\nFailed to copy direct verification link to clipboard.\n");
+                          console.log(`${verifyLink}\n`);
+                        }
+                        continue;
+                      }
+
+                      if (action.type === "openDirect") {
+                        openUrlInDefaultBrowser(verifyLink);
+                        console.log("\nOpened direct verification link in browser.\n");
+                        continue;
+                      }
+
+                      continue;
+                    }
+
+                    const detailLines: string[] = [
+                      `Status: ${selectedStatus}`,
+                    ];
+                    if (selected.origin === "quarantined") {
+                      detailLines.push("Origin: quarantined (removed from rotation)");
+                    }
+                    if (selected.message) {
+                      detailLines.push(`Message: ${selected.message}`);
+                    }
+
+                    const copyText = `${selectedLabel}\n` + detailLines.join("\n");
+
+                    const actionItems: MenuItem<DetailAction>[] = [
+                      { label: "Details", value: { type: "back" }, kind: "heading" },
+                      ...detailLines.map(
+                        (l): MenuItem<DetailAction> => ({ label: l, value: { type: "back" }, kind: "heading" }),
+                      ),
+                      { label: "", value: { type: "back" }, separator: true },
+                      { label: "Copy details", value: { type: "copy" }, color: "cyan" },
+                      { label: "Back", value: { type: "back" } },
+                    ];
+
+                    const action = await select(actionItems, {
+                      message: selectedLabel,
+                      subtitle: selectedStatus,
+                      help: "Up/Down to select | Enter: confirm | Esc: back",
+                      clearScreen: true,
+                    });
+
+                    if (!action || action.type === "back") continue;
+
+                    const copied = copyTextToClipboard(copyText);
+                    if (copied) {
+                      console.log("\nCopied details to clipboard.\n");
+                    } else {
+                      console.log(`\n${copyText}\n`);
+                    }
+                  }
+
                   console.log("");
                   continue;
                 }
@@ -1945,7 +3267,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     const acc = existingStorage.accounts[menuResult.toggleAccountIndex];
                     if (acc) {
                       acc.enabled = acc.enabled === false;
-                      await saveAccounts(existingStorage);
+                      await saveAccounts(existingStorage, { merge: true, preserveDeletions: true });
                       console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
                     }
                   }
@@ -1964,28 +3286,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 };
               }
               
-              if (menuResult.deleteAccountIndex !== undefined) {
-                const updatedAccounts = existingStorage.accounts.filter(
-                  (_, idx) => idx !== menuResult.deleteAccountIndex
-                );
-                await saveAccounts({
-                  version: 3,
-                  accounts: updatedAccounts,
-                  activeIndex: 0,
-                  activeIndexByFamily: { claude: 0, gemini: 0 },
-                });
-                console.log("\nAccount deleted.\n");
-                
-                if (updatedAccounts.length > 0) {
-                  return {
-                    url: "",
-                    instructions: "Account deleted. Please run `opencode auth login` again to continue.",
-                    method: "auto",
-                    callback: async () => ({ type: "failed", error: "Account deleted - please re-run auth" }),
-                  };
-                }
-              }
-
               if (menuResult.refreshAccountIndex !== undefined) {
                 refreshAccountIndex = menuResult.refreshAccountIndex;
                 const refreshEmail = existingStorage.accounts[refreshAccountIndex]?.email;
@@ -1995,6 +3295,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
               
               if (menuResult.deleteAll) {
                 await clearAccounts();
+                await clearBlockedAccounts();
                 console.log("\nAll accounts deleted.\n");
                 startFresh = true;
               } else {

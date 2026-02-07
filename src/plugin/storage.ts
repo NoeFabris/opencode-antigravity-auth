@@ -22,6 +22,8 @@ export const GITIGNORE_ENTRIES = [
   ".gitignore",
   "antigravity-accounts.json",
   "antigravity-accounts.json.*.tmp",
+  "antigravity-blocked-accounts.json",
+  "antigravity-blocked-accounts.json.*.tmp",
   "antigravity-signature-cache.json",
   "antigravity-logs/",
 ];
@@ -189,6 +191,8 @@ export interface AccountMetadataV3 {
   cooldownReason?: CooldownReason;
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
+  /** History of previous fingerprints for this account */
+  fingerprintHistory?: import("./fingerprint").FingerprintVersion[];
 }
 
 export interface AccountStorageV3 {
@@ -220,6 +224,22 @@ export function getStoragePath(): string {
   return join(getConfigDir(), "antigravity-accounts.json");
 }
 
+export function getBlockedAccountsPath(): string {
+  return join(getConfigDir(), "antigravity-blocked-accounts.json");
+}
+
+export interface BlockedAccountMetadataV1 extends AccountMetadataV3 {
+  blockedAt: number;
+  blockedReason?: string;
+  /** Most recent Google verification URL (best-effort) */
+  verifyUrl?: string;
+}
+
+export interface BlockedAccountStorageV1 {
+  version: 1;
+  accounts: BlockedAccountMetadataV1[];
+}
+
 const LOCK_OPTIONS = {
   stale: 10000,
   retries: {
@@ -243,8 +263,38 @@ async function ensureFileExists(path: string): Promise<void> {
   }
 }
 
+async function ensureBlockedAccountsFileExists(path: string): Promise<void> {
+  try {
+    await fs.access(path);
+  } catch {
+    await fs.mkdir(dirname(path), { recursive: true });
+    await fs.writeFile(
+      path,
+      JSON.stringify({ version: 1, accounts: [] }, null, 2),
+      "utf-8",
+    );
+  }
+}
+
 async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await ensureFileExists(path);
+  let release: (() => Promise<void>) | null = null;
+  try {
+    release = await lockfile.lock(path, LOCK_OPTIONS);
+    return await fn();
+  } finally {
+    if (release) {
+      try {
+        await release();
+      } catch (unlockError) {
+        log.warn("Failed to release lock", { error: String(unlockError) });
+      }
+    }
+  }
+}
+
+async function withBlockedFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  await ensureBlockedAccountsFileExists(path);
   let release: (() => Promise<void>) | null = null;
   try {
     release = await lockfile.lock(path, LOCK_OPTIONS);
@@ -521,15 +571,88 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   }
 }
 
-export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
+export interface SaveAccountsOptions {
+  /**
+   * When true (default), merges with on-disk storage under a file lock.
+   * When false, overwrites on-disk storage with `storage`.
+   */
+  merge?: boolean;
+  /**
+   * Refresh tokens that are newly created in-memory and should be persisted even
+   * if they are not present on disk yet.
+   */
+  addedRefreshTokens?: string[];
+  /** Refresh tokens that should be removed from disk. */
+  removedRefreshTokens?: string[];
+  /**
+   * When true (default), prevents stale writers from re-introducing refresh
+   * tokens that were deleted from disk by another process.
+   */
+  preserveDeletions?: boolean;
+}
+
+export async function saveAccounts(
+  storage: AccountStorageV3,
+  options: SaveAccountsOptions = {},
+): Promise<void> {
   const path = getStoragePath();
   const configDir = dirname(path);
   await fs.mkdir(configDir, { recursive: true });
   await ensureGitignore(configDir);
 
   await withFileLock(path, async () => {
-    const existing = await loadAccountsUnsafe();
-    const merged = existing ? mergeAccountStorage(existing, storage) : storage;
+    const shouldMerge = options.merge !== false;
+    const preserveDeletions = options.preserveDeletions === true;
+    const existing = shouldMerge ? await loadAccountsUnsafe() : null;
+
+    let merged = existing ? mergeAccountStorage(existing, storage) : storage;
+
+    const removedSet = new Set(options.removedRefreshTokens ?? []);
+    if (removedSet.size > 0) {
+      merged = {
+        ...merged,
+        accounts: merged.accounts.filter((a) => !removedSet.has(a.refreshToken)),
+      };
+    }
+
+    // Prevent stale processes from resurrecting deleted accounts:
+    // if an account refresh token is present only in the incoming `storage`
+    // (not on disk), we drop it unless it is explicitly marked as "added".
+    if (existing && preserveDeletions) {
+      const diskTokens = new Set(existing.accounts.map((a) => a.refreshToken).filter(Boolean));
+      const addedTokens = new Set(options.addedRefreshTokens ?? []);
+      const incomingTokens = new Set(storage.accounts.map((a) => a.refreshToken).filter(Boolean));
+
+      const staleIncoming = new Set<string>();
+      for (const token of incomingTokens) {
+        if (!diskTokens.has(token) && !addedTokens.has(token)) {
+          staleIncoming.add(token);
+        }
+      }
+
+      if (staleIncoming.size > 0) {
+        merged = {
+          ...merged,
+          accounts: merged.accounts.filter((a) => !staleIncoming.has(a.refreshToken)),
+        };
+      }
+    }
+
+    // Clamp indices after any removals/pruning so we don't write invalid indices.
+    const len = merged.accounts.length;
+    const clampIndex = (idx: unknown): number => {
+      if (len <= 0) return 0;
+      const n = typeof idx === "number" && Number.isFinite(idx) ? idx : 0;
+      return Math.min(Math.max(0, Math.trunc(n)), len - 1);
+    };
+    merged.activeIndex = clampIndex(merged.activeIndex);
+    if (merged.activeIndexByFamily && typeof merged.activeIndexByFamily === "object") {
+      merged.activeIndexByFamily = {
+        ...merged.activeIndexByFamily,
+        claude: clampIndex((merged.activeIndexByFamily as any).claude),
+        gemini: clampIndex((merged.activeIndexByFamily as any).gemini),
+      };
+    }
 
     const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
     const content = JSON.stringify(merged, null, 2);
@@ -583,6 +706,75 @@ export async function clearAccounts(): Promise<void> {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
       log.error("Failed to clear account storage", { error: String(error) });
+    }
+  }
+}
+
+export async function loadBlockedAccounts(): Promise<BlockedAccountStorageV1> {
+  try {
+    const path = getBlockedAccountsPath();
+    const content = await fs.readFile(path, "utf-8");
+    const parsed = JSON.parse(content) as Partial<BlockedAccountStorageV1> | null;
+
+    if (!parsed || typeof parsed !== "object" || parsed.version !== 1 || !Array.isArray(parsed.accounts)) {
+      return { version: 1, accounts: [] };
+    }
+
+    const map = new Map<string, BlockedAccountMetadataV1>();
+    for (const acc of parsed.accounts) {
+      if (!acc || typeof acc !== "object") continue;
+      const refreshToken = (acc as any).refreshToken;
+      if (typeof refreshToken !== "string" || !refreshToken) continue;
+      const blockedAt = typeof (acc as any).blockedAt === "number" ? (acc as any).blockedAt : 0;
+      map.set(refreshToken, { ...(acc as any), blockedAt });
+    }
+
+    return {
+      version: 1,
+      accounts: Array.from(map.values()),
+    };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return { version: 1, accounts: [] };
+    }
+    log.error("Failed to load blocked account storage", { error: String(error) });
+    return { version: 1, accounts: [] };
+  }
+}
+
+export async function saveBlockedAccounts(storage: BlockedAccountStorageV1): Promise<void> {
+  const path = getBlockedAccountsPath();
+  const configDir = dirname(path);
+  await fs.mkdir(configDir, { recursive: true });
+  await ensureGitignore(configDir);
+
+  await withBlockedFileLock(path, async () => {
+    const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+    const content = JSON.stringify(storage, null, 2);
+
+    try {
+      await fs.writeFile(tempPath, content, "utf-8");
+      await fs.rename(tempPath, path);
+    } catch (error) {
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // ignore cleanup errors
+      }
+      throw error;
+    }
+  });
+}
+
+export async function clearBlockedAccounts(): Promise<void> {
+  try {
+    const path = getBlockedAccountsPath();
+    await fs.unlink(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      log.error("Failed to clear blocked account storage", { error: String(error) });
     }
   }
 }

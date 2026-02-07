@@ -1,5 +1,16 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
-import { loadAccounts, saveAccounts, type AccountStorageV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
+import {
+  loadAccounts,
+  loadBlockedAccounts,
+  saveAccounts,
+  saveBlockedAccounts,
+  type AccountStorageV3,
+  type BlockedAccountMetadataV1,
+  type RateLimitStateV3,
+  type ModelFamily,
+  type HeaderStyle,
+  type CooldownReason,
+} from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
@@ -238,6 +249,7 @@ function clearExpiredRateLimits(account: ManagedAccount): void {
  * Source of truth for the pool is `antigravity-accounts.json`.
  */
 export class AccountManager {
+  private authFallback?: OAuthAuthDetails;
   private accounts: ManagedAccount[] = [];
   private cursor = 0;
   private currentAccountIndexByFamily: Record<ModelFamily, number> = {
@@ -254,6 +266,8 @@ export class AccountManager {
   private savePending = false;
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private savePromiseResolvers: Array<() => void> = [];
+  private pendingAddedRefreshTokens = new Set<string>();
+  private pendingRemovedRefreshTokens = new Set<string>();
 
   static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
     const stored = await loadAccounts();
@@ -261,6 +275,7 @@ export class AccountManager {
   }
 
   constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
+    this.authFallback = authFallback;
     const authParts = authFallback ? parseRefreshParts(authFallback.refresh) : null;
 
     if (stored && stored.accounts.length === 0) {
@@ -305,6 +320,7 @@ export class AccountManager {
             fingerprint: acc.fingerprint
               ? updateFingerprintVersion(acc.fingerprint)
               : generateFingerprint(),
+            fingerprintHistory: acc.fingerprintHistory?.length ? acc.fingerprintHistory : undefined,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -345,6 +361,8 @@ export class AccountManager {
           touchedForQuota: {},
         };
         this.accounts.push(newAccount);
+        this.pendingAddedRefreshTokens.add(authParts.refreshToken);
+        this.requestSaveToDisk();
         // Update indices to include the new account
         this.currentAccountIndexByFamily.claude = Math.min(this.currentAccountIndexByFamily.claude, this.accounts.length - 1);
         this.currentAccountIndexByFamily.gemini = Math.min(this.currentAccountIndexByFamily.gemini, this.accounts.length - 1);
@@ -369,6 +387,8 @@ export class AccountManager {
             touchedForQuota: {},
           },
         ];
+        this.pendingAddedRefreshTokens.add(parts.refreshToken);
+        this.requestSaveToDisk();
         this.cursor = 0;
         this.currentAccountIndexByFamily.claude = 0;
         this.currentAccountIndexByFamily.gemini = 0;
@@ -673,6 +693,12 @@ export class AccountManager {
       return false;
     }
 
+    const refreshToken = account.parts.refreshToken;
+    if (refreshToken) {
+      this.pendingRemovedRefreshTokens.add(refreshToken);
+      this.pendingAddedRefreshTokens.delete(refreshToken);
+    }
+
     this.accounts.splice(idx, 1);
     this.accounts.forEach((acc, index) => {
       acc.index = index;
@@ -771,6 +797,134 @@ export class AccountManager {
     return [...this.accounts];
   }
 
+  async reloadFromDisk(): Promise<void> {
+    const stored = await loadAccounts();
+    const authFallback = this.authFallback;
+    const authParts = authFallback ? parseRefreshParts(authFallback.refresh) : null;
+
+    // Reset per-session-only state. This keeps behavior predictable after restore.
+    this.sessionOffsetApplied = { claude: false, gemini: false };
+    this.lastToastAccountIndex = -1;
+    this.lastToastTime = 0;
+
+    if (!stored || stored.accounts.length === 0) {
+      this.accounts = [];
+      this.cursor = 0;
+      this.currentAccountIndexByFamily.claude = -1;
+      this.currentAccountIndexByFamily.gemini = -1;
+      return;
+    }
+
+    const baseNow = nowMs();
+    this.accounts = stored.accounts
+      .map((acc, index): ManagedAccount | null => {
+        if (!acc.refreshToken || typeof acc.refreshToken !== "string") {
+          return null;
+        }
+        const matchesFallback = !!(
+          authFallback &&
+          authParts &&
+          authParts.refreshToken &&
+          acc.refreshToken === authParts.refreshToken
+        );
+
+        return {
+          index,
+          email: acc.email,
+          addedAt: clampNonNegativeInt(acc.addedAt, baseNow),
+          lastUsed: clampNonNegativeInt(acc.lastUsed, 0),
+          parts: {
+            refreshToken: acc.refreshToken,
+            projectId: acc.projectId,
+            managedProjectId: acc.managedProjectId,
+          },
+          access: matchesFallback ? authFallback?.access : undefined,
+          expires: matchesFallback ? authFallback?.expires : undefined,
+          enabled: acc.enabled !== false,
+          rateLimitResetTimes: acc.rateLimitResetTimes ?? {},
+          lastSwitchReason: acc.lastSwitchReason,
+          coolingDownUntil: acc.coolingDownUntil,
+          cooldownReason: acc.cooldownReason,
+          touchedForQuota: {},
+          fingerprint: acc.fingerprint
+            ? updateFingerprintVersion(acc.fingerprint)
+            : generateFingerprint(),
+          fingerprintHistory: acc.fingerprintHistory?.length ? acc.fingerprintHistory : undefined,
+        };
+      })
+      .filter((a): a is ManagedAccount => a !== null);
+
+    this.cursor = clampNonNegativeInt(stored.activeIndex, 0);
+    if (this.accounts.length === 0) {
+      this.cursor = 0;
+      this.currentAccountIndexByFamily.claude = -1;
+      this.currentAccountIndexByFamily.gemini = -1;
+      return;
+    }
+
+    this.cursor = this.cursor % this.accounts.length;
+    const defaultIndex = this.cursor;
+    this.currentAccountIndexByFamily.claude = clampNonNegativeInt(
+      stored.activeIndexByFamily?.claude,
+      defaultIndex
+    ) % this.accounts.length;
+    this.currentAccountIndexByFamily.gemini = clampNonNegativeInt(
+      stored.activeIndexByFamily?.gemini,
+      defaultIndex
+    ) % this.accounts.length;
+  }
+
+  async quarantineAccountForVerification(
+    account: ManagedAccount,
+    reason?: string,
+    verifyUrl?: string,
+  ): Promise<boolean> {
+    const refreshToken = account.parts.refreshToken;
+    if (!refreshToken) return false;
+
+    const record: BlockedAccountMetadataV1 = {
+      email: account.email,
+      refreshToken,
+      projectId: account.parts.projectId,
+      managedProjectId: account.parts.managedProjectId,
+      addedAt: account.addedAt,
+      lastUsed: account.lastUsed,
+      enabled: account.enabled,
+      lastSwitchReason: account.lastSwitchReason,
+      rateLimitResetTimes: Object.keys(account.rateLimitResetTimes).length > 0 ? account.rateLimitResetTimes : undefined,
+      coolingDownUntil: account.coolingDownUntil,
+      cooldownReason: account.cooldownReason,
+      fingerprint: account.fingerprint,
+      fingerprintHistory: account.fingerprintHistory?.length ? account.fingerprintHistory : undefined,
+      blockedAt: nowMs(),
+      blockedReason: reason,
+      verifyUrl,
+    };
+
+    const removed = this.removeAccount(account);
+    if (!removed) return false;
+
+    try {
+      const blocked = await loadBlockedAccounts();
+      const map = new Map<string, BlockedAccountMetadataV1>();
+      for (const a of blocked.accounts) {
+        if (a?.refreshToken) map.set(a.refreshToken, a);
+      }
+      map.set(record.refreshToken, record);
+      await saveBlockedAccounts({ version: 1, accounts: Array.from(map.values()) });
+    } catch {
+      // Best-effort: quarantining should not crash the request path.
+    }
+
+    try {
+      await this.saveToDisk();
+    } catch {
+      // Best-effort persistence.
+    }
+
+    return true;
+  }
+
   async saveToDisk(): Promise<void> {
     const claudeIndex = Math.max(0, this.currentAccountIndexByFamily.claude);
     const geminiIndex = Math.max(0, this.currentAccountIndexByFamily.gemini);
@@ -784,6 +938,7 @@ export class AccountManager {
         managedProjectId: a.parts.managedProjectId,
         addedAt: a.addedAt,
         lastUsed: a.lastUsed,
+        enabled: a.enabled,
         lastSwitchReason: a.lastSwitchReason,
         rateLimitResetTimes: Object.keys(a.rateLimitResetTimes).length > 0 ? a.rateLimitResetTimes : undefined,
         coolingDownUntil: a.coolingDownUntil,
@@ -798,7 +953,22 @@ export class AccountManager {
       },
     };
 
-    await saveAccounts(storage);
+    const addedRefreshTokens = Array.from(this.pendingAddedRefreshTokens);
+    const removedRefreshTokens = Array.from(this.pendingRemovedRefreshTokens);
+
+    // IMPORTANT:
+    // This plugin can run in multiple processes concurrently (e.g. a long-running
+    // OpenCode session + `opencode auth login`). Use merge+pruning to avoid
+    // resurrecting accounts deleted in another process.
+    await saveAccounts(storage, {
+      merge: true,
+      addedRefreshTokens,
+      removedRefreshTokens,
+      preserveDeletions: true,
+    });
+
+    this.pendingAddedRefreshTokens.clear();
+    this.pendingRemovedRefreshTokens.clear();
   }
 
   requestSaveToDisk(): void {

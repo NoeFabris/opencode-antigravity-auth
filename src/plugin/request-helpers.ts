@@ -1085,31 +1085,6 @@ function sanitizeThinkingPart(part: Record<string, unknown>): Record<string, unk
   return stripCacheControlRecursively(part) as Record<string, unknown>;
 }
 
-function applySentinelSignature(part: Record<string, unknown>): Record<string, unknown> {
-  const updated = { ...part } as Record<string, unknown>;
-
-  if ("thoughtSignature" in updated) {
-    (updated as any).thoughtSignature = SKIP_THOUGHT_SIGNATURE;
-  }
-  if ("signature" in updated) {
-    (updated as any).signature = SKIP_THOUGHT_SIGNATURE;
-  }
-
-  if ((updated as any).thought === true && (updated as any).thoughtSignature === undefined) {
-    (updated as any).thoughtSignature = SKIP_THOUGHT_SIGNATURE;
-  }
-  if (
-    ((updated as any).type === "thinking"
-      || (updated as any).type === "redacted_thinking"
-      || (updated as any).type === "reasoning")
-    && (updated as any).signature === undefined
-  ) {
-    (updated as any).signature = SKIP_THOUGHT_SIGNATURE;
-  }
-
-  return updated;
-}
-
 function findLastAssistantIndex(contents: any[], roleValue: "model" | "assistant"): number {
   for (let i = contents.length - 1; i >= 0; i--) {
     const content = contents[i];
@@ -1127,41 +1102,11 @@ function filterContentArray(
   isClaudeModel?: boolean,
   isLastAssistantMessage: boolean = false,
 ): any[] {
-  // For Claude models, strip thinking blocks by default for reliability
-  // User can opt-in to keep thinking via config: { "keep_thinking": true }
-  if (isClaudeModel && !getKeepThinking()) {
-    return stripAllThinkingBlocks(contentArray);
-  }
-
+  // Claude thinking blocks include signed `signature` fields that cannot be replayed.
+  // To avoid hard-to-recover 400s from invalid signature reuse, always strip thinking
+  // blocks from outgoing requests for Claude models (tool blocks are preserved).
   if (isClaudeModel) {
-    const filtered: any[] = [];
-
-    for (const item of contentArray) {
-      if (!item || typeof item !== "object") {
-        filtered.push(item);
-        continue;
-      }
-
-      if (isToolBlock(item)) {
-        filtered.push(item);
-        continue;
-      }
-
-      const isThinking = isThinkingPart(item);
-      const hasSignature = hasSignatureField(item);
-
-      if (!isThinking && !hasSignature) {
-        filtered.push(item);
-        continue;
-      }
-
-      const sanitized = sanitizeThinkingPart(item);
-      if (sanitized) {
-        filtered.push(applySentinelSignature(sanitized));
-      }
-    }
-
-    return filtered;
+    return stripAllThinkingBlocks(contentArray);
   }
 
   const filtered: any[] = [];
@@ -1554,6 +1499,59 @@ export function transformThinkingParts(response: unknown): unknown {
   }
 
   return result;
+}
+
+/**
+ * Strips reasoning/thinking parts from a response object.
+ * For Claude models, OpenCode will render these as "Thinking:" which users generally don't want.
+ */
+export function stripThinkingFromResponse(response: unknown): unknown {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+
+  const resp = response as Record<string, unknown>;
+
+  const stripPartsArray = (parts: any[]): any[] =>
+    parts.filter((p) => {
+      if (!p || typeof p !== "object") return true;
+      // OpenCode/Gemini format
+      if ((p as any).thought === true) return false;
+      // Anthropic-ish / normalized formats
+      const t = (p as any).type;
+      if (t === "thinking" || t === "redacted_thinking" || t === "reasoning") return false;
+      return true;
+    });
+
+  const out: Record<string, unknown> = { ...resp };
+
+  if (Array.isArray(resp.candidates)) {
+    out.candidates = (resp.candidates as any[]).map((cand) => {
+      if (!cand || typeof cand !== "object") return cand;
+      const c = cand as Record<string, unknown>;
+      const content = c.content as Record<string, unknown> | undefined;
+      if (!content || typeof content !== "object") return cand;
+      if (!Array.isArray((content as any).parts)) return cand;
+      return {
+        ...c,
+        content: {
+          ...content,
+          parts: stripPartsArray((content as any).parts),
+        },
+      };
+    });
+  }
+
+  if (Array.isArray(resp.content)) {
+    out.content = stripPartsArray(resp.content as any[]);
+  }
+
+  // Remove any extracted reasoning aggregate to avoid UI showing it elsewhere.
+  if ("reasoning_content" in out) {
+    delete (out as any).reasoning_content;
+  }
+
+  return out;
 }
 
 /**
@@ -2787,77 +2785,33 @@ export function applyToolPairingFixes(
 export function createSyntheticErrorResponse(
   errorMessage: string,
   requestedModel: string = "unknown",
+  errorType: string = "prompt_too_long",
 ): Response {
-  // Generate a unique message ID
-  const messageId = `msg_synthetic_${Date.now()}`;
-  
-  // Build Claude SSE events that represent a complete message with error text
-  const events: string[] = [];
-  
-  // 1. message_start event
-  events.push(`event: message_start
-data: ${JSON.stringify({
-    type: "message_start",
-    message: {
-      id: messageId,
-      type: "message",
-      role: "assistant",
-      content: [],
-      model: requestedModel,
-      stop_reason: null,
-      stop_sequence: null,
-      usage: { input_tokens: 0, output_tokens: 0 },
+  // IMPORTANT:
+  // OpenCode's Google provider expects Antigravity/Gemini-shaped SSE lines (data: {"response": ...}).
+  // Returning raw Claude SSE events here causes "Failed to process error response".
+  const outputTokens = Math.max(1, Math.ceil(errorMessage.length / 4));
+  const payload = {
+    response: {
+      candidates: [
+        {
+          content: {
+            role: "model",
+            parts: [{ text: errorMessage }],
+          },
+          finishReason: "STOP",
+        },
+      ],
+      modelVersion: requestedModel,
+      usageMetadata: {
+        promptTokenCount: 0,
+        candidatesTokenCount: outputTokens,
+        totalTokenCount: outputTokens,
+      },
     },
-  })}
+  };
 
-`);
-
-  // 2. content_block_start event
-  events.push(`event: content_block_start
-data: ${JSON.stringify({
-    type: "content_block_start",
-    index: 0,
-    content_block: { type: "text", text: "" },
-  })}
-
-`);
-
-  // 3. content_block_delta event with the error message
-  events.push(`event: content_block_delta
-data: ${JSON.stringify({
-    type: "content_block_delta",
-    index: 0,
-    delta: { type: "text_delta", text: errorMessage },
-  })}
-
-`);
-
-  // 4. content_block_stop event
-  events.push(`event: content_block_stop
-data: ${JSON.stringify({
-    type: "content_block_stop",
-    index: 0,
-  })}
-
-`);
-
-  // 5. message_delta event (end_turn)
-  events.push(`event: message_delta
-data: ${JSON.stringify({
-    type: "message_delta",
-    delta: { stop_reason: "end_turn", stop_sequence: null },
-    usage: { output_tokens: Math.ceil(errorMessage.length / 4) },
-  })}
-
-`);
-
-  // 6. message_stop event
-  events.push(`event: message_stop
-data: ${JSON.stringify({ type: "message_stop" })}
-
-`);
-
-  const body = events.join("");
+  const body = `data: ${JSON.stringify(payload)}\n\n`;
 
   return new Response(body, {
     status: 200,
@@ -2866,7 +2820,7 @@ data: ${JSON.stringify({ type: "message_stop" })}
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
       "X-Antigravity-Synthetic": "true",
-      "X-Antigravity-Error-Type": "prompt_too_long",
+      "X-Antigravity-Error-Type": errorType,
     },
   });
 }

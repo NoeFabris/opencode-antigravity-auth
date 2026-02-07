@@ -470,6 +470,8 @@ describe("Storage Migration", () => {
         ".gitignore",
         "antigravity-accounts.json",
         "antigravity-accounts.json.*.tmp",
+        "antigravity-blocked-accounts.json",
+        "antigravity-blocked-accounts.json.*.tmp",
         "antigravity-signature-cache.json",
         "antigravity-logs/",
       ].join("\n");
@@ -534,6 +536,8 @@ describe("Storage Migration", () => {
         ".gitignore",
         "antigravity-accounts.json",
         "antigravity-accounts.json.*.tmp",
+        "antigravity-blocked-accounts.json",
+        "antigravity-blocked-accounts.json.*.tmp",
         "antigravity-signature-cache.json",
         "antigravity-logs/",
       ].join("\n");

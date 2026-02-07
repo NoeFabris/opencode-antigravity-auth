@@ -1574,52 +1574,47 @@ describe("createSyntheticErrorResponse", () => {
 
     expect(text).toContain("Context too long");
     expect(text).toContain("data:");
-    expect(text).toContain("message_start");
-    expect(text).toContain("message_stop");
+    expect(text).toContain("\"response\"");
   });
 
-  it("uses provided model in message_start event", async () => {
+  it("includes provided model in the SSE payload", async () => {
     const response = createSyntheticErrorResponse("Error", "claude-opus-4");
     const text = await response.text();
 
     expect(text).toContain("claude-opus-4");
   });
 
-  it("generates valid Claude SSE event structure", async () => {
+  it("generates valid Antigravity-style SSE structure", async () => {
     const response = createSyntheticErrorResponse("Test", "test-model");
     const text = await response.text();
     const lines = text.split("\n").filter((l) => l.startsWith("data:"));
 
-    expect(lines.length).toBeGreaterThanOrEqual(5);
+    expect(lines.length).toBeGreaterThanOrEqual(1);
 
     const events = lines.map((l) => JSON.parse(l.replace("data: ", "")));
-    const eventTypes = events.map((e) => e.type);
-
-    expect(eventTypes).toContain("message_start");
-    expect(eventTypes).toContain("content_block_start");
-    expect(eventTypes).toContain("content_block_delta");
-    expect(eventTypes).toContain("content_block_stop");
-    expect(eventTypes).toContain("message_stop");
+    for (const e of events) {
+      expect(e.response).toBeDefined();
+    }
   });
 
-  it("includes error message in content_block_delta", async () => {
+  it("includes error message in response.candidates[0].content.parts[0].text", async () => {
     const response = createSyntheticErrorResponse("Something failed", "model");
     const text = await response.text();
     const lines = text.split("\n").filter((l) => l.startsWith("data:"));
     const events = lines.map((l) => JSON.parse(l.replace("data: ", "")));
-    const delta = events.find((e) => e.type === "content_block_delta");
+    const resp = events[0]?.response;
 
-    expect(delta?.delta?.text).toBe("Something failed");
+    expect(resp?.candidates?.[0]?.content?.parts?.[0]?.text).toBe("Something failed");
   });
 
-  it("sets end_turn stop reason in message_delta", async () => {
+  it("sets finishReason STOP in response.candidates[0]", async () => {
     const response = createSyntheticErrorResponse("Error", "model");
     const text = await response.text();
     const lines = text.split("\n").filter((l) => l.startsWith("data:"));
     const events = lines.map((l) => JSON.parse(l.replace("data: ", "")));
-    const messageDelta = events.find((e) => e.type === "message_delta");
+    const resp = events[0]?.response;
 
-    expect(messageDelta?.delta?.stop_reason).toBe("end_turn");
+    expect(resp?.candidates?.[0]?.finishReason).toBe("STOP");
   });
 });
 

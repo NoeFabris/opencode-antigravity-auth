@@ -6,15 +6,62 @@ export interface MenuItem<T = string> {
   hint?: string;
   disabled?: boolean;
   separator?: boolean;
+  /** Non-selectable label row (section heading). */
+  kind?: 'heading';
   color?: 'red' | 'green' | 'yellow' | 'cyan';
 }
 
 export interface SelectOptions {
   message: string;
   subtitle?: string;
+  /** Override the help line shown at the bottom of the menu. */
+  help?: string;
+  /**
+   * Clear the terminal before first render.
+   * Useful for nested flows where previous logs make menus feel cluttered.
+   */
+  clearScreen?: boolean;
 }
 
 const ESCAPE_TIMEOUT_MS = 50;
+
+const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
+
+function stripAnsi(input: string): string {
+  return input.replace(ANSI_REGEX, '');
+}
+
+function truncateAnsi(input: string, maxVisibleChars: number): string {
+  if (maxVisibleChars <= 0) return '';
+
+  const visible = stripAnsi(input);
+  if (visible.length <= maxVisibleChars) return input;
+
+  const suffix = maxVisibleChars >= 3 ? '...' : '.'.repeat(maxVisibleChars);
+  const keep = Math.max(0, maxVisibleChars - suffix.length);
+
+  let out = '';
+  let i = 0;
+  let kept = 0;
+
+  while (i < input.length && kept < keep) {
+    // Preserve ANSI sequences without counting them.
+    if (input[i] === '\x1b') {
+      const m = input.slice(i).match(/^\x1b\[[0-9;]*m/);
+      if (m) {
+        out += m[0];
+        i += m[0].length;
+        continue;
+      }
+    }
+
+    out += input[i];
+    i += 1;
+    kept += 1;
+  }
+
+  return out + suffix;
+}
 
 function getColorCode(color: MenuItem['color']): string {
   switch (color) {
@@ -38,7 +85,8 @@ export async function select<T>(
     throw new Error('No menu items provided');
   }
 
-  const enabledItems = items.filter(i => !i.disabled && !i.separator);
+  const isSelectable = (i: MenuItem<T>) => !i.disabled && !i.separator && i.kind !== 'heading';
+  const enabledItems = items.filter(isSelectable);
   if (enabledItems.length === 0) {
     throw new Error('All items disabled');
   }
@@ -50,35 +98,53 @@ export async function select<T>(
   const { message, subtitle } = options;
   const { stdin, stdout } = process;
 
-  let cursor = items.findIndex(i => !i.disabled && !i.separator);
+  let cursor = items.findIndex(isSelectable);
   if (cursor === -1) cursor = 0; // Fallback, though validation above should prevent this
   let escapeTimeout: ReturnType<typeof setTimeout> | null = null;
   let isCleanedUp = false;
-  let isFirstRender = true;
-
-  const getTotalLines = (): number => {
-    const subtitleLines = subtitle ? 3 : 0;
-    return 1 + subtitleLines + items.length + 1 + 1;
-  };
 
   const render = () => {
-    const totalLines = getTotalLines();
+    const columns = stdout.columns ?? 80;
+    const rows = stdout.rows ?? 24;
+    const shouldClearScreen = options.clearScreen !== false;
 
-    if (!isFirstRender) {
-      stdout.write(ANSI.up(totalLines) + '\r');
+    // For nested/stacked flows, rely on full clears instead of cursor-up rewrites.
+    // Cursor-up is fragile when terminals wrap unexpectedly (width mismatches, unicode, etc).
+    if (shouldClearScreen) {
+      stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
     }
-    isFirstRender = false;
 
-    stdout.write(`${ANSI.clearLine}${ANSI.dim}┌  ${ANSI.reset}${message}\n`);
+    // Subtitle renders as 4 lines:
+    // 1) blank "│" spacer, 2) subtitle line, 3) blank line, plus header counted separately.
+    const subtitleLines = subtitle ? 4 : 0;
+    const fixedLines = 1 + subtitleLines + 2; // header + subtitle + (help + bottom)
+    // Keep a small safety margin so the final newline doesn't scroll the terminal.
+    const maxVisibleItems = Math.max(1, Math.min(items.length, rows - fixedLines - 1));
+
+    // If the menu is taller than the viewport, only render a window around the cursor.
+    // This prevents terminal scrollback spam (e.g. repeated headers when pressing arrows).
+    let windowStart = 0;
+    let windowEnd = items.length;
+    if (items.length > maxVisibleItems) {
+      windowStart = cursor - Math.floor(maxVisibleItems / 2);
+      windowStart = Math.max(0, Math.min(windowStart, items.length - maxVisibleItems));
+      windowEnd = windowStart + maxVisibleItems;
+    }
+
+    const visibleItems = items.slice(windowStart, windowEnd);
+    const headerMessage = truncateAnsi(message, Math.max(1, columns - 4));
+    stdout.write(`${ANSI.clearLine}${ANSI.dim}┌  ${ANSI.reset}${headerMessage}\n`);
     
     if (subtitle) {
       stdout.write(`${ANSI.clearLine}${ANSI.dim}│${ANSI.reset}\n`);
-      stdout.write(`${ANSI.clearLine}${ANSI.cyan}◆${ANSI.reset}  ${subtitle}\n`);
+      const sub = truncateAnsi(subtitle, Math.max(1, columns - 4));
+      stdout.write(`${ANSI.clearLine}${ANSI.cyan}◆${ANSI.reset}  ${sub}\n`);
       stdout.write(`${ANSI.clearLine}\n`);
     }
 
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
+    for (let i = 0; i < visibleItems.length; i++) {
+      const itemIndex = windowStart + i;
+      const item = visibleItems[i];
       if (!item) continue;
 
       if (item.separator) {
@@ -86,7 +152,13 @@ export async function select<T>(
         continue;
       }
 
-      const isSelected = i === cursor;
+      if (item.kind === 'heading') {
+        const heading = truncateAnsi(`${ANSI.dim}${ANSI.bold}${item.label}${ANSI.reset}`, Math.max(1, columns - 6));
+        stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${heading}\n`);
+        continue;
+      }
+
+      const isSelected = itemIndex === cursor;
       const colorCode = getColorCode(item.color);
 
       let labelText: string;
@@ -102,6 +174,9 @@ export async function select<T>(
         if (item.hint) labelText += ` ${ANSI.dim}${item.hint}${ANSI.reset}`;
       }
 
+      // Prevent wrapping: cursor positioning relies on a fixed line count.
+      labelText = truncateAnsi(labelText, Math.max(1, columns - 8));
+
       if (isSelected) {
         stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${ANSI.green}●${ANSI.reset} ${labelText}\n`);
       } else {
@@ -109,7 +184,12 @@ export async function select<T>(
       }
     }
 
-    stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${ANSI.dim}↑/↓ to select • Enter: confirm${ANSI.reset}\n`);
+    const windowHint = items.length > visibleItems.length
+      ? ` (${windowStart + 1}-${windowEnd}/${items.length})`
+      : '';
+    const helpText = options.help ?? `Up/Down to select | Enter: confirm | Esc: back${windowHint}`;
+    const help = truncateAnsi(helpText, Math.max(1, columns - 6));
+    stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${ANSI.dim}${help}${ANSI.reset}\n`);
     stdout.write(`${ANSI.clearLine}${ANSI.cyan}└${ANSI.reset}\n`);
   };
 
@@ -154,7 +234,7 @@ export async function select<T>(
       let next = from;
       do {
         next = (next + direction + items.length) % items.length;
-      } while (items[next]?.disabled || items[next]?.separator);
+      } while (items[next]?.disabled || items[next]?.separator || items[next]?.kind === 'heading');
       return next;
     };
 
