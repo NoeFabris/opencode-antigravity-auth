@@ -3,8 +3,10 @@ import {
   deduplicateAccountsByEmail,
   migrateV2ToV3,
   loadAccounts,
+  saveAccounts,
   type AccountMetadata,
   type AccountStorage,
+  type AccountStorageV3,
 } from "./storage";
 import { promises as fs } from "node:fs";
 import {
@@ -428,6 +430,95 @@ describe("Storage Migration", () => {
         (call) => (call[0] as string).includes(".gitignore")
       );
       expect(gitignoreCall).toBeDefined();
+    });
+  });
+
+  describe("enabled persistence", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("persists explicit enabled=false when saving accounts", async () => {
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        const error = new Error("ENOENT") as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        return Promise.reject(error);
+      });
+
+      const incoming: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r-disabled",
+            addedAt: now,
+            lastUsed: now,
+            enabled: false,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      await saveAccounts(incoming);
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts temp write call not found");
+      const saved = JSON.parse(saveCall[1] as string) as AccountStorageV3;
+
+      expect(saved.accounts[0]?.enabled).toBe(false);
+    });
+
+    it("preserves existing enabled=false during merge when incoming omits enabled", async () => {
+      const existingOnDisk: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r1",
+            addedAt: now,
+            lastUsed: now - 5000,
+            enabled: false,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        return Promise.resolve(JSON.stringify(existingOnDisk));
+      });
+
+      const incomingWithoutEnabled: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r1",
+            addedAt: now,
+            lastUsed: now,
+            // intentionally omitted `enabled`
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      await saveAccounts(incomingWithoutEnabled, { merge: true });
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts temp write call not found");
+      const saved = JSON.parse(saveCall[1] as string) as AccountStorageV3;
+
+      expect(saved.accounts[0]?.enabled).toBe(false);
     });
   });
 
