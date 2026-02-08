@@ -26,6 +26,9 @@ const MODELS: ModelTest[] = [
   { model: "google/antigravity-claude-opus-4-5-thinking-low", category: "antigravity-claude" },
   { model: "google/antigravity-claude-opus-4-5-thinking-medium", category: "antigravity-claude" },
   { model: "google/antigravity-claude-opus-4-5-thinking-high", category: "antigravity-claude" },
+  { model: "google/antigravity-claude-opus-4-6-thinking-low", category: "antigravity-claude" },
+  { model: "google/antigravity-claude-opus-4-6-thinking-medium", category: "antigravity-claude" },
+  { model: "google/antigravity-claude-opus-4-6-thinking-high", category: "antigravity-claude" },
 ];
 
 const TEST_PROMPT = "Reply with exactly one word: WORKING";

@@ -194,7 +194,7 @@ export function startAntigravityDebugRequest(meta: AntigravityDebugRequestMeta):
 
   const id = `ANTIGRAVITY-${++requestCounter}`;
   const method = meta.method ?? "GET";
-  logDebug(`[Antigravity Debug ${id}] ${method} ${meta.resolvedUrl}`);
+  logDebug(`[Antigravity Debug ${id}] pid=${process.pid} ${method} ${meta.resolvedUrl}`);
   if (meta.originalUrl && meta.originalUrl !== meta.resolvedUrl) {
     logDebug(`[Antigravity Debug ${id}] Original URL: ${meta.originalUrl}`);
   }
@@ -443,4 +443,94 @@ export function logModelFamily(url: string, extractedModel: string | null, famil
 export function debugLogToFile(message: string): void {
   if (!getDebugState().debugEnabled) return;
   logDebug(message);
+}
+
+/**
+ * Logs a toast message to the debug file.
+ * This helps correlate what the user saw with debug events.
+ */
+export function logToast(message: string, variant: "info" | "warning" | "success" | "error"): void {
+  if (!getDebugState().debugEnabled) return;
+  const variantLabel = variant.toUpperCase();
+  logDebug(`[Toast/${variantLabel}] ${message}`);
+}
+
+/**
+ * Logs retry attempt information.
+ * @param maxAttempts - Use -1 for unlimited retries
+ */
+export function logRetryAttempt(
+  attempt: number,
+  maxAttempts: number,
+  reason: string,
+  delayMs?: number,
+): void {
+  if (!getDebugState().debugEnabled) return;
+  const delayInfo = delayMs !== undefined ? ` delay=${delayMs}ms` : "";
+  const maxInfo = maxAttempts < 0 ? "∞" : maxAttempts.toString();
+  logDebug(`[Retry] Attempt ${attempt}/${maxInfo} reason=${reason}${delayInfo}`);
+}
+
+/**
+ * Logs cache hit/miss information from response usage metadata.
+ */
+export function logCacheStats(
+  model: string,
+  cacheReadTokens: number,
+  cacheWriteTokens: number,
+  totalInputTokens: number,
+): void {
+  if (!getDebugState().debugEnabled) return;
+  const cacheHitRate = totalInputTokens > 0 
+    ? Math.round((cacheReadTokens / totalInputTokens) * 100) 
+    : 0;
+  const status = cacheReadTokens > 0 ? "HIT" : (cacheWriteTokens > 0 ? "WRITE" : "MISS");
+  logDebug(`[Cache] ${status} model=${model} read=${cacheReadTokens} write=${cacheWriteTokens} total=${totalInputTokens} hitRate=${cacheHitRate}%`);
+}
+
+/**
+ * Logs quota status for an account.
+ */
+export function logQuotaStatus(
+  accountEmail: string | undefined,
+  accountIndex: number,
+  quotaPercent: number,
+  family?: string,
+): void {
+  if (!getDebugState().debugEnabled) return;
+  const accountLabel = accountEmail || `Account ${accountIndex + 1}`;
+  const familyInfo = family ? ` family=${family}` : "";
+  const status = quotaPercent <= 0 ? "EXHAUSTED" : quotaPercent < 20 ? "LOW" : "OK";
+  logDebug(`[Quota] ${accountLabel} remaining=${quotaPercent.toFixed(1)}% status=${status}${familyInfo}`);
+}
+
+/**
+ * Logs background quota fetch events.
+ */
+export function logQuotaFetch(
+  event: "start" | "complete" | "error",
+  accountCount?: number,
+  details?: string,
+): void {
+  if (!getDebugState().debugEnabled) return;
+  const countInfo = accountCount !== undefined ? ` accounts=${accountCount}` : "";
+  const detailsInfo = details ? ` ${details}` : "";
+  logDebug(`[QuotaFetch] ${event.toUpperCase()}${countInfo}${detailsInfo}`);
+}
+
+/**
+ * Logs which model is being used for a request.
+ */
+export function logModelUsed(
+  requestedModel: string,
+  actualModel: string,
+  accountEmail?: string,
+): void {
+  if (!getDebugState().debugEnabled) return;
+  const accountInfo = accountEmail ? ` account=${accountEmail}` : "";
+  if (requestedModel !== actualModel) {
+    logDebug(`[Model] requested=${requestedModel} actual=${actualModel}${accountInfo}`);
+  } else {
+    logDebug(`[Model] ${actualModel}${accountInfo}`);
+  }
 }
