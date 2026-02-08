@@ -4,61 +4,80 @@
  * Sends notifications (Toast + Telegram) when accounts encounter errors.
  * Implements cooldown to prevent notification spam.
  */
-
-import { createLogger } from "./logger";
+import { createLogger } from "./plugin/logger";
 
 const log = createLogger("notification");
 
-/**
- * Notification data for account errors.
- */
 export interface AccountErrorNotification {
-    /** Account email if available */
-    accountEmail?: string;
-    /** Account index (0-based) */
+    /**
+     * Index of the account in the pool
+     */
     accountIndex: number;
-    /** Type of error */
-    errorType:
-    | "auth-failure"
-    | "invalid_grant"
-    | "project-error"
-    | "api-error"
-    | "network-error"
-    | "empty-response";
-    /** Human-readable error message */
+
+    /**
+     * Account email (if available)
+     */
+    accountEmail?: string;
+
+    /**
+     * The error type/code (e.g., "invalid_grant", "auth-failure")
+     */
+    errorType: string;
+
+    /**
+     * Detailed error message
+     */
     errorMessage: string;
-    /** Request/response payload for debugging (truncated) */
-    payload?: string;
-    /** Number of accounts still available */
-    remainingAccounts: number;
-    /** When the error occurred */
-    timestamp: Date;
-    /** HTTP status code if applicable */
+
+    /**
+     * The HTTP status code (if applicable)
+     */
     statusCode?: number;
-    /** Model being used */
+
+    /**
+     * The model that was being used (if applicable)
+     */
     model?: string;
+
+    /**
+     * Number of remaining valid accounts in the pool
+     */
+    remainingAccounts: number;
+
+    /**
+     * Timestamp of the error
+     */
+    timestamp: Date;
+
+    /**
+     * The request/response payload for debugging context
+     */
+    payload?: string;
 }
 
-/**
- * Telegram configuration.
- */
-export interface TelegramConfig {
-    botToken: string;
-    chatId: string;
-}
-
-/**
- * Notification configuration.
- */
 export interface NotificationConfig {
-    /** Whether notifications are enabled */
+    /**
+     * Whether notifications are enabled
+     */
     enabled: boolean;
-    /** Telegram configuration (optional) */
-    telegram?: TelegramConfig;
-    /** Cooldown in milliseconds between notifications of the same type */
+
+    /**
+     * Whether to suppress toast notifications (CLI/quiet mode)
+     */
+    quietMode: boolean;
+
+    /**
+     * Cooldown period in milliseconds between notifications for the same error type
+     */
     cooldownMs: number;
-    /** Whether quiet mode is enabled (suppresses toasts) */
-    quietMode?: boolean;
+
+    /**
+     * Telegram configuration (optional)
+     */
+    telegram?: {
+        botToken?: string;
+        chatId?: string;
+    };
 }
 
 // Cooldown tracking
@@ -68,7 +87,7 @@ const MAX_COOLDOWN_ENTRIES = 100;
 /**
  * Clean up old cooldown entries to prevent memory leaks.
  */
-function cleanupCooldowns(cooldownMs: number): void {
+function cleanupCooldowns(cooldownMs: number) {
     if (notificationCooldowns.size > MAX_COOLDOWN_ENTRIES) {
         const now = Date.now();
         for (const [key, time] of notificationCooldowns) {
@@ -82,10 +101,7 @@ function cleanupCooldowns(cooldownMs: number): void {
 /**
  * Check if a notification should be sent based on cooldown.
  */
-function shouldNotify(
-    notification: AccountErrorNotification,
-    cooldownMs: number
-): boolean {
+function shouldNotify(notification: AccountErrorNotification, cooldownMs: number): boolean {
     if (cooldownMs <= 0) return true;
 
     cleanupCooldowns(cooldownMs);
@@ -120,6 +136,7 @@ function formatNotificationMessage(notification: AccountErrorNotification): stri
     if (notification.statusCode) {
         message += `📊 Status: ${notification.statusCode}\n`;
     }
+
     if (notification.model) {
         message += `🤖 Model: ${notification.model}\n`;
     }
@@ -150,7 +167,7 @@ function formatToastMessage(notification: AccountErrorNotification): string {
  * Send notification via Telegram.
  */
 export async function sendTelegramMessage(
-    config: TelegramConfig,
+    config: NonNullable<NotificationConfig["telegram"]>,
     notification: AccountErrorNotification
 ): Promise<boolean> {
     const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
@@ -193,27 +210,10 @@ export async function sendTelegramMessage(
 }
 
 /**
- * Plugin client interface for TUI operations.
- * Uses `body` parameter to match the actual OpenCode plugin client API.
- */
-export interface NotificationPluginClient {
-    tui: {
-        showToast: (options: {
-            body: {
-                title: string;
-                message: string;
-                variant: "info" | "warning" | "success" | "error";
-                durationMs?: number;
-            };
-        }) => Promise<unknown>;
-    };
-}
-
-/**
  * Main notification function. Sends both toast and Telegram if configured.
  */
 export async function notifyAccountError(
-    client: NotificationPluginClient | null,
+    client: any,
     config: NotificationConfig,
     notification: AccountErrorNotification
 ): Promise<void> {
@@ -267,13 +267,13 @@ export async function notifyAccountError(
 /**
  * Reset all notification cooldowns (for testing).
  */
-export function resetNotificationCooldowns(): void {
+export function resetNotificationCooldowns() {
     notificationCooldowns.clear();
 }
 
 /**
  * Get current cooldown state (for testing/debugging).
  */
-export function getNotificationCooldownState(): Map<string, number> {
+export function getNotificationCooldownState() {
     return new Map(notificationCooldowns);
 }
