@@ -760,10 +760,11 @@ export async function saveAccounts(
     };
     merged.activeIndex = clampIndex(merged.activeIndex);
     if (merged.activeIndexByFamily && typeof merged.activeIndexByFamily === "object") {
+      const family = merged.activeIndexByFamily;
       merged.activeIndexByFamily = {
-        ...merged.activeIndexByFamily,
-        claude: clampIndex((merged.activeIndexByFamily as any).claude),
-        gemini: clampIndex((merged.activeIndexByFamily as any).gemini),
+        ...family,
+        ...(family.claude !== undefined ? { claude: clampIndex(family.claude) } : {}),
+        ...(family.gemini !== undefined ? { gemini: clampIndex(family.gemini) } : {}),
       };
     }
 

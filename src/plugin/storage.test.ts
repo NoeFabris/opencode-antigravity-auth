@@ -522,6 +522,51 @@ describe("Storage Migration", () => {
     });
   });
 
+  describe("activeIndexByFamily clamping", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("clamps defined family indices without creating missing keys", async () => {
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        const error = new Error("ENOENT") as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        return Promise.reject(error);
+      });
+
+      const incoming: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r-family",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+        activeIndex: 99,
+        activeIndexByFamily: {
+          claude: 99,
+        },
+      };
+
+      await saveAccounts(incoming);
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts temp write call not found");
+      const saved = JSON.parse(saveCall[1] as string) as AccountStorageV3;
+
+      expect(saved.activeIndexByFamily?.claude).toBe(0);
+      expect(saved.activeIndexByFamily).not.toHaveProperty("gemini");
+    });
+  });
+
   describe("ensureGitignore", () => {
     const configDir = "/tmp/opencode-test";
 
