@@ -9,8 +9,8 @@
  * 4. Environment variables
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { AccountSelectionStrategySchema, AntigravityConfigSchema, DEFAULT_CONFIG, type AntigravityConfig } from "./schema";
 import { createLogger } from "../logger";
@@ -38,10 +38,60 @@ function getConfigDir(): string {
 }
 
 /**
+ * Gets the legacy Windows config directory (%APPDATA%\opencode).
+ */
+function getLegacyWindowsConfigDir(): string {
+  return join(
+    process.env.APPDATA || join(homedir(), "AppData", "Roaming"),
+    "opencode",
+  );
+}
+
+/**
+ * Resolves user config path and migrates legacy Windows config if needed.
+ *
+ * Legacy path: %APPDATA%\opencode\antigravity.json
+ * Current path: ~/.config/opencode/antigravity.json (or OPENCODE_CONFIG_DIR override)
+ */
+function resolveUserConfigPath(platform: NodeJS.Platform = process.platform): string {
+  const newPath = join(getConfigDir(), "antigravity.json");
+
+  if (platform !== "win32") {
+    return newPath;
+  }
+
+  const legacyPath = join(getLegacyWindowsConfigDir(), "antigravity.json");
+  if (!existsSync(legacyPath) || existsSync(newPath)) {
+    return newPath;
+  }
+
+  try {
+    mkdirSync(dirname(newPath), { recursive: true });
+    try {
+      renameSync(legacyPath, newPath);
+      log.info("Migrated Windows config via rename", { from: legacyPath, to: newPath });
+    } catch {
+      copyFileSync(legacyPath, newPath);
+      unlinkSync(legacyPath);
+      log.info("Migrated Windows config via copy+delete", { from: legacyPath, to: newPath });
+    }
+    return newPath;
+  } catch (error) {
+    // Fallback to legacy path if migration failed, so user settings are still respected.
+    log.warn("Failed to migrate legacy Windows config, falling back to legacy path", {
+      legacyPath,
+      newPath,
+      error: String(error),
+    });
+    return legacyPath;
+  }
+}
+
+/**
  * Get the user-level config file path.
  */
 export function getUserConfigPath(): string {
-  return join(getConfigDir(), "antigravity.json");
+  return resolveUserConfigPath();
 }
 
 /**
@@ -231,3 +281,7 @@ export function initRuntimeConfig(config: AntigravityConfig): void {
 export function getKeepThinking(): boolean {
   return runtimeConfig?.keep_thinking ?? false;
 }
+
+export const __testExports = {
+  resolveUserConfigPath,
+};
