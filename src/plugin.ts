@@ -1107,6 +1107,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
           while (true) {
             // Check for abort at the start of each iteration
             checkAborted();
+
+            const requestedHeaderStyle = getHeaderStyleFromUrl(urlString, family);
             
             const accountCount = accountManager.getAccountCount();
             
@@ -1123,7 +1125,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
               family, 
               model, 
               config.account_selection_strategy,
-              'antigravity',
+              requestedHeaderStyle,
               config.pid_offset_enabled,
               config.soft_quota_threshold_percent,
               softQuotaCacheTtlMs,
@@ -1160,7 +1162,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 continue;
               }
 
-              const headerStyle = getHeaderStyleFromUrl(urlString, family);
+              const headerStyle = requestedHeaderStyle;
               const explicitQuota = isExplicitQuotaFromUrl(urlString);
               // All accounts are rate-limited - wait and retry
               const waitMs = accountManager.getMinWaitTimeForFamily(
@@ -1411,9 +1413,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
             let shouldSwitchAccount = false;
             
             // Determine header style from model suffix:
-            // - Gemini models default to Antigravity
-            // - Claude models always use Antigravity
-            let headerStyle = getHeaderStyleFromUrl(urlString, family);
+            // - Models with :antigravity suffix -> use Antigravity quota
+            // - Models without suffix (default) -> use Gemini CLI quota
+            // - Claude models -> always use Antigravity
+            let headerStyle = requestedHeaderStyle;
             const explicitQuota = isExplicitQuotaFromUrl(urlString);
             const cliFirst = getCliFirst(config);
             pushDebug(`headerStyle=${headerStyle} explicit=${explicitQuota}`);
