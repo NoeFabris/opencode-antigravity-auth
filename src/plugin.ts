@@ -1703,7 +1703,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             );
             
             if (!account) {
-              const headerStyle = getHeaderStyleFromUrl(urlString, family);
+              const headerStyle = getHeaderStyleFromUrl(urlString, family, config.cli_first);
               const explicitQuota = isExplicitQuotaFromUrl(urlString);
               // All accounts are rate-limited - wait and retry
               const waitMs = accountManager.getMinWaitTimeForFamily(
@@ -1957,7 +1957,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // - Models with :antigravity suffix -> use Antigravity quota
             // - Models without suffix (default) -> use Gemini CLI quota
             // - Claude models -> always use Antigravity
-            let headerStyle = getHeaderStyleFromUrl(urlString, family);
+            let headerStyle = getHeaderStyleFromUrl(urlString, family, config.cli_first);
             const explicitQuota = isExplicitQuotaFromUrl(urlString);
             pushDebug(`headerStyle=${headerStyle} explicit=${explicitQuota}`);
             if (account.fingerprint) {
@@ -2210,19 +2210,25 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       }
 
                       // All accounts exhausted for Antigravity on THIS model.
-                      // Before falling back to gemini-cli, check if it's the last option (automatic fallback)
-                      if (config.quota_fallback && !explicitQuota) {
-                        const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
-                        if (alternateStyle && alternateStyle !== headerStyle) {
-                          const safeModelName = model || "this model";
-                          await showToast(
-                            `Antigravity quota exhausted for ${safeModelName}. Switching to Gemini CLI quota...`,
-                            "warning"
-                          );
-                          headerStyle = alternateStyle;
-                          pushDebug(`quota fallback: ${headerStyle}`);
-                          continue;
-                        }
+                      // Before falling back to the alternate quota pool, honor cli_first fallback direction.
+                      const alternateStyle = accountManager.getAvailableHeaderStyle(account, family, model);
+                      const fallbackStyle = resolveQuotaFallbackHeaderStyle({
+                        quotaFallback: config.quota_fallback,
+                        cliFirst: config.cli_first,
+                        explicitQuota,
+                        family,
+                        headerStyle,
+                        alternateStyle,
+                      });
+                      if (fallbackStyle) {
+                        const safeModelName = model || "this model";
+                        await showToast(
+                          `Antigravity quota exhausted for ${safeModelName}. Switching to ${fallbackStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity"} quota...`,
+                          "warning",
+                        );
+                        headerStyle = fallbackStyle;
+                        pushDebug(`quota fallback: ${headerStyle}`);
+                        continue;
                       }
                     }
                   }
@@ -3853,7 +3859,11 @@ function getModelFamilyFromUrl(urlString: string): ModelFamily {
   return family;
 }
 
-function getHeaderStyleFromUrl(urlString: string, family: ModelFamily): HeaderStyle {
+function getHeaderStyleFromUrl(
+  urlString: string,
+  family: ModelFamily,
+  cliFirst: boolean,
+): HeaderStyle {
   if (family === "claude") {
     return "antigravity";
   }
@@ -3861,7 +3871,9 @@ function getHeaderStyleFromUrl(urlString: string, family: ModelFamily): HeaderSt
   if (!modelWithSuffix) {
     return "gemini-cli";
   }
-  const { quotaPreference } = resolveModelWithTier(modelWithSuffix);
+  const { quotaPreference } = resolveModelWithTier(modelWithSuffix, {
+    cli_first: cliFirst,
+  });
   return quotaPreference ?? "gemini-cli";
 }
 
