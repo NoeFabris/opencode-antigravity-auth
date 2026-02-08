@@ -17,10 +17,12 @@ import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWit
 import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
 import { getModelFamily } from "./transform/model-resolver";
 import { createLogger } from "./logger";
+import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { ANTIGRAVITY_VERSION } from "../constants";
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
 export type { AccountSelectionStrategy } from "./config/schema";
+export type { QuotaGroup, QuotaGroupSummary } from "./quota";
 
 const log = createLogger("accounts");
 
@@ -154,13 +156,6 @@ export function calculateBackoffMs(
 
 export type BaseQuotaKey = "claude" | "gemini-antigravity" | "gemini-cli";
 export type QuotaKey = BaseQuotaKey | `${BaseQuotaKey}:${string}`;
-export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash";
-
-export interface QuotaGroupSummary {
-  remainingFraction?: number;
-  resetTime?: string;
-  modelCount: number;
-}
 
 export interface ManagedAccount {
   index: number;
