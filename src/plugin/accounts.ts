@@ -1173,11 +1173,11 @@ export class AccountManager {
   async saveToDisk(): Promise<void> {
     const accountCount = this.accounts.length;
     const clampStoredIndex = (value: number): number => {
-      if (accountCount <= 0) return 0;
+      if (accountCount <= 0) return -1;
       return Math.min(Math.max(0, value), accountCount - 1);
     };
 
-    const activeIndex = clampStoredIndex(this.currentAccountIndexByFamily.claude);
+    const activeIndex = clampStoredIndex(this.cursor);
     const claudeIndex = clampFamilyIndex(
       this.currentAccountIndexByFamily.claude,
       activeIndex,

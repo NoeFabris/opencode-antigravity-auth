@@ -584,6 +584,49 @@ describe("AccountManager", () => {
       expect(saved?.activeIndexByFamily).toEqual({ claude: -1, gemini: -1 });
       expect(saved?.activeIndex).toBe(0);
     });
+
+    it("persists activeIndex from cursor not from claude family index", async () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 1,
+        activeIndexByFamily: {
+          claude: 0,
+          gemini: 1,
+        },
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      vi.mocked(saveAccounts).mockClear();
+      await manager.saveToDisk();
+
+      const saved = vi.mocked(saveAccounts).mock.calls[0]?.[0] as AccountStorageV3 | undefined;
+      expect(saved).toBeDefined();
+      expect(saved?.activeIndex).toBe(1);
+      expect(saved?.activeIndexByFamily).toEqual({ claude: 0, gemini: 1 });
+    });
+
+    it("uses -1 activeIndex sentinel when saving an empty account list", async () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      vi.mocked(saveAccounts).mockClear();
+      await manager.saveToDisk();
+
+      const saved = vi.mocked(saveAccounts).mock.calls[0]?.[0] as AccountStorageV3 | undefined;
+      expect(saved).toBeDefined();
+      expect(saved?.activeIndex).toBe(-1);
+      expect(saved?.activeIndexByFamily).toEqual({ claude: -1, gemini: -1 });
+    });
   });
 
   describe("account cooldown (non-429 errors)", () => {
