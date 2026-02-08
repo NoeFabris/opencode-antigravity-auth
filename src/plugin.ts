@@ -143,6 +143,12 @@ function cleanAuthuserValue(input: string | null | undefined): string {
   return raw.replace(/^[\s"',]+|[\s"',]+$/g, "");
 }
 
+function normalizeAuthuserIndex(input: string | null | undefined): string {
+  const cleaned = cleanAuthuserValue(input);
+  if (!cleaned) return "";
+  return /^\d+$/.test(cleaned) ? cleaned : "";
+}
+
 function sanitizeGoogleSigninParams(url: URL, accountEmail?: string): URL {
   const out = new URL(url.toString());
 
@@ -153,7 +159,7 @@ function sanitizeGoogleSigninParams(url: URL, accountEmail?: string): URL {
     const normalizedKey = key.toLowerCase().replace(/%25/g, "%");
     if (normalizedKey.startsWith("authuser") && key !== "authuser") {
       weirdAuthuserKeys.push(key);
-      const cleaned = cleanAuthuserValue(value);
+      const cleaned = normalizeAuthuserIndex(value);
       if (cleaned && !out.searchParams.get("authuser")) {
         out.searchParams.set("authuser", cleaned);
       }
@@ -163,7 +169,7 @@ function sanitizeGoogleSigninParams(url: URL, accountEmail?: string): URL {
     out.searchParams.delete(key);
   }
 
-  const cleanedAuthuser = cleanAuthuserValue(out.searchParams.get("authuser"));
+  const cleanedAuthuser = normalizeAuthuserIndex(out.searchParams.get("authuser"));
   if (cleanedAuthuser) {
     out.searchParams.set("authuser", cleanedAuthuser);
   } else {
