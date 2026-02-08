@@ -583,6 +583,7 @@ async function scanAllAccountsForVerification(
       const acc = accounts[idx];
       const email = acc?.email as string | undefined;
       const enabled = acc?.enabled !== false;
+      const shouldScan = enabled || origin === "quarantined";
       const refreshToken = typeof acc?.refreshToken === "string" ? (acc.refreshToken as string) : "";
 
       let result: VerificationScanResult;
@@ -599,7 +600,7 @@ async function scanAllAccountsForVerification(
           refreshToken,
           email,
           enabled,
-          status: enabled ? "error" : "skipped",
+          status: shouldScan ? "error" : "skipped",
           message: err instanceof Error ? err.message : String(err),
         };
       }

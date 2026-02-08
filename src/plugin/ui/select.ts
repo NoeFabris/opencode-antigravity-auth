@@ -103,17 +103,25 @@ export async function select<T>(
   if (cursor === -1) cursor = 0; // Fallback, though validation above should prevent this
   let escapeTimeout: ReturnType<typeof setTimeout> | null = null;
   let isCleanedUp = false;
+  let renderedLines = 0;
 
   const render = () => {
     const columns = stdout.columns ?? 80;
     const rows = stdout.rows ?? 24;
     const shouldClearScreen = options.clearScreen === true;
+    const previousRenderedLines = renderedLines;
 
-    // For nested/stacked flows, rely on full clears instead of cursor-up rewrites.
-    // Cursor-up is fragile when terminals wrap unexpectedly (width mismatches, unicode, etc).
     if (shouldClearScreen) {
       stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
+    } else if (previousRenderedLines > 0) {
+      stdout.write(ANSI.up(previousRenderedLines));
     }
+
+    let linesWritten = 0;
+    const writeLine = (line: string) => {
+      stdout.write(`${ANSI.clearLine}${line}\n`);
+      linesWritten += 1;
+    };
 
     // Subtitle renders as 4 lines:
     // 1) blank "│" spacer, 2) subtitle line, 3) blank line, plus header counted separately.
@@ -134,13 +142,13 @@ export async function select<T>(
 
     const visibleItems = items.slice(windowStart, windowEnd);
     const headerMessage = truncateAnsi(message, Math.max(1, columns - 4));
-    stdout.write(`${ANSI.clearLine}${ANSI.dim}┌  ${ANSI.reset}${headerMessage}\n`);
+    writeLine(`${ANSI.dim}┌  ${ANSI.reset}${headerMessage}`);
     
     if (subtitle) {
-      stdout.write(`${ANSI.clearLine}${ANSI.dim}│${ANSI.reset}\n`);
+      writeLine(`${ANSI.dim}│${ANSI.reset}`);
       const sub = truncateAnsi(subtitle, Math.max(1, columns - 4));
-      stdout.write(`${ANSI.clearLine}${ANSI.cyan}◆${ANSI.reset}  ${sub}\n`);
-      stdout.write(`${ANSI.clearLine}\n`);
+      writeLine(`${ANSI.cyan}◆${ANSI.reset}  ${sub}`);
+      writeLine("");
     }
 
     for (let i = 0; i < visibleItems.length; i++) {
@@ -149,13 +157,13 @@ export async function select<T>(
       if (!item) continue;
 
       if (item.separator) {
-        stdout.write(`${ANSI.clearLine}${ANSI.dim}│${ANSI.reset}\n`);
+        writeLine(`${ANSI.dim}│${ANSI.reset}`);
         continue;
       }
 
       if (item.kind === 'heading') {
         const heading = truncateAnsi(`${ANSI.dim}${ANSI.bold}${item.label}${ANSI.reset}`, Math.max(1, columns - 6));
-        stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${heading}\n`);
+        writeLine(`${ANSI.cyan}│${ANSI.reset}  ${heading}`);
         continue;
       }
 
@@ -179,9 +187,9 @@ export async function select<T>(
       labelText = truncateAnsi(labelText, Math.max(1, columns - 8));
 
       if (isSelected) {
-        stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${ANSI.green}●${ANSI.reset} ${labelText}\n`);
+        writeLine(`${ANSI.cyan}│${ANSI.reset}  ${ANSI.green}●${ANSI.reset} ${labelText}`);
       } else {
-        stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${ANSI.dim}○${ANSI.reset} ${labelText}\n`);
+        writeLine(`${ANSI.cyan}│${ANSI.reset}  ${ANSI.dim}○${ANSI.reset} ${labelText}`);
       }
     }
 
@@ -190,8 +198,17 @@ export async function select<T>(
       : '';
     const helpText = options.help ?? `Up/Down to select | Enter: confirm | Esc: back${windowHint}`;
     const help = truncateAnsi(helpText, Math.max(1, columns - 6));
-    stdout.write(`${ANSI.clearLine}${ANSI.cyan}│${ANSI.reset}  ${ANSI.dim}${help}${ANSI.reset}\n`);
-    stdout.write(`${ANSI.clearLine}${ANSI.cyan}└${ANSI.reset}\n`);
+    writeLine(`${ANSI.cyan}│${ANSI.reset}  ${ANSI.dim}${help}${ANSI.reset}`);
+    writeLine(`${ANSI.cyan}└${ANSI.reset}`);
+
+    if (!shouldClearScreen && previousRenderedLines > linesWritten) {
+      const extra = previousRenderedLines - linesWritten;
+      for (let i = 0; i < extra; i++) {
+        writeLine("");
+      }
+    }
+
+    renderedLines = linesWritten;
   };
 
   return new Promise((resolve) => {
