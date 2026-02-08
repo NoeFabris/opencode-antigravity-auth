@@ -1413,9 +1413,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
             let shouldSwitchAccount = false;
             
             // Determine header style from model suffix:
-            // - Models with :antigravity suffix -> use Antigravity quota
-            // - Models without suffix (default) -> use Gemini CLI quota
             // - Claude models -> always use Antigravity
+            // - Gemini defaults to Antigravity (including explicit gemini-cli suffix)
+            // - Gemini CLI is used as fallback when Antigravity is exhausted
             let headerStyle = requestedHeaderStyle;
             const explicitQuota = isExplicitQuotaFromUrl(urlString);
             const cliFirst = getCliFirst(config);
