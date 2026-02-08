@@ -1056,6 +1056,51 @@ describe("AccountManager", () => {
     });
   });
 
+  describe("Issue #400: hybrid strategy respects requested header style", () => {
+    it("skips account when requested antigravity style is rate-limited", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+          { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+        activeIndexByFamily: { claude: 0, gemini: 0 },
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const firstAccount = manager.getCurrentOrNextForFamily("gemini", null, "hybrid", "antigravity");
+
+      manager.markRateLimited(firstAccount!, 60000, "gemini", "antigravity");
+
+      expect(manager.isRateLimitedForHeaderStyle(firstAccount!, "gemini", "antigravity")).toBe(true);
+      expect(manager.isRateLimitedForHeaderStyle(firstAccount!, "gemini", "gemini-cli")).toBe(false);
+
+      const nextAccount = manager.getCurrentOrNextForFamily("gemini", null, "hybrid", "antigravity");
+      expect(nextAccount?.index).toBe(1);
+    });
+
+    it("keeps account for gemini-cli when only antigravity style is rate-limited", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+        activeIndexByFamily: { claude: 0, gemini: 0 },
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const firstAccount = manager.getCurrentOrNextForFamily("gemini", null, "hybrid", "gemini-cli");
+
+      manager.markRateLimited(firstAccount!, 60000, "gemini", "antigravity");
+
+      const nextAccount = manager.getCurrentOrNextForFamily("gemini", null, "hybrid", "gemini-cli");
+      expect(nextAccount).not.toBeNull();
+      expect(nextAccount?.parts.refreshToken).toBe("r1");
+    });
+  });
+
   describe("Issue #174: saveToDisk throttling", () => {
     it("requestSaveToDisk coalesces multiple calls into one write", async () => {
       vi.useFakeTimers();
@@ -1605,6 +1650,38 @@ describe("AccountManager", () => {
       manager.updateQuotaCache(0, { claude: { remainingFraction: 0.01, modelCount: 1 } });
 
       const account = manager.getCurrentOrNextForFamily("claude", null, "sticky", "antigravity", false, 100);
+      expect(account?.parts.refreshToken).toBe("r1");
+    });
+
+    it("does not apply soft quota threshold to gemini-cli in sticky mode", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { "gemini-pro": { remainingFraction: 0.01, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("gemini", "gemini-2.5-pro", "sticky", "gemini-cli", false, 90);
+      expect(account?.parts.refreshToken).toBe("r1");
+    });
+
+    it("does not apply soft quota threshold to gemini-cli in hybrid mode", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      manager.updateQuotaCache(0, { "gemini-pro": { remainingFraction: 0.01, modelCount: 1 } });
+
+      const account = manager.getCurrentOrNextForFamily("gemini", "gemini-2.5-pro", "hybrid", "gemini-cli", false, 90);
       expect(account?.parts.refreshToken).toBe("r1");
     });
 

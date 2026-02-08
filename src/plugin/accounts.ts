@@ -516,20 +516,22 @@ export class AccountManager {
     if (strategy === 'hybrid') {
       const healthTracker = getHealthTracker();
       const tokenTracker = getTokenTracker();
-      
-      const accountsWithMetrics: AccountWithMetrics[] = this.accounts
-        .filter(acc => acc.enabled !== false)
-        .map(acc => {
-          clearExpiredRateLimits(acc);
-          return {
-            index: acc.index,
-            lastUsed: acc.lastUsed,
-            healthScore: healthTracker.getScore(acc.index),
-            isRateLimited: isRateLimitedForFamily(acc, family, model) || 
-                          isOverSoftQuotaThreshold(acc, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model),
-            isCoolingDown: this.isAccountCoolingDown(acc),
-          };
-        });
+
+      const shouldApplySoftQuota = headerStyle !== "gemini-cli";
+      const accountsWithMetrics: AccountWithMetrics[] = this.accounts.map(acc => {
+        clearExpiredRateLimits(acc);
+        const isOverThreshold = shouldApplySoftQuota &&
+          isOverSoftQuotaThreshold(acc, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
+        return {
+          index: acc.index,
+          lastUsed: acc.lastUsed,
+          healthScore: healthTracker.getScore(acc.index),
+          isRateLimited: acc.enabled === false ||
+            isRateLimitedForHeaderStyle(acc, family, headerStyle, model) ||
+            isOverThreshold,
+          isCoolingDown: this.isAccountCoolingDown(acc),
+        };
+      });
 
       // Get current account index for stickiness
       const currentIndex = this.currentAccountIndexByFamily[family] ?? null;
@@ -564,7 +566,8 @@ export class AccountManager {
     if (current) {
       clearExpiredRateLimits(current);
       const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
-      const isOverThreshold = isOverSoftQuotaThreshold(current, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
+      const isOverThreshold = headerStyle !== "gemini-cli" &&
+        isOverSoftQuotaThreshold(current, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
       if (!isLimitedForRequestedStyle && !isOverThreshold && !this.isAccountCoolingDown(current)) {
         this.markTouchedForQuota(current, quotaKey);
         return current;
@@ -582,9 +585,11 @@ export class AccountManager {
   getNextForFamily(family: ModelFamily, model?: string | null, headerStyle: HeaderStyle = "antigravity", softQuotaThresholdPercent: number = 100, softQuotaCacheTtlMs: number = 10 * 60 * 1000): ManagedAccount | null {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
+      const isOverThreshold = headerStyle !== "gemini-cli" &&
+        isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
       return a.enabled !== false && 
              !isRateLimitedForHeaderStyle(a, family, headerStyle, model) && 
-             !isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model) &&
+             !isOverThreshold &&
              !this.isAccountCoolingDown(a);
     });
 
