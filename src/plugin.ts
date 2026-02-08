@@ -43,7 +43,7 @@ import { createProactiveRefreshQueue, type ProactiveRefreshQueue } from "./plugi
 import { initLogger, createLogger } from "./plugin/logger";
 import { initHealthTracker, getHealthTracker, initTokenTracker, getTokenTracker } from "./plugin/rotation";
 import { executeSearch } from "./plugin/search";
-import { notifyAccountError, type AccountErrorNotification, type NotificationConfig } from "./plugin/notification";
+import { notifyAccountError, type AccountErrorNotification, type NotificationConfig } from "./plugin/notification.js";
 import type {
   GetAuth,
   LoaderResult,

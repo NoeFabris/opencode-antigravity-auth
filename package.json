@@ -43,7 +43,8 @@
         "test:coverage": "vitest run --coverage",
         "prepublishOnly": "npm run build",
         "test:e2e:models": "npx tsx script/test-models.ts",
-        "test:e2e:regression": "npx tsx script/test-regression.ts"
+        "test:e2e:regression": "npx tsx script/test-regression.ts",
+        "prepare": "npm run build"
     },
     "peerDependencies": {
         "typescript": "^5"
