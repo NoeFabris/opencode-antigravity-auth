@@ -236,11 +236,11 @@ describe("request.ts", () => {
       expect(result.thoughtSignature).toBe("skip_thought_signature_validator");
     });
 
-    it("replaces existing thoughtSignature with sentinel", () => {
+    it("preserves existing thoughtSignature", () => {
       const existingSignature = "a".repeat(MIN_SIGNATURE_LENGTH + 10);
       const part = { thought: true, text: "thinking...", thoughtSignature: existingSignature };
       const result = ensureThoughtSignature(part, "session-key");
-      expect(result.thoughtSignature).toBe("skip_thought_signature_validator");
+      expect(result.thoughtSignature).toBe(existingSignature);
     });
 
     it("does not modify non-thinking parts", () => {
@@ -274,13 +274,6 @@ describe("request.ts", () => {
     it("returns true for type:reasoning with valid signature field", () => {
       const part = { type: "reasoning", signature: "a".repeat(MIN_SIGNATURE_LENGTH) };
       expect(hasSignedThinkingPart(part)).toBe(true);
-    });
-
-    it("returns true for sentinel signatures", () => {
-      const thoughtPart = { thought: true, thoughtSignature: "skip_thought_signature_validator" };
-      const thinkingPart = { type: "thinking", signature: "skip_thought_signature_validator" };
-      expect(hasSignedThinkingPart(thoughtPart)).toBe(true);
-      expect(hasSignedThinkingPart(thinkingPart)).toBe(true);
     });
 
     it("returns false for part with short signature", () => {

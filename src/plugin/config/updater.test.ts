@@ -8,14 +8,22 @@ import { OPENCODE_MODEL_DEFINITIONS } from "./models";
 describe("updateOpencodeConfig", () => {
   let tempDir: string;
   let configPath: string;
+  let originalXdgConfigHome: string | undefined;
 
   beforeEach(() => {
+    originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
     // Create a temporary directory for each test
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-test-"));
     configPath = path.join(tempDir, "opencode.json");
   });
 
   afterEach(() => {
+    if (originalXdgConfigHome === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+    }
+
     // Clean up temp directory
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -201,6 +209,50 @@ describe("updateOpencodeConfig", () => {
     for (const modelKey of Object.keys(OPENCODE_MODEL_DEFINITIONS)) {
       expect(models[modelKey]).toBeDefined();
     }
+  });
+
+  test("parses existing jsonc config files with comments and trailing commas", async () => {
+    const jsoncPath = path.join(tempDir, "opencode.jsonc");
+    const existingJsoncConfig = `{
+  // Keep existing plugin
+  "plugin": [
+    "other-plugin",
+  ],
+  "provider": {
+    "google": {
+      "region": "us-central1",
+    },
+  },
+}`;
+    fs.writeFileSync(jsoncPath, existingJsoncConfig);
+
+    const result = await updateOpencodeConfig({ configPath: jsoncPath });
+
+    expect(result.success).toBe(true);
+    expect(result.configPath).toBe(jsoncPath);
+
+    const writtenConfig = JSON.parse(fs.readFileSync(jsoncPath, "utf-8"));
+    expect(writtenConfig.plugin).toContain("other-plugin");
+    expect(writtenConfig.plugin).toContain("opencode-antigravity-auth@latest");
+    expect(writtenConfig.provider.google.region).toBe("us-central1");
+    expect(writtenConfig.provider.google.models["antigravity-gemini-3-pro"]).toBeDefined();
+  });
+
+  test("prefers existing opencode.jsonc when using default config path", async () => {
+    const opencodeDir = path.join(tempDir, "opencode");
+    const jsonPath = path.join(opencodeDir, "opencode.json");
+    const jsoncPath = path.join(opencodeDir, "opencode.jsonc");
+
+    fs.mkdirSync(opencodeDir, { recursive: true });
+    fs.writeFileSync(jsoncPath, JSON.stringify({ plugin: ["other-plugin"], provider: {} }, null, 2));
+    process.env.XDG_CONFIG_HOME = tempDir;
+
+    const result = await updateOpencodeConfig();
+
+    expect(result.success).toBe(true);
+    expect(result.configPath).toBe(jsoncPath);
+    expect(fs.existsSync(jsonPath)).toBe(false);
+    expect(fs.existsSync(jsoncPath)).toBe(true);
   });
 
   test("creates parent directory if it does not exist", async () => {

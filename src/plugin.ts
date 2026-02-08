@@ -46,6 +46,7 @@ import {
   loadAccounts,
   loadBlockedAccounts,
   saveAccounts,
+  saveAccountsReplace,
   saveBlockedAccounts,
 } from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs } from "./plugin/accounts";
@@ -642,6 +643,9 @@ const MAX_TOAST_COOLDOWN_ENTRIES = 100;
 // Track if "all accounts rate-limited" toast was shown to prevent spam in while loop
 let allAccountsRateLimitedToastShown = false;
 
+// Module-level reference to AccountManager for access from auth.login
+let activeAccountManager: import("./plugin/accounts").AccountManager | null = null;
+
 function cleanupToastCooldowns(): void {
   if (rateLimitToastCooldowns.size > MAX_TOAST_COOLDOWN_ENTRIES) {
     const now = Date.now();
@@ -1013,6 +1017,28 @@ async function persistAccountPool(
           removedRefreshTokens: Array.from(removedRefreshTokens),
         },
   );
+}
+
+function buildAuthSuccessFromStoredAccount(account: {
+  refreshToken: string;
+  projectId?: string;
+  managedProjectId?: string;
+  email?: string;
+}): Extract<AntigravityTokenExchangeResult, { type: "success" }> {
+  const refresh = formatRefreshParts({
+    refreshToken: account.refreshToken,
+    projectId: account.projectId,
+    managedProjectId: account.managedProjectId,
+  });
+
+  return {
+    type: "success",
+    refresh,
+    access: "",
+    expires: 0,
+    email: account.email,
+    projectId: account.projectId ?? "",
+  };
 }
 
 function retryAfterMsFromResponse(response: Response, defaultRetryMs: number = 60_000): number {
@@ -1552,6 +1578,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
       // Note: AccountManager now ensures the current auth is always included in accounts
 
       const accountManager = await AccountManager.loadFromDisk(auth);
+      activeAccountManager = accountManager;
       if (accountManager.getAccountCount() > 0) {
         accountManager.requestSaveToDisk();
       }
@@ -1688,28 +1715,48 @@ export const createAntigravityPlugin = (providerId: string) => async (
               await accountManager.reloadFromDisk();
               accountCount = accountManager.getAccountCount();
             }
+            const preferredHeaderStyle = getHeaderStyleFromUrl(urlString, family, config.cli_first);
+            const explicitQuota = isExplicitQuotaFromUrl(urlString);
+            const allowQuotaFallback = config.quota_fallback && !explicitQuota && family === "gemini";
             
             if (accountCount === 0) {
               throw new Error("No Antigravity accounts available. Run `opencode auth login`.");
             }
 
-            const account = accountManager.getCurrentOrNextForFamily(
+            let account = accountManager.getCurrentOrNextForFamily(
               family, 
               model, 
               config.account_selection_strategy,
-              'antigravity',
+              preferredHeaderStyle,
               config.pid_offset_enabled,
             );
+
+            if (!account && allowQuotaFallback) {
+              const alternateHeaderStyle: HeaderStyle =
+                preferredHeaderStyle === "antigravity" ? "gemini-cli" : "antigravity";
+              account = accountManager.getCurrentOrNextForFamily(
+                family,
+                model,
+                config.account_selection_strategy,
+                alternateHeaderStyle,
+                config.pid_offset_enabled,
+                config.soft_quota_threshold_percent,
+              );
+              if (account) {
+                pushDebug(
+                  `selected-by-fallback idx=${account.index} preferred=${preferredHeaderStyle} alternate=${alternateHeaderStyle}`,
+                );
+              }
+            }
             
             if (!account) {
-              const headerStyle = getHeaderStyleFromUrl(urlString, family, config.cli_first);
-              const explicitQuota = isExplicitQuotaFromUrl(urlString);
+              const strictWait = explicitQuota || !allowQuotaFallback;
               // All accounts are rate-limited - wait and retry
               const waitMs = accountManager.getMinWaitTimeForFamily(
                 family,
                 model,
-                headerStyle,
-                explicitQuota,
+                preferredHeaderStyle,
+                strictWait,
               ) || 60_000;
               const waitSecValue = Math.max(1, Math.ceil(waitMs / 1000));
 
@@ -1874,7 +1921,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
               continue;
             }
 
-            if (projectContext.auth !== authRecord) {
+            if (projectContext.auth.refresh !== authRecord.refresh || 
+                projectContext.auth.access !== authRecord.access) {
               accountManager.updateFromAuth(account, projectContext.auth);
               authRecord = projectContext.auth;
               try {
@@ -1956,8 +2004,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // - Models with :antigravity suffix -> use Antigravity quota
             // - Models without suffix (default) -> use Gemini CLI quota
             // - Claude models -> always use Antigravity
-            let headerStyle = getHeaderStyleFromUrl(urlString, family, config.cli_first);
-            const explicitQuota = isExplicitQuotaFromUrl(urlString);
+            let headerStyle = preferredHeaderStyle;
             pushDebug(`headerStyle=${headerStyle} explicit=${explicitQuota}`);
             if (account.fingerprint) {
               pushDebug(`fingerprint: quotaUser=${account.fingerprint.quotaUser} deviceId=${account.fingerprint.deviceId.slice(0, 8)}...`);
@@ -3395,6 +3442,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     if (acc) {
                       acc.enabled = acc.enabled === false;
                       await saveAccounts(existingStorage, { merge: true, preserveDeletions: true });
+                      activeAccountManager?.setAccountEnabled(menuResult.toggleAccountIndex, acc.enabled);
                       console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
                     }
                   }
@@ -3413,6 +3461,66 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 };
               }
               
+              if (menuResult.deleteAccountIndex !== undefined) {
+                const updatedAccounts = existingStorage.accounts.filter(
+                  (_, idx) => idx !== menuResult.deleteAccountIndex
+                );
+                // Use saveAccountsReplace to bypass merge (otherwise deleted account gets merged back)
+                await saveAccountsReplace({
+                  version: 3,
+                  accounts: updatedAccounts,
+                  activeIndex: 0,
+                  activeIndexByFamily: { claude: 0, gemini: 0 },
+                });
+                // Sync in-memory state so deleted account stops being used immediately
+                activeAccountManager?.removeAccountByIndex(menuResult.deleteAccountIndex);
+                console.log("\nAccount deleted.\n");
+
+                if (updatedAccounts.length > 0) {
+                  const fallbackAccount = updatedAccounts[0];
+                  if (fallbackAccount?.refreshToken) {
+                    const fallbackResult = buildAuthSuccessFromStoredAccount(fallbackAccount);
+                    try {
+                      await client.auth.set({
+                        path: { id: providerId },
+                        body: { type: "oauth", refresh: fallbackResult.refresh, access: "", expires: 0 },
+                      });
+                    } catch (storeError) {
+                      log.error("Failed to update stored Antigravity OAuth credentials", { error: String(storeError) });
+                    }
+
+                    const label = fallbackAccount.email || `Account ${1}`;
+                    return {
+                      url: "",
+                      instructions: `Account deleted. Using ${label} for future requests.`,
+                      method: "auto",
+                      callback: async () => fallbackResult,
+                    };
+                  }
+                }
+
+                try {
+                  await client.auth.set({
+                    path: { id: providerId },
+                    body: { type: "oauth", refresh: "", access: "", expires: 0 },
+                  });
+                } catch (storeError) {
+                  log.error("Failed to clear stored Antigravity OAuth credentials", { error: String(storeError) });
+                }
+
+                return {
+                  url: "",
+                  instructions: "All accounts deleted. Run `opencode auth login` to reauthenticate.",
+                  method: "auto",
+                  callback: async () => ({
+                    type: "success",
+                    refresh: "",
+                    access: "",
+                    expires: 0,
+                    projectId: "",
+                  }),
+                };
+              }
               if (menuResult.refreshAccountIndex !== undefined) {
                 refreshAccountIndex = menuResult.refreshAccountIndex;
                 const refreshEmail = existingStorage.accounts[refreshAccountIndex]?.email;
@@ -3425,6 +3533,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 await clearBlockedAccounts();
                 console.log("\nAll accounts deleted.\n");
                 startFresh = true;
+                try {
+                  await client.auth.set({
+                    path: { id: providerId },
+                    body: { type: "oauth", refresh: "", access: "", expires: 0 },
+                  });
+                } catch (storeError) {
+                  log.error("Failed to clear stored Antigravity OAuth credentials", { error: String(storeError) });
+                }
               } else {
                 startFresh = menuResult.mode === "fresh";
               }
@@ -3919,5 +4035,6 @@ function resolveQuotaFallbackHeaderStyle(input: {
 
 // Exported only for unit tests.
 export const __testExports = {
+  getHeaderStyleFromUrl,
   resolveQuotaFallbackHeaderStyle,
 };

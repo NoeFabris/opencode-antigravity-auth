@@ -1,4 +1,3 @@
-import { getKeepThinking } from "./config";
 import { createLogger } from "./logger";
 import { cacheSignature } from "./cache";
 import {
@@ -1108,7 +1107,6 @@ function filterContentArray(
   if (isClaudeModel) {
     return stripAllThinkingBlocks(contentArray);
   }
-
   const filtered: any[] = [];
 
   for (const item of contentArray) {

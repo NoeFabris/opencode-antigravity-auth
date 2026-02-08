@@ -357,24 +357,35 @@ function isGeminiThinkingPart(part: any): boolean {
 // Reference: LLM-API-Key-Proxy uses this pattern for Gemini 3 tool calls.
 const SENTINEL_SIGNATURE = "skip_thought_signature_validator";
 
-function ensureThoughtSignature(part: any, _sessionId: string): any {
+function ensureThoughtSignature(part: any, sessionId: string): any {
   if (!part || typeof part !== "object") {
     return part;
   }
 
-  if (part.thought === true) {
-    if (part.thoughtSignature === SENTINEL_SIGNATURE) {
-      return part;
-    }
-    // Always use sentinel to avoid invalid signature reuse in history.
-    return { ...part, thoughtSignature: SENTINEL_SIGNATURE };
+  const text = typeof part.text === "string" ? part.text : typeof part.thinking === "string" ? part.thinking : "";
+  if (!text) {
+    return part;
   }
 
-  if (part.type === "thinking" || part.type === "reasoning") {
-    if (part.signature === SENTINEL_SIGNATURE) {
-      return part;
+  if (part.thought === true) {
+    if (!part.thoughtSignature) {
+      const cached = getCachedSignature(sessionId, text);
+      if (cached) {
+        return { ...part, thoughtSignature: cached };
+      }
+      // Fallback: use sentinel signature to prevent API rejection
+      // This allows Claude to redact the thinking block instead of failing
+      return { ...part, thoughtSignature: SENTINEL_SIGNATURE };
     }
-    // Always use sentinel to avoid invalid signature reuse in history.
+    return part;
+  }
+
+  if ((part.type === "thinking" || part.type === "reasoning") && !part.signature) {
+    const cached = getCachedSignature(sessionId, text);
+    if (cached) {
+      return { ...part, signature: cached };
+    }
+    // Fallback: use sentinel signature to prevent API rejection
     return { ...part, signature: SENTINEL_SIGNATURE };
   }
 
@@ -387,13 +398,11 @@ function hasSignedThinkingPart(part: any): boolean {
   }
 
   if (part.thought === true) {
-    return typeof part.thoughtSignature === "string"
-      && (part.thoughtSignature === SENTINEL_SIGNATURE || part.thoughtSignature.length >= MIN_SIGNATURE_LENGTH);
+    return typeof part.thoughtSignature === "string" && part.thoughtSignature.length >= MIN_SIGNATURE_LENGTH;
   }
 
   if (part.type === "thinking" || part.type === "reasoning") {
-    return typeof part.signature === "string"
-      && (part.signature === SENTINEL_SIGNATURE || part.signature.length >= MIN_SIGNATURE_LENGTH);
+    return typeof part.signature === "string" && part.signature.length >= MIN_SIGNATURE_LENGTH;
   }
 
   return false;
@@ -426,23 +435,24 @@ function ensureThinkingBeforeToolUseInContents(contents: any[], signatureSession
 
     const lastThinking = defaultSignatureStore.get(signatureSessionKey);
     if (!lastThinking) {
-      // No cached thinking available - strip thinking blocks entirely
-      // Return only tool_use parts without any thinking to avoid invalid signature reuse
-      log.debug("Stripping thinking from tool_use content (no cached thinking)", { signatureSessionKey });
+      // No cached signature available - strip thinking blocks entirely
+      // Claude requires valid signatures, and we can't fake them
+      // Return only tool_use parts without any thinking to avoid signature validation errors
+      log.debug("Stripping thinking from tool_use content (no valid cached signature)", { signatureSessionKey });
       return { ...content, parts: otherParts };
     }
 
     const injected = {
       thought: true,
       text: lastThinking.text,
-      thoughtSignature: SKIP_THOUGHT_SIGNATURE,
+      thoughtSignature: lastThinking.signature,
     };
 
     return { ...content, parts: [injected, ...otherParts] };
   });
 }
 
-function ensureMessageThinkingSignature(block: any, _sessionId: string): any {
+function ensureMessageThinkingSignature(block: any, sessionId: string): any {
   if (!block || typeof block !== "object") {
     return block;
   }
@@ -451,11 +461,21 @@ function ensureMessageThinkingSignature(block: any, _sessionId: string): any {
     return block;
   }
 
-  if (block.signature === SENTINEL_SIGNATURE) {
+  if (typeof block.signature === "string" && block.signature.length >= MIN_SIGNATURE_LENGTH) {
     return block;
   }
 
-  return { ...block, signature: SENTINEL_SIGNATURE };
+  const text = typeof block.thinking === "string" ? block.thinking : typeof block.text === "string" ? block.text : "";
+  if (!text) {
+    return block;
+  }
+
+  const cached = getCachedSignature(sessionId, text);
+  if (cached) {
+    return { ...block, signature: cached };
+  }
+
+  return block;
 }
 
 function hasToolUseInContents(contents: any[]): boolean {
@@ -498,7 +518,7 @@ function hasSignedThinkingInMessages(messages: any[]): boolean {
         typeof block === "object" &&
         (block.type === "thinking" || block.type === "redacted_thinking") &&
         typeof block.signature === "string" &&
-        (block.signature === SKIP_THOUGHT_SIGNATURE || block.signature.length >= MIN_SIGNATURE_LENGTH),
+        block.signature.length >= MIN_SIGNATURE_LENGTH,
     );
   });
 }
@@ -524,11 +544,7 @@ function ensureThinkingBeforeToolUseInMessages(messages: any[], signatureSession
       .map((b) => ensureMessageThinkingSignature(b, signatureSessionKey));
 
     const otherBlocks = blocks.filter((b) => !(b && typeof b === "object" && (b.type === "thinking" || b.type === "redacted_thinking")));
-    const hasSignedThinking = thinkingBlocks.some(
-      (b) =>
-        typeof b.signature === "string"
-        && (b.signature === SKIP_THOUGHT_SIGNATURE || b.signature.length >= MIN_SIGNATURE_LENGTH),
-    );
+    const hasSignedThinking = thinkingBlocks.some((b) => typeof b.signature === "string" && b.signature.length >= MIN_SIGNATURE_LENGTH);
 
     if (hasSignedThinking) {
       return { ...message, content: [...thinkingBlocks, ...otherBlocks] };
@@ -552,7 +568,7 @@ function ensureThinkingBeforeToolUseInMessages(messages: any[], signatureSession
     const injected = {
       type: "thinking",
       thinking: lastThinking.text,
-      signature: SKIP_THOUGHT_SIGNATURE,
+      signature: lastThinking.signature,
     };
 
     return { ...message, content: [injected, ...otherBlocks] };
@@ -1535,8 +1551,7 @@ export async function transformAntigravityResponse(
 
   try {
     const headers = new Headers(response.headers);
-    // Read from a clone so the original body remains available for callers on failure paths.
-    const text = await response.clone().text();
+    const text = await response.text();
 
     if (!response.ok) {
       let errorBody;
@@ -1727,3 +1742,4 @@ export const __testExports = {
   transformStreamingPayload,
   createStreamingTransformer,
 };
+

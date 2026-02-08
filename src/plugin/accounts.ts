@@ -470,7 +470,11 @@ export class AccountManager {
   getCurrentAccountForFamily(family: ModelFamily): ManagedAccount | null {
     const currentIndex = this.currentAccountIndexByFamily[family];
     if (currentIndex >= 0 && currentIndex < this.accounts.length) {
-      return this.accounts[currentIndex] ?? null;
+      const account = this.accounts[currentIndex] ?? null;
+      // Only return account if it's enabled - disabled accounts should not be selected
+      if (account && account.enabled !== false) {
+        return account;
+      }
     }
     return null;
   }
@@ -830,6 +834,36 @@ export class AccountManager {
     return null;
   }
 
+  setAccountEnabled(accountIndex: number, enabled: boolean): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    account.enabled = enabled;
+
+    if (!enabled) {
+      for (const family of Object.keys(this.currentAccountIndexByFamily) as ModelFamily[]) {
+        if (this.currentAccountIndexByFamily[family] === accountIndex) {
+          const next = this.accounts.find((a, i) => i !== accountIndex && a.enabled !== false);
+          this.currentAccountIndexByFamily[family] = next?.index ?? -1;
+        }
+      }
+    }
+
+    this.requestSaveToDisk();
+    return true;
+  }
+
+  removeAccountByIndex(accountIndex: number): boolean {
+    if (accountIndex < 0 || accountIndex >= this.accounts.length) {
+      return false;
+    }
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    return this.removeAccount(account);
+  }
   removeAccount(account: ManagedAccount): boolean {
     const idx = this.accounts.indexOf(account);
     if (idx < 0) {
