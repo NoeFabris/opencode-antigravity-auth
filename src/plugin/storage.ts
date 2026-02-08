@@ -758,13 +758,19 @@ export async function saveAccounts(
       const n = typeof idx === "number" && Number.isFinite(idx) ? idx : 0;
       return Math.min(Math.max(0, Math.trunc(n)), len - 1);
     };
+    const clampFamilyIndex = (idx: unknown): number => {
+      if (len <= 0) return -1;
+      const n = typeof idx === "number" && Number.isFinite(idx) ? Math.trunc(idx) : 0;
+      if (n < 0) return -1;
+      return Math.min(n, len - 1);
+    };
     merged.activeIndex = clampIndex(merged.activeIndex);
     if (merged.activeIndexByFamily && typeof merged.activeIndexByFamily === "object") {
       const family = merged.activeIndexByFamily;
       merged.activeIndexByFamily = {
         ...family,
-        ...(family.claude !== undefined ? { claude: clampIndex(family.claude) } : {}),
-        ...(family.gemini !== undefined ? { gemini: clampIndex(family.gemini) } : {}),
+        ...(family.claude !== undefined ? { claude: clampFamilyIndex(family.claude) } : {}),
+        ...(family.gemini !== undefined ? { gemini: clampFamilyIndex(family.gemini) } : {}),
       };
     }
 
@@ -860,35 +866,47 @@ export async function clearAccounts(): Promise<void> {
 }
 
 export async function loadBlockedAccounts(): Promise<BlockedAccountStorageV1> {
+  const path = getBlockedAccountsPath();
+  const empty: BlockedAccountStorageV1 = { version: 1, accounts: [] };
+
   try {
-    const path = getBlockedAccountsPath();
-    const content = await fs.readFile(path, "utf-8");
-    const parsed = JSON.parse(content) as Partial<BlockedAccountStorageV1> | null;
+    return await withBlockedFileLock(path, async () => {
+      // Best effort to normalize permissions for pre-existing files.
+      await ensureSecurePermissions(path);
 
-    if (!parsed || typeof parsed !== "object" || parsed.version !== 1 || !Array.isArray(parsed.accounts)) {
-      return { version: 1, accounts: [] };
-    }
+      const content = await fs.readFile(path, "utf-8");
+      const parsed = JSON.parse(content) as Partial<BlockedAccountStorageV1> | null;
 
-    const map = new Map<string, BlockedAccountMetadataV1>();
-    for (const acc of parsed.accounts) {
-      if (!acc || typeof acc !== "object") continue;
-      const refreshToken = (acc as any).refreshToken;
-      if (typeof refreshToken !== "string" || !refreshToken) continue;
-      const blockedAt = typeof (acc as any).blockedAt === "number" ? (acc as any).blockedAt : 0;
-      map.set(refreshToken, { ...(acc as any), blockedAt });
-    }
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        parsed.version !== 1 ||
+        !Array.isArray(parsed.accounts)
+      ) {
+        return empty;
+      }
 
-    return {
-      version: 1,
-      accounts: Array.from(map.values()),
-    };
+      const map = new Map<string, BlockedAccountMetadataV1>();
+      for (const acc of parsed.accounts) {
+        if (!acc || typeof acc !== "object") continue;
+        const refreshToken = (acc as any).refreshToken;
+        if (typeof refreshToken !== "string" || !refreshToken) continue;
+        const blockedAt = typeof (acc as any).blockedAt === "number" ? (acc as any).blockedAt : 0;
+        map.set(refreshToken, { ...(acc as any), blockedAt });
+      }
+
+      return {
+        version: 1,
+        accounts: Array.from(map.values()),
+      };
+    });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      return { version: 1, accounts: [] };
+      return empty;
     }
     log.error("Failed to load blocked account storage", { error: String(error) });
-    return { version: 1, accounts: [] };
+    return empty;
   }
 }
 

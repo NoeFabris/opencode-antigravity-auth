@@ -200,6 +200,22 @@ function clampNonNegativeInt(value: unknown, fallback: number): number {
   return value < 0 ? 0 : Math.floor(value);
 }
 
+function clampFamilyIndex(
+  value: unknown,
+  fallback: number,
+  accountCount: number,
+): number {
+  if (accountCount <= 0) return -1;
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return Math.min(clampNonNegativeInt(fallback, 0), accountCount - 1);
+  }
+
+  const normalized = Math.trunc(value);
+  if (normalized < 0) return -1;
+  return Math.min(normalized, accountCount - 1);
+}
+
 function getQuotaKey(family: ModelFamily, headerStyle: HeaderStyle, model?: string | null): QuotaKey {
   if (family === "claude") {
     return "claude";
@@ -409,12 +425,16 @@ export class AccountManager {
       if (this.accounts.length > 0) {
         this.cursor = this.cursor % this.accounts.length;
         const defaultIndex = this.cursor;
-        this.currentAccountIndexByFamily.claude =
-          clampNonNegativeInt(stored.activeIndexByFamily?.claude, defaultIndex) %
-          this.accounts.length;
-        this.currentAccountIndexByFamily.gemini =
-          clampNonNegativeInt(stored.activeIndexByFamily?.gemini, defaultIndex) %
-          this.accounts.length;
+        this.currentAccountIndexByFamily.claude = clampFamilyIndex(
+          stored.activeIndexByFamily?.claude,
+          defaultIndex,
+          this.accounts.length,
+        );
+        this.currentAccountIndexByFamily.gemini = clampFamilyIndex(
+          stored.activeIndexByFamily?.gemini,
+          defaultIndex,
+          this.accounts.length,
+        );
       } else {
         this.cursor = 0;
         this.currentAccountIndexByFamily.claude = -1;
@@ -1043,14 +1063,16 @@ export class AccountManager {
 
     this.cursor = this.cursor % this.accounts.length;
     const defaultIndex = this.cursor;
-    this.currentAccountIndexByFamily.claude = clampNonNegativeInt(
+    this.currentAccountIndexByFamily.claude = clampFamilyIndex(
       stored.activeIndexByFamily?.claude,
-      defaultIndex
-    ) % this.accounts.length;
-    this.currentAccountIndexByFamily.gemini = clampNonNegativeInt(
+      defaultIndex,
+      this.accounts.length,
+    );
+    this.currentAccountIndexByFamily.gemini = clampFamilyIndex(
       stored.activeIndexByFamily?.gemini,
-      defaultIndex
-    ) % this.accounts.length;
+      defaultIndex,
+      this.accounts.length,
+    );
   }
 
   async quarantineAccountForVerification(
@@ -1160,8 +1182,17 @@ export class AccountManager {
       return Math.min(Math.max(0, value), accountCount - 1);
     };
 
-    const claudeIndex = clampStoredIndex(this.currentAccountIndexByFamily.claude);
-    const geminiIndex = clampStoredIndex(this.currentAccountIndexByFamily.gemini);
+    const activeIndex = clampStoredIndex(this.currentAccountIndexByFamily.claude);
+    const claudeIndex = clampFamilyIndex(
+      this.currentAccountIndexByFamily.claude,
+      activeIndex,
+      accountCount,
+    );
+    const geminiIndex = clampFamilyIndex(
+      this.currentAccountIndexByFamily.gemini,
+      activeIndex,
+      accountCount,
+    );
     
     const storage: AccountStorageV3 = {
       version: 3,
@@ -1180,7 +1211,7 @@ export class AccountManager {
         fingerprint: a.fingerprint,
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
       })),
-      activeIndex: claudeIndex,
+      activeIndex,
       activeIndexByFamily: {
         claude: claudeIndex,
         gemini: geminiIndex,

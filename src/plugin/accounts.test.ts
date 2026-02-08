@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason, resolveQuotaGroup } from "./accounts";
-import type { AccountStorageV3 } from "./storage";
+import { saveAccounts, type AccountStorageV3 } from "./storage";
 import type { OAuthAuthDetails } from "./types";
 
 // Mock storage to prevent test data from leaking to real config files
@@ -540,6 +540,49 @@ describe("AccountManager", () => {
 
       expect(manager.getCurrentAccountForFamily("claude")?.parts.refreshToken).toBe("r2");
       expect(manager.getCurrentAccountForFamily("gemini")?.parts.refreshToken).toBe("r2");
+    });
+
+    it("preserves -1 family sentinel from storage", () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+        activeIndexByFamily: {
+          claude: -1,
+          gemini: -1,
+        },
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      expect(manager.getCurrentAccountForFamily("claude")).toBeNull();
+      expect(manager.getCurrentAccountForFamily("gemini")).toBeNull();
+    });
+
+    it("writes -1 family sentinel to storage when no enabled account exists", async () => {
+      const stored: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      (manager as unknown as { currentAccountIndexByFamily: Record<ModelFamily, number> }).currentAccountIndexByFamily = {
+        claude: -1,
+        gemini: -1,
+      };
+
+      vi.mocked(saveAccounts).mockClear();
+      await manager.saveToDisk();
+
+      const saved = vi.mocked(saveAccounts).mock.calls[0]?.[0] as AccountStorageV3 | undefined;
+      expect(saved).toBeDefined();
+      expect(saved?.activeIndexByFamily).toEqual({ claude: -1, gemini: -1 });
+      expect(saved?.activeIndex).toBe(0);
     });
   });
 
