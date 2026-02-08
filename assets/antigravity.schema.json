@@ -10,6 +10,14 @@
       "type": "boolean",
       "description": "Suppress most toast notifications (rate limit, account switching). Recovery toasts always shown. Env: OPENCODE_ANTIGRAVITY_QUIET=1"
     },
+    "toast_scope": {
+      "default": "root_only",
+      "type": "string",
+      "enum": [
+        "root_only",
+        "all"
+      ]
+    },
     "debug": {
       "default": false,
       "type": "boolean",
@@ -133,8 +141,7 @@
     },
     "cli_first": {
       "default": false,
-      "type": "boolean",
-      "description": "Prefer gemini-cli routing before Antigravity for Gemini models. When false (default), Antigravity is tried first and gemini-cli is fallback."
+      "type": "boolean"
     },
     "account_selection_strategy": {
       "default": "hybrid",
@@ -153,6 +160,27 @@
       "default": true,
       "type": "boolean"
     },
+    "scheduling_mode": {
+      "default": "cache_first",
+      "type": "string",
+      "enum": [
+        "cache_first",
+        "balance",
+        "performance_first"
+      ]
+    },
+    "max_cache_first_wait_seconds": {
+      "default": 60,
+      "type": "number",
+      "minimum": 5,
+      "maximum": 300
+    },
+    "failure_ttl_seconds": {
+      "default": 3600,
+      "type": "number",
+      "minimum": 60,
+      "maximum": 7200
+    },
     "default_retry_after_seconds": {
       "default": 60,
       "type": "number",
@@ -164,6 +192,38 @@
       "type": "number",
       "minimum": 5,
       "maximum": 300
+    },
+    "request_jitter_max_ms": {
+      "default": 0,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "soft_quota_threshold_percent": {
+      "default": 90,
+      "type": "number",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "quota_refresh_interval_minutes": {
+      "default": 15,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 60
+    },
+    "soft_quota_cache_ttl_minutes": {
+      "default": "auto",
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 120
+        }
+      ]
     },
     "health_score": {
       "type": "object",
@@ -255,6 +315,22 @@
       "default": true,
       "type": "boolean",
       "description": "Enable automatic plugin updates. Env: OPENCODE_ANTIGRAVITY_AUTO_UPDATE=1"
+    },
+    "notify_on_account_error": {
+      "default": true,
+      "type": "boolean"
+    },
+    "telegram_bot_token": {
+      "type": "string"
+    },
+    "telegram_chat_id": {
+      "type": "string"
+    },
+    "notification_cooldown_seconds": {
+      "default": 60,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 300
     }
   },
   "additionalProperties": false

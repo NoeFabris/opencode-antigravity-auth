@@ -185,7 +185,83 @@ OPENCODE_ANTIGRAVITY_LOG_DIR=/path                        # log_dir
 OPENCODE_ANTIGRAVITY_KEEP_THINKING=1                      # keep_thinking
 OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY=round-robin
 OPENCODE_ANTIGRAVITY_PID_OFFSET_ENABLED=1
+OPENCODE_ANTIGRAVITY_TELEGRAM_BOT_TOKEN="your-bot-token"  # Telegram notifications
+OPENCODE_ANTIGRAVITY_TELEGRAM_CHAT_ID="your-chat-id"      # Telegram chat ID
 ```
+
+---
+
+## Error Notifications
+
+Get alerts when accounts encounter errors. Session continues with next account instead of stopping.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `notify_on_account_error` | `true` | Enable notifications when accounts fail |
+| `telegram_bot_token` | - | Telegram bot token for remote notifications |
+| `telegram_chat_id` | - | Your Telegram chat ID |
+| `notification_cooldown_seconds` | `60` | Cooldown between notifications (prevents spam) |
+
+### Telegram Setup (Optional)
+
+Receive account error notifications directly to Telegram - useful for monitoring long-running agents.
+
+**Step 1: Create a Telegram Bot**
+
+1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the prompts
+3. BotFather will give you a token like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`
+
+**Step 2: Get Your Chat ID**
+
+1. Search for [@userinfobot](https://t.me/userinfobot) on Telegram
+2. Send any message to it
+3. It will reply with your chat ID (e.g., `123456789`)
+
+**Step 3: Configure the Plugin**
+
+Add to your `antigravity.json`:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/main/assets/antigravity.schema.json",
+  "telegram_bot_token": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+  "telegram_chat_id": "123456789"
+}
+```
+
+Or via environment variables:
+
+```bash
+export OPENCODE_ANTIGRAVITY_TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+export OPENCODE_ANTIGRAVITY_TELEGRAM_CHAT_ID="123456789"
+```
+
+**Step 4: Start Your Bot**
+
+> ⚠️ You must send at least one message to your bot before it can message you.
+
+1. Open your new bot in Telegram (use the link BotFather gave you)
+2. Send any message (e.g., `/start`)
+3. Now the plugin can send notifications to you!
+
+### What You'll Receive
+
+When an account encounters an error, you'll get a Telegram message like:
+
+```
+⚠️ Account Error
+━━━━━━━━━━━━━━━━━━━━━━━━
+📧 Account: user@gmail.com
+❌ Error: invalid_grant
+💬 Message: Token revoked - run `opencode auth login`
+📊 Status: 401
+🤖 Model: claude-sonnet-4-20250514
+📋 Remaining: 2 account(s)
+🕐 Time: 2025-02-08T10:30:00.000Z
+```
+
+The session will automatically continue with the next available account.
 
 ---
 
