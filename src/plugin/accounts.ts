@@ -1,16 +1,30 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
-import { loadAccounts, saveAccounts, type AccountStorageV3, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
+import {
+  loadAccounts,
+  loadBlockedAccounts,
+  saveAccounts,
+  saveBlockedAccounts,
+  type AccountStorageV3,
+  type BlockedAccountMetadataV1,
+  type RateLimitStateV3,
+  type ModelFamily,
+  type HeaderStyle,
+  type CooldownReason,
+} from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
 import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
-import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { getModelFamily } from "./transform/model-resolver";
-import { debugLogToFile } from "./debug";
+import { createLogger } from "./logger";
+import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { ANTIGRAVITY_VERSION } from "../constants";
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
 export type { AccountSelectionStrategy } from "./config/schema";
+export type { QuotaGroup, QuotaGroupSummary } from "./quota";
+
+const log = createLogger("accounts");
 
 /**
  * Update fingerprint userAgent to current version if outdated.
@@ -48,6 +62,10 @@ const MODEL_CAPACITY_EXHAUSTED_JITTER_MAX = 30_000; // ±15s jitter range
 const SERVER_ERROR_BACKOFF = 20_000;
 const UNKNOWN_BACKOFF = 60_000;
 const MIN_BACKOFF_MS = 2_000;
+
+// Soft quota cache is best-effort and should fail open when stale/missing.
+// Tests assume 10 minutes.
+const DEFAULT_SOFT_QUOTA_CACHE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Generate a random jitter value for backoff timing.
@@ -160,8 +178,9 @@ export interface ManagedAccount {
   fingerprint?: import("./fingerprint").Fingerprint;
   /** History of previous fingerprints for this account */
   fingerprintHistory?: FingerprintVersion[];
-  /** Cached quota data from last checkAccountsQuota() call */
+  /** Last cached quota summary by quota group (best-effort, in-memory). */
   cachedQuota?: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
+  /** Timestamp of last quota cache update (ms since epoch). */
   cachedQuotaUpdatedAt?: number;
 }
 
@@ -174,6 +193,22 @@ function clampNonNegativeInt(value: unknown, fallback: number): number {
     return fallback;
   }
   return value < 0 ? 0 : Math.floor(value);
+}
+
+function clampFamilyIndex(
+  value: unknown,
+  fallback: number,
+  accountCount: number,
+): number {
+  if (accountCount <= 0) return -1;
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return Math.min(clampNonNegativeInt(fallback, 0), accountCount - 1);
+  }
+
+  const normalized = Math.trunc(value);
+  if (normalized < 0) return -1;
+  return Math.min(normalized, accountCount - 1);
 }
 
 function getQuotaKey(family: ModelFamily, headerStyle: HeaderStyle, model?: string | null): QuotaKey {
@@ -236,15 +271,6 @@ function clearExpiredRateLimits(account: ManagedAccount): void {
 
 /**
  * Resolve the quota group for soft quota checks.
- * 
- * When a model string is available, we can precisely determine the quota group.
- * When model is null/undefined, we fall back based on family:
- * - Claude → "claude" quota group
- * - Gemini → "gemini-pro" (conservative fallback; may misclassify flash models)
- * 
- * @param family - The model family ("claude" | "gemini")
- * @param model - Optional model string for precise resolution
- * @returns The QuotaGroup to use for soft quota checks
  */
 export function resolveQuotaGroup(family: ModelFamily, model?: string | null): QuotaGroup {
   if (model) {
@@ -262,39 +288,18 @@ function isOverSoftQuotaThreshold(
 ): boolean {
   if (thresholdPercent >= 100) return false;
   if (!account.cachedQuota) return false;
-  
   if (account.cachedQuotaUpdatedAt == null) return false;
+
   const age = nowMs() - account.cachedQuotaUpdatedAt;
   if (age > cacheTtlMs) return false;
-  
+
   const quotaGroup = resolveQuotaGroup(family, model);
-  
   const groupData = account.cachedQuota[quotaGroup];
   if (groupData?.remainingFraction == null) return false;
-  
+
   const remainingFraction = Math.max(0, Math.min(1, groupData.remainingFraction));
   const usedPercent = (1 - remainingFraction) * 100;
-  const isOverThreshold = usedPercent >= thresholdPercent;
-  
-  if (isOverThreshold) {
-    const accountLabel = account.email || `Account ${account.index + 1}`;
-    debugLogToFile(
-      `[SoftQuota] Skipping ${accountLabel}: ${quotaGroup} usage ${usedPercent.toFixed(1)}% >= threshold ${thresholdPercent}%` +
-      (groupData.resetTime ? ` (resets: ${groupData.resetTime})` : '')
-    );
-  }
-  
-  return isOverThreshold;
-}
-
-export function computeSoftQuotaCacheTtlMs(
-  ttlConfig: "auto" | number,
-  refreshIntervalMinutes: number
-): number {
-  if (ttlConfig === "auto") {
-    return Math.max(2 * refreshIntervalMinutes, 10) * 60 * 1000;
-  }
-  return ttlConfig * 60 * 1000;
+  return usedPercent >= thresholdPercent;
 }
 
 /**
@@ -307,6 +312,7 @@ export function computeSoftQuotaCacheTtlMs(
  * Source of truth for the pool is `antigravity-accounts.json`.
  */
 export class AccountManager {
+  private authFallback?: OAuthAuthDetails;
   private accounts: ManagedAccount[] = [];
   private cursor = 0;
   private currentAccountIndexByFamily: Record<ModelFamily, number> = {
@@ -323,6 +329,8 @@ export class AccountManager {
   private savePending = false;
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private savePromiseResolvers: Array<() => void> = [];
+  private pendingAddedRefreshTokens = new Set<string>();
+  private pendingRemovedRefreshTokens = new Set<string>();
 
   static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
     const stored = await loadAccounts();
@@ -330,6 +338,7 @@ export class AccountManager {
   }
 
   constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
+    this.authFallback = authFallback;
     const authParts = authFallback ? parseRefreshParts(authFallback.refresh) : null;
 
     if (stored && stored.accounts.length === 0) {
@@ -374,52 +383,60 @@ export class AccountManager {
             fingerprint: acc.fingerprint
               ? updateFingerprintVersion(acc.fingerprint)
               : generateFingerprint(),
-            cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
-            cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
+            fingerprintHistory: acc.fingerprintHistory?.length ? acc.fingerprintHistory : undefined,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
 
       this.cursor = clampNonNegativeInt(stored.activeIndex, 0);
+
+      // Merge currently authenticated account into persisted storage if missing.
+      // This handles cases where a fresh OAuth login was performed in another process.
+      if (authFallback && authParts?.refreshToken) {
+        const hasMatching = this.accounts.some(
+          (acc) => acc.parts.refreshToken === authParts.refreshToken
+        );
+        if (!hasMatching) {
+          const now = nowMs();
+          const newAccount: ManagedAccount = {
+            index: this.accounts.length,
+            email: undefined,
+            addedAt: now,
+            lastUsed: 0,
+            parts: authParts,
+            access: authFallback.access,
+            expires: authFallback.expires,
+            enabled: true,
+            rateLimitResetTimes: {},
+            touchedForQuota: {},
+            fingerprint: generateFingerprint(),
+          };
+          this.accounts.push(newAccount);
+          this.pendingAddedRefreshTokens.add(authParts.refreshToken);
+          this.requestSaveToDisk();
+        }
+      }
+
       if (this.accounts.length > 0) {
         this.cursor = this.cursor % this.accounts.length;
         const defaultIndex = this.cursor;
-        this.currentAccountIndexByFamily.claude = clampNonNegativeInt(
+        this.currentAccountIndexByFamily.claude = clampFamilyIndex(
           stored.activeIndexByFamily?.claude,
-          defaultIndex
-        ) % this.accounts.length;
-        this.currentAccountIndexByFamily.gemini = clampNonNegativeInt(
+          defaultIndex,
+          this.accounts.length,
+        );
+        this.currentAccountIndexByFamily.gemini = clampFamilyIndex(
           stored.activeIndexByFamily?.gemini,
-          defaultIndex
-        ) % this.accounts.length;
+          defaultIndex,
+          this.accounts.length,
+        );
+      } else {
+        this.cursor = 0;
+        this.currentAccountIndexByFamily.claude = -1;
+        this.currentAccountIndexByFamily.gemini = -1;
       }
 
       return;
-    }
-
-    // If we have stored accounts, check if we need to add the current auth
-    if (authFallback && this.accounts.length > 0) {
-      const authParts = parseRefreshParts(authFallback.refresh);
-      const hasMatching = this.accounts.some(acc => acc.parts.refreshToken === authParts.refreshToken);
-      if (!hasMatching && authParts.refreshToken) {
-        const now = nowMs();
-        const newAccount: ManagedAccount = {
-          index: this.accounts.length,
-          email: undefined,
-          addedAt: now,
-          lastUsed: 0,
-          parts: authParts,
-          access: authFallback.access,
-          expires: authFallback.expires,
-          enabled: true,
-          rateLimitResetTimes: {},
-          touchedForQuota: {},
-        };
-        this.accounts.push(newAccount);
-        // Update indices to include the new account
-        this.currentAccountIndexByFamily.claude = Math.min(this.currentAccountIndexByFamily.claude, this.accounts.length - 1);
-        this.currentAccountIndexByFamily.gemini = Math.min(this.currentAccountIndexByFamily.gemini, this.accounts.length - 1);
-      }
     }
 
     if (authFallback) {
@@ -440,6 +457,8 @@ export class AccountManager {
             touchedForQuota: {},
           },
         ];
+        this.pendingAddedRefreshTokens.add(parts.refreshToken);
+        this.requestSaveToDisk();
         this.cursor = 0;
         this.currentAccountIndexByFamily.claude = 0;
         this.currentAccountIndexByFamily.gemini = 0;
@@ -504,12 +523,11 @@ export class AccountManager {
     headerStyle: HeaderStyle = 'antigravity',
     pidOffsetEnabled: boolean = false,
     softQuotaThresholdPercent: number = 100,
-    softQuotaCacheTtlMs: number = 10 * 60 * 1000,
   ): ManagedAccount | null {
     const quotaKey = getQuotaKey(family, headerStyle, model);
 
     if (strategy === 'round-robin') {
-      const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs);
+      const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent);
       if (next) {
         this.markTouchedForQuota(next, quotaKey);
         this.currentAccountIndexByFamily[family] = next.index;
@@ -529,8 +547,8 @@ export class AccountManager {
             index: acc.index,
             lastUsed: acc.lastUsed,
             healthScore: healthTracker.getScore(acc.index),
-            isRateLimited: isRateLimitedForFamily(acc, family, model) || 
-                          isOverSoftQuotaThreshold(acc, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model),
+            isRateLimited: isRateLimitedForFamily(acc, family, model)
+              || isOverSoftQuotaThreshold(acc, family, softQuotaThresholdPercent, DEFAULT_SOFT_QUOTA_CACHE_TTL_MS, model),
             isCoolingDown: this.isAccountCoolingDown(acc),
           };
         });
@@ -556,26 +574,28 @@ export class AccountManager {
     if (pidOffsetEnabled && !this.sessionOffsetApplied[family] && this.accounts.length > 1) {
       const pidOffset = process.pid % this.accounts.length;
       const baseIndex = this.currentAccountIndexByFamily[family] ?? 0;
-      const newIndex = (baseIndex + pidOffset) % this.accounts.length;
-      
-      debugLogToFile(`[Account] Applying PID offset: pid=${process.pid} offset=${pidOffset} family=${family} index=${baseIndex}->${newIndex}`);
-      
-      this.currentAccountIndexByFamily[family] = newIndex;
+      this.currentAccountIndexByFamily[family] = (baseIndex + pidOffset) % this.accounts.length;
       this.sessionOffsetApplied[family] = true;
     }
 
     const current = this.getCurrentAccountForFamily(family);
-    if (current) {
+    if (current && current.enabled !== false) {
       clearExpiredRateLimits(current);
       const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
-      const isOverThreshold = isOverSoftQuotaThreshold(current, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
-      if (!isLimitedForRequestedStyle && !isOverThreshold && !this.isAccountCoolingDown(current)) {
+      const isOverSoftQuota = isOverSoftQuotaThreshold(
+        current,
+        family,
+        softQuotaThresholdPercent,
+        DEFAULT_SOFT_QUOTA_CACHE_TTL_MS,
+        model,
+      );
+      if (!isLimitedForRequestedStyle && !this.isAccountCoolingDown(current) && !isOverSoftQuota) {
         this.markTouchedForQuota(current, quotaKey);
         return current;
       }
     }
 
-    const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs);
+    const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent);
     if (next) {
       this.markTouchedForQuota(next, quotaKey);
       this.currentAccountIndexByFamily[family] = next.index;
@@ -583,13 +603,89 @@ export class AccountManager {
     return next;
   }
 
-  getNextForFamily(family: ModelFamily, model?: string | null, headerStyle: HeaderStyle = "antigravity", softQuotaThresholdPercent: number = 100, softQuotaCacheTtlMs: number = 10 * 60 * 1000): ManagedAccount | null {
+  updateQuotaCache(accountIndex: number, quota: Partial<Record<QuotaGroup, QuotaGroupSummary>>): void {
+    const account = this.accounts.find((a) => a.index === accountIndex);
+    if (!account) return;
+    account.cachedQuota = { ...(account.cachedQuota ?? {}), ...quota };
+    account.cachedQuotaUpdatedAt = nowMs();
+  }
+
+  /**
+   * Returns the minimum wait time (ms) until at least one account is under the soft quota threshold.
+   *
+   * - `0` means "an account is available right now"
+   * - `null` means "all accounts are over threshold and we don't know when it resets"
+   */
+  getMinWaitTimeForSoftQuota(
+    family: ModelFamily,
+    thresholdPercent: number,
+    cacheTtlMs: number,
+    model?: string | null,
+  ): number | null {
+    if (thresholdPercent >= 100) return 0;
+
+    const enabled = this.accounts.filter((a) => a.enabled !== false);
+    if (enabled.length === 0) return 0;
+
+    const over = enabled.filter((a) =>
+      isOverSoftQuotaThreshold(a, family, thresholdPercent, cacheTtlMs, model),
+    );
+
+    // If any account is under threshold (or cache is missing/stale), we can proceed now.
+    if (over.length !== enabled.length) return 0;
+
+    const now = nowMs();
+    const quotaGroup = resolveQuotaGroup(family, model);
+    const waits: number[] = [];
+
+    for (const a of over) {
+      const resetTime = a.cachedQuota?.[quotaGroup]?.resetTime;
+      if (!resetTime) continue;
+      const resetMs = Date.parse(resetTime);
+      if (!Number.isFinite(resetMs)) continue;
+      // Past reset times are treated as unknown; fail open by returning null.
+      if (resetMs <= now) continue;
+      waits.push(resetMs - now);
+    }
+
+    if (waits.length === 0) return null;
+    return Math.min(...waits);
+  }
+
+  /**
+   * For Gemini only: returns true when a *different* account still has Antigravity quota available.
+   * Used to enforce "Antigravity-first" (switch accounts before falling back to gemini-cli).
+   */
+  hasOtherAccountWithAntigravityAvailable(
+    currentAccountIndex: number,
+    family: ModelFamily,
+    model?: string | null,
+  ): boolean {
+    if (family !== "gemini") return false;
+    for (const acc of this.accounts) {
+      if (acc.index === currentAccountIndex) continue;
+      if (acc.enabled === false) continue;
+      clearExpiredRateLimits(acc);
+      if (this.isAccountCoolingDown(acc)) continue;
+      if (!isRateLimitedForHeaderStyle(acc, family, "antigravity", model)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  getNextForFamily(
+    family: ModelFamily,
+    model?: string | null,
+    headerStyle: HeaderStyle = "antigravity",
+    softQuotaThresholdPercent: number = 100,
+  ): ManagedAccount | null {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
-      return a.enabled !== false && 
-             !isRateLimitedForHeaderStyle(a, family, headerStyle, model) && 
-             !isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model) &&
-             !this.isAccountCoolingDown(a);
+      return a.enabled !== false
+        && !isRateLimitedForHeaderStyle(a, family, headerStyle, model)
+        && !this.isAccountCoolingDown(a)
+        && !isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, DEFAULT_SOFT_QUOTA_CACHE_TTL_MS, model);
     });
 
     if (available.length === 0) {
@@ -753,49 +849,6 @@ export class AccountManager {
     return null;
   }
 
-  /**
-   * Check if any OTHER account has antigravity quota available for the given family/model.
-   * 
-   * Used to determine whether to switch accounts vs fall back to gemini-cli:
-   * - If true: Switch to another account (preserve antigravity priority)
-   * - If false: All accounts exhausted antigravity, safe to fall back to gemini-cli
-   * 
-   * @param currentAccountIndex - Index of the current account (will be excluded from check)
-   * @param family - Model family ("gemini" or "claude")
-   * @param model - Optional model name for model-specific rate limits
-   * @returns true if any other enabled, non-cooling-down account has antigravity available
-   */
-  hasOtherAccountWithAntigravityAvailable(
-    currentAccountIndex: number,
-    family: ModelFamily,
-    model?: string | null
-  ): boolean {
-    // Claude has no gemini-cli fallback - always return false
-    // (This method is only relevant for Gemini's dual quota pools)
-    if (family === "claude") {
-      return false;
-    }
-
-    return this.accounts.some(acc => {
-      // Skip current account
-      if (acc.index === currentAccountIndex) {
-        return false;
-      }
-      // Skip disabled accounts
-      if (acc.enabled === false) {
-        return false;
-      }
-      // Skip cooling down accounts
-      if (this.isAccountCoolingDown(acc)) {
-        return false;
-      }
-      // Clear expired rate limits before checking
-      clearExpiredRateLimits(acc);
-      // Check if antigravity is available for this account
-      return !isRateLimitedForHeaderStyle(acc, family, "antigravity", model);
-    });
-  }
-
   setAccountEnabled(accountIndex: number, enabled: boolean): boolean {
     const account = this.accounts[accountIndex];
     if (!account) {
@@ -826,11 +879,16 @@ export class AccountManager {
     }
     return this.removeAccount(account);
   }
-
   removeAccount(account: ManagedAccount): boolean {
     const idx = this.accounts.indexOf(account);
     if (idx < 0) {
       return false;
+    }
+
+    const refreshToken = account.parts.refreshToken;
+    if (refreshToken) {
+      this.pendingRemovedRefreshTokens.add(refreshToken);
+      this.pendingAddedRefreshTokens.delete(refreshToken);
     }
 
     this.accounts.splice(idx, 1);
@@ -931,9 +989,205 @@ export class AccountManager {
     return [...this.accounts];
   }
 
+  async reloadFromDisk(): Promise<void> {
+    const stored = await loadAccounts();
+    const authFallback = this.authFallback;
+    const authParts = authFallback ? parseRefreshParts(authFallback.refresh) : null;
+
+    // Reset per-session-only state. This keeps behavior predictable after restore.
+    this.sessionOffsetApplied = { claude: false, gemini: false };
+    this.lastToastAccountIndex = -1;
+    this.lastToastTime = 0;
+    this.pendingAddedRefreshTokens.clear();
+    this.pendingRemovedRefreshTokens.clear();
+
+    if (!stored || stored.accounts.length === 0) {
+      this.accounts = [];
+      this.cursor = 0;
+      this.currentAccountIndexByFamily.claude = -1;
+      this.currentAccountIndexByFamily.gemini = -1;
+      return;
+    }
+
+    const baseNow = nowMs();
+    this.accounts = stored.accounts
+      .map((acc, index): ManagedAccount | null => {
+        if (!acc.refreshToken || typeof acc.refreshToken !== "string") {
+          return null;
+        }
+        const matchesFallback = !!(
+          authFallback &&
+          authParts &&
+          authParts.refreshToken &&
+          acc.refreshToken === authParts.refreshToken
+        );
+
+        return {
+          index,
+          email: acc.email,
+          addedAt: clampNonNegativeInt(acc.addedAt, baseNow),
+          lastUsed: clampNonNegativeInt(acc.lastUsed, 0),
+          parts: {
+            refreshToken: acc.refreshToken,
+            projectId: acc.projectId,
+            managedProjectId: acc.managedProjectId,
+          },
+          access: matchesFallback ? authFallback?.access : undefined,
+          expires: matchesFallback ? authFallback?.expires : undefined,
+          enabled: acc.enabled !== false,
+          rateLimitResetTimes: acc.rateLimitResetTimes ?? {},
+          lastSwitchReason: acc.lastSwitchReason,
+          coolingDownUntil: acc.coolingDownUntil,
+          cooldownReason: acc.cooldownReason,
+          touchedForQuota: {},
+          fingerprint: acc.fingerprint
+            ? updateFingerprintVersion(acc.fingerprint)
+            : generateFingerprint(),
+          fingerprintHistory: acc.fingerprintHistory?.length ? acc.fingerprintHistory : undefined,
+        };
+      })
+      .filter((a): a is ManagedAccount => a !== null);
+
+    this.cursor = clampNonNegativeInt(stored.activeIndex, 0);
+    if (this.accounts.length === 0) {
+      this.cursor = 0;
+      this.currentAccountIndexByFamily.claude = -1;
+      this.currentAccountIndexByFamily.gemini = -1;
+      return;
+    }
+
+    this.cursor = this.cursor % this.accounts.length;
+    const defaultIndex = this.cursor;
+    this.currentAccountIndexByFamily.claude = clampFamilyIndex(
+      stored.activeIndexByFamily?.claude,
+      defaultIndex,
+      this.accounts.length,
+    );
+    this.currentAccountIndexByFamily.gemini = clampFamilyIndex(
+      stored.activeIndexByFamily?.gemini,
+      defaultIndex,
+      this.accounts.length,
+    );
+  }
+
+  async quarantineAccountForVerification(
+    account: ManagedAccount,
+    reason?: string,
+    verifyUrl?: string,
+  ): Promise<boolean> {
+    const refreshToken = account.parts.refreshToken;
+    if (!refreshToken) return false;
+
+    // Capture state for rollback in case persisting blocked storage fails.
+    // Losing the account is worse than leaving it in rotation.
+    const restoreIndex = this.accounts.indexOf(account);
+    const previousCursor = this.cursor;
+    const previousAccountIndexByFamily = { ...this.currentAccountIndexByFamily };
+    const previousPendingAddedRefreshTokens = new Set(this.pendingAddedRefreshTokens);
+    const previousPendingRemovedRefreshTokens = new Set(this.pendingRemovedRefreshTokens);
+
+    const record: BlockedAccountMetadataV1 = {
+      email: account.email,
+      refreshToken,
+      projectId: account.parts.projectId,
+      managedProjectId: account.parts.managedProjectId,
+      addedAt: account.addedAt,
+      lastUsed: account.lastUsed,
+      enabled: account.enabled,
+      lastSwitchReason: account.lastSwitchReason,
+      rateLimitResetTimes: Object.keys(account.rateLimitResetTimes).length > 0 ? account.rateLimitResetTimes : undefined,
+      coolingDownUntil: account.coolingDownUntil,
+      cooldownReason: account.cooldownReason,
+      fingerprint: account.fingerprint,
+      fingerprintHistory: account.fingerprintHistory?.length ? account.fingerprintHistory : undefined,
+      blockedAt: nowMs(),
+      blockedReason: reason,
+      verifyUrl,
+    };
+
+    const removed = this.removeAccount(account);
+    if (!removed) return false;
+
+    try {
+      const blocked = await loadBlockedAccounts();
+      const map = new Map<string, BlockedAccountMetadataV1>();
+      for (const a of blocked.accounts) {
+        if (a?.refreshToken) map.set(a.refreshToken, a);
+      }
+      map.set(record.refreshToken, record);
+      await saveBlockedAccounts({ version: 1, accounts: Array.from(map.values()) });
+    } catch (error) {
+      // Best-effort: quarantining should not crash the request path.
+      log.warn("Failed to persist blocked account storage; restoring account", {
+        email: account.email,
+        refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}...` : undefined,
+        verifyUrl,
+        error: String(error),
+      });
+
+      // Roll back in-memory removal and pending token deltas so we don't drop
+      // the account from disk on a later save.
+      try {
+        if (restoreIndex >= 0) {
+          const insertAt = Math.min(Math.max(0, restoreIndex), this.accounts.length);
+          this.accounts.splice(insertAt, 0, account);
+          this.accounts.forEach((acc, index) => {
+            acc.index = index;
+          });
+        } else if (!this.accounts.includes(account)) {
+          this.accounts.push(account);
+          this.accounts.forEach((acc, index) => {
+            acc.index = index;
+          });
+        }
+
+        this.cursor = previousCursor;
+        this.currentAccountIndexByFamily = { ...previousAccountIndexByFamily };
+        this.pendingAddedRefreshTokens = previousPendingAddedRefreshTokens;
+        this.pendingRemovedRefreshTokens = previousPendingRemovedRefreshTokens;
+      } catch (restoreError) {
+        log.warn("Failed to restore account after blocked-storage write failure", {
+          email: account.email,
+          refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}...` : undefined,
+          error: String(restoreError),
+        });
+      }
+
+      return false;
+    }
+
+    try {
+      await this.saveToDisk();
+    } catch (error) {
+      // Best-effort persistence.
+      log.warn("Failed to persist active account removal after quarantining", {
+        email: account.email,
+        refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}...` : undefined,
+        error: String(error),
+      });
+    }
+
+    return true;
+  }
+
   async saveToDisk(): Promise<void> {
-    const claudeIndex = Math.max(0, this.currentAccountIndexByFamily.claude);
-    const geminiIndex = Math.max(0, this.currentAccountIndexByFamily.gemini);
+    const accountCount = this.accounts.length;
+    const clampStoredIndex = (value: number): number => {
+      if (accountCount <= 0) return -1;
+      return Math.min(Math.max(0, value), accountCount - 1);
+    };
+
+    const activeIndex = clampStoredIndex(this.cursor);
+    const claudeIndex = clampFamilyIndex(
+      this.currentAccountIndexByFamily.claude,
+      activeIndex,
+      accountCount,
+    );
+    const geminiIndex = clampFamilyIndex(
+      this.currentAccountIndexByFamily.gemini,
+      activeIndex,
+      accountCount,
+    );
     
     const storage: AccountStorageV3 = {
       version: 3,
@@ -951,17 +1205,30 @@ export class AccountManager {
         cooldownReason: a.cooldownReason,
         fingerprint: a.fingerprint,
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
-        cachedQuota: a.cachedQuota && Object.keys(a.cachedQuota).length > 0 ? a.cachedQuota : undefined,
-        cachedQuotaUpdatedAt: a.cachedQuotaUpdatedAt,
       })),
-      activeIndex: claudeIndex,
+      activeIndex,
       activeIndexByFamily: {
         claude: claudeIndex,
         gemini: geminiIndex,
       },
     };
 
-    await saveAccounts(storage);
+    const addedRefreshTokens = Array.from(this.pendingAddedRefreshTokens);
+    const removedRefreshTokens = Array.from(this.pendingRemovedRefreshTokens);
+
+    // IMPORTANT:
+    // This plugin can run in multiple processes concurrently (e.g. a long-running
+    // OpenCode session + `opencode auth login`). Use merge+pruning to avoid
+    // resurrecting accounts deleted in another process.
+    await saveAccounts(storage, {
+      merge: true,
+      addedRefreshTokens,
+      removedRefreshTokens,
+      preserveDeletions: true,
+    });
+
+    this.pendingAddedRefreshTokens.clear();
+    this.pendingRemovedRefreshTokens.clear();
   }
 
   requestSaveToDisk(): void {
@@ -1092,92 +1359,5 @@ export class AccountManager {
       return [];
     }
     return [...account.fingerprintHistory];
-  }
-
-  updateQuotaCache(accountIndex: number, quotaGroups: Partial<Record<QuotaGroup, QuotaGroupSummary>>): void {
-    const account = this.accounts[accountIndex];
-    if (account) {
-      account.cachedQuota = quotaGroups;
-      account.cachedQuotaUpdatedAt = nowMs();
-    }
-  }
-
-  isAccountOverSoftQuota(account: ManagedAccount, family: ModelFamily, thresholdPercent: number, cacheTtlMs: number, model?: string | null): boolean {
-    return isOverSoftQuotaThreshold(account, family, thresholdPercent, cacheTtlMs, model);
-  }
-
-  getAccountsForQuotaCheck(): AccountMetadataV3[] {
-    return this.accounts.map((a) => ({
-      email: a.email,
-      refreshToken: a.parts.refreshToken,
-      projectId: a.parts.projectId,
-      managedProjectId: a.parts.managedProjectId,
-      addedAt: a.addedAt,
-      lastUsed: a.lastUsed,
-      enabled: a.enabled,
-    }));
-  }
-
-  getOldestQuotaCacheAge(): number | null {
-    let oldest: number | null = null;
-    for (const acc of this.accounts) {
-      if (acc.enabled === false) continue;
-      if (acc.cachedQuotaUpdatedAt == null) return null;
-      const age = nowMs() - acc.cachedQuotaUpdatedAt;
-      if (oldest === null || age > oldest) oldest = age;
-    }
-    return oldest;
-  }
-
-  areAllAccountsOverSoftQuota(family: ModelFamily, thresholdPercent: number, cacheTtlMs: number, model?: string | null): boolean {
-    if (thresholdPercent >= 100) return false;
-    const enabled = this.accounts.filter(a => a.enabled !== false);
-    if (enabled.length === 0) return false;
-    return enabled.every(a => isOverSoftQuotaThreshold(a, family, thresholdPercent, cacheTtlMs, model));
-  }
-
-  /**
-   * Get minimum wait time until any account's soft quota resets.
-   * Returns 0 if any account is available (not over threshold).
-   * Returns the minimum resetTime across all over-threshold accounts.
-   * Returns null if no resetTime data is available.
-   */
-  getMinWaitTimeForSoftQuota(
-    family: ModelFamily,
-    thresholdPercent: number,
-    cacheTtlMs: number,
-    model?: string | null
-  ): number | null {
-    if (thresholdPercent >= 100) return 0;
-    
-    const enabled = this.accounts.filter(a => a.enabled !== false);
-    if (enabled.length === 0) return null;
-    
-    // If any account is available (not over threshold), no wait needed
-    const available = enabled.filter(a => !isOverSoftQuotaThreshold(a, family, thresholdPercent, cacheTtlMs, model));
-    if (available.length > 0) return 0;
-    
-    // All accounts are over threshold - find earliest reset time
-    // For gemini family, we MUST have the model to distinguish pro vs flash quotas.
-    // Fail-open (return null = no wait info) if model is missing to avoid blocking on wrong quota.
-    if (!model && family !== "claude") return null;
-    const quotaGroup = resolveQuotaGroup(family, model);
-    const now = nowMs();
-    const waitTimes: number[] = [];
-    
-    for (const acc of enabled) {
-      const groupData = acc.cachedQuota?.[quotaGroup];
-      if (groupData?.resetTime) {
-        const resetTimestamp = Date.parse(groupData.resetTime);
-        if (Number.isFinite(resetTimestamp)) {
-          waitTimes.push(Math.max(0, resetTimestamp - now));
-        }
-      }
-    }
-    
-    if (waitTimes.length === 0) return null;
-    const minWait = Math.min(...waitTimes);
-    // Treat 0 as stale cache (resetTime in the past) → fail-open to avoid spin loop
-    return minWait === 0 ? null : minWait;
   }
 }

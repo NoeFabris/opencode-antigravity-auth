@@ -45,6 +45,7 @@ import {
   resolveThinkingConfig,
   rewriteAntigravityPreviewAccessError,
   transformThinkingParts,
+  stripThinkingFromResponse,
   type AntigravityApiBody,
 } from "./request-helpers";
 import {
@@ -105,9 +106,10 @@ function buildSignatureSessionKey(
 function shouldCacheThinkingSignatures(model?: string): boolean {
   if (typeof model !== "string") return false;
   const lower = model.toLowerCase();
-  // Both Claude and Gemini 3 models require thought signature caching
-  // for multi-turn conversations with function calling
-  return lower.includes("claude") || lower.includes("gemini-3");
+  // Gemini 3 uses unsigned "thought" parts that we may want to preserve/transform.
+  // Claude uses signed thinking blocks that MUST NOT be replayed (signatures are per-response),
+  // so we never cache signatures for Claude.
+  return lower.includes("gemini-3");
 }
 
 function hashConversationSeed(seed: string): string {
@@ -727,6 +729,13 @@ export function prepareAntigravityRequest(
           sessionId = signatureSessionKey;
         }
 
+        if (isClaude) {
+          // Defense in depth: some callers may include replayed messages/contents
+          // outside the nested request objects. Claude thinking signatures are not
+          // replayable, so strip thinking blocks from the entire wrapped payload.
+          deepFilterThinkingBlocks(wrappedBody, signatureSessionKey, getCachedSignature, true);
+        }
+
         for (const req of requestObjects) {
           // Use stable session ID for signature caching across multi-turn conversations
           (req as any).sessionId = signatureSessionKey;
@@ -739,30 +748,15 @@ export function prepareAntigravityRequest(
             // Step 1: Strip corrupted/unsigned thinking blocks FIRST
             deepFilterThinkingBlocks(req, signatureSessionKey, getCachedSignature, true);
 
-            // Step 2: THEN inject signed thinking from cache (after stripping)
-            if (isClaudeThinking && Array.isArray((req as any).contents)) {
-              (req as any).contents = ensureThinkingBeforeToolUseInContents((req as any).contents, signatureSessionKey);
-            }
-            if (isClaudeThinking && Array.isArray((req as any).messages)) {
-              (req as any).messages = ensureThinkingBeforeToolUseInMessages((req as any).messages, signatureSessionKey);
-            }
-
             // Step 3: Apply tool pairing fixes (ID assignment, response matching, orphan recovery)
             applyToolPairingFixes(req as Record<string, unknown>, true);
           }
         }
 
         if (isClaudeThinking && sessionId) {
-          const hasToolUse = requestObjects.some((req) =>
-            (Array.isArray((req as any).contents) && hasToolUseInContents((req as any).contents)) ||
-            (Array.isArray((req as any).messages) && hasToolUseInMessages((req as any).messages)),
-          );
-          const hasSignedThinking = requestObjects.some((req) =>
-            (Array.isArray((req as any).contents) && hasSignedThinkingInContents((req as any).contents)) ||
-            (Array.isArray((req as any).messages) && hasSignedThinkingInMessages((req as any).messages)),
-          );
-          const hasCachedThinking = defaultSignatureStore.has(signatureSessionKey);
-          needsSignedThinkingWarmup = hasToolUse && !hasSignedThinking && !hasCachedThinking;
+          // Claude thinking block signatures cannot be replayed. We always strip thinking blocks
+          // from outgoing requests, so a "warmup request for thinking signature" is not useful.
+          needsSignedThinkingWarmup = false;
         }
 
         body = JSON.stringify(wrappedBody);
@@ -1179,25 +1173,11 @@ export function prepareAntigravityRequest(
           // Step 1: Strip corrupted/unsigned thinking blocks FIRST
           deepFilterThinkingBlocks(requestPayload, signatureSessionKey, getCachedSignature, true);
 
-          // Step 2: THEN inject signed thinking from cache (after stripping)
-          if (isClaudeThinking && Array.isArray(requestPayload.contents)) {
-            requestPayload.contents = ensureThinkingBeforeToolUseInContents(requestPayload.contents, signatureSessionKey);
-          }
-          if (isClaudeThinking && Array.isArray(requestPayload.messages)) {
-            requestPayload.messages = ensureThinkingBeforeToolUseInMessages(requestPayload.messages, signatureSessionKey);
-          }
-
-          // Step 3: Check if warmup needed (AFTER injection attempt)
-          if (isClaudeThinking) {
-            const hasToolUse =
-              (Array.isArray(requestPayload.contents) && hasToolUseInContents(requestPayload.contents)) ||
-              (Array.isArray(requestPayload.messages) && hasToolUseInMessages(requestPayload.messages));
-            const hasSignedThinking =
-              (Array.isArray(requestPayload.contents) && hasSignedThinkingInContents(requestPayload.contents)) ||
-              (Array.isArray(requestPayload.messages) && hasSignedThinkingInMessages(requestPayload.messages));
-            const hasCachedThinking = defaultSignatureStore.has(signatureSessionKey);
-            needsSignedThinkingWarmup = hasToolUse && !hasSignedThinking && !hasCachedThinking;
-          }
+          // IMPORTANT:
+          // Claude thinking blocks are signed and signatures are not replayable across turns.
+          // Do not inject or "warm up" signed thinking from cache. We always strip all Claude
+          // thinking blocks from outgoing requests and let Claude generate fresh thinking.
+          needsSignedThinkingWarmup = false;
         }
 
         // For Claude models, ensure functionCall/tool use parts carry IDs (required by Anthropic).
@@ -1511,6 +1491,8 @@ export async function transformAntigravityResponse(
   const isJsonResponse = contentType.includes("application/json");
   const isEventStreamResponse = contentType.includes("text/event-stream");
 
+  const isClaude = typeof effectiveModel === "string" && isClaudeModel(effectiveModel);
+
   // Generate text for thinking injection:
   // - If debug=true: inject full debug logs
   // - If keep_thinking=true (but no debug): inject placeholder to trigger signature caching
@@ -1518,7 +1500,8 @@ export async function transformAntigravityResponse(
   const debugText =
     isDebugEnabled() && Array.isArray(debugLines) && debugLines.length > 0
       ? formatDebugLinesForThinking(debugLines)
-      : getKeepThinking()
+      // Claude thinking blocks are signed; never inject synthetic placeholders.
+      : (!isClaude && getKeepThinking())
         ? SYNTHETIC_THINKING_PLACEHOLDER
         : undefined;
   const cacheSignatures = shouldCacheThinkingSignatures(effectiveModel);
@@ -1546,7 +1529,10 @@ export async function transformAntigravityResponse(
         onCacheSignature: cacheSignature,
         onInjectDebug: injectDebugThinking,
         // onInjectSyntheticThinking removed - keep_thinking now uses debugText path
-        transformThinkingParts,
+        transformThinkingParts: (r: unknown) => {
+          const t = transformThinkingParts(r);
+          return isClaude ? stripThinkingFromResponse(t) : t;
+        },
       },
       {
         signatureSessionKey: sessionId,
@@ -1575,24 +1561,39 @@ export async function transformAntigravityResponse(
         errorBody = { error: { message: text } };
       }
 
-      // Inject Debug Info
       if (errorBody?.error) {
-        const debugInfo = `\n\n[Debug Info]\nRequested Model: ${requestedModel || "Unknown"}\nEffective Model: ${effectiveModel || "Unknown"}\nProject: ${projectId || "Unknown"}\nEndpoint: ${endpoint || "Unknown"}\nStatus: ${response.status}\nRequest ID: ${headers.get("x-request-id") || "N/A"}${toolDebugMissing !== undefined ? `\nTool Debug Missing: ${toolDebugMissing}` : ""}${toolDebugSummary ? `\nTool Debug Summary: ${toolDebugSummary}` : ""}${toolDebugPayload ? `\nTool Debug Payload: ${toolDebugPayload}` : ""}`;
-        const injectedDebug = debugText ? `\n\n${debugText}` : "";
-        errorBody.error.message = (errorBody.error.message || "Unknown error") + debugInfo + injectedDebug;
+        const rawMessage =
+          typeof errorBody.error.message === "string" && errorBody.error.message.trim()
+            ? errorBody.error.message
+            : text || "Unknown error";
 
-        // Check if this is a recoverable thinking error - throw to trigger retry
-        const errorType = detectErrorType(errorBody.error.message || "");
+        // IMPORTANT:
+        // Determine recovery type from the raw upstream message BEFORE appending any debug info.
+        // Debug injection can contain words that falsely match recovery patterns.
+        const errorType = detectErrorType(rawMessage);
         if (errorType === "thinking_block_order") {
           const recoveryError = new Error("THINKING_RECOVERY_NEEDED");
           (recoveryError as any).recoveryType = errorType;
           (recoveryError as any).originalError = errorBody;
-          (recoveryError as any).debugInfo = debugInfo;
           throw recoveryError;
         }
 
+        // Only append verbose debug info when debug mode is explicitly enabled.
+        // This keeps user-facing errors clean (no giant tool payloads) by default.
+        if (isDebugEnabled()) {
+          const debugInfo = `\n\n[Debug Info]\nRequested Model: ${requestedModel || "Unknown"}\nEffective Model: ${effectiveModel || "Unknown"}\nProject: ${projectId || "Unknown"}\nEndpoint: ${endpoint || "Unknown"}\nStatus: ${response.status}\nRequest ID: ${headers.get("x-request-id") || "N/A"}${toolDebugMissing !== undefined ? `\nTool Debug Missing: ${toolDebugMissing}` : ""}${toolDebugSummary ? `\nTool Debug Summary: ${toolDebugSummary}` : ""}${toolDebugPayload ? `\nTool Debug Payload: ${toolDebugPayload}` : ""}`;
+          const injectedDebug =
+            typeof debugText === "string" && debugText.startsWith(DEBUG_MESSAGE_PREFIX)
+              ? `\n\n${debugText}`
+              : "";
+          errorBody.error.message = rawMessage + debugInfo + injectedDebug;
+        } else {
+          // Preserve the raw upstream error message when debug mode is off.
+          errorBody.error.message = rawMessage;
+        }
+
         // Detect context length / prompt too long errors - signal to caller for toast
-        const errorMessage = errorBody.error.message?.toLowerCase() || "";
+        const errorMessage = rawMessage.toLowerCase();
         if (
           errorMessage.includes("prompt is too long") ||
           errorMessage.includes("context length exceeded") ||
@@ -1611,30 +1612,32 @@ export async function transformAntigravityResponse(
           headers.set("x-antigravity-context-error", "tool_pairing");
         }
 
+        // Extract google.rpc.RetryInfo (if present) BEFORE returning the error response.
+        // This lets the caller honor Retry-After on capacity/rate limiting errors.
+        if (errorBody?.error?.details && Array.isArray(errorBody.error.details)) {
+          const retryInfo = errorBody.error.details.find(
+            (detail: any) => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
+          );
+
+          if (retryInfo?.retryDelay) {
+            const match = retryInfo.retryDelay.match(/^([\d.]+)s$/);
+            if (match && match[1]) {
+              const retrySeconds = parseFloat(match[1]);
+              if (!isNaN(retrySeconds) && retrySeconds > 0) {
+                const retryAfterSec = Math.ceil(retrySeconds).toString();
+                const retryAfterMs = Math.ceil(retrySeconds * 1000).toString();
+                headers.set('Retry-After', retryAfterSec);
+                headers.set('retry-after-ms', retryAfterMs);
+              }
+            }
+          }
+        }
+
         return new Response(JSON.stringify(errorBody), {
           status: response.status,
           statusText: response.statusText,
           headers
         });
-      }
-
-      if (errorBody?.error?.details && Array.isArray(errorBody.error.details)) {
-        const retryInfo = errorBody.error.details.find(
-          (detail: any) => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
-        );
-
-        if (retryInfo?.retryDelay) {
-          const match = retryInfo.retryDelay.match(/^([\d.]+)s$/);
-          if (match && match[1]) {
-            const retrySeconds = parseFloat(match[1]);
-            if (!isNaN(retrySeconds) && retrySeconds > 0) {
-              const retryAfterSec = Math.ceil(retrySeconds).toString();
-              const retryAfterMs = Math.ceil(retrySeconds * 1000).toString();
-              headers.set('Retry-After', retryAfterSec);
-              headers.set('retry-after-ms', retryAfterMs);
-            }
-          }
-        }
       }
     }
 
@@ -1694,7 +1697,10 @@ export async function transformAntigravityResponse(
       if (debugText) {
         responseBody = injectDebugThinking(responseBody, debugText);
       }
-      const transformed = transformThinkingParts(responseBody);
+      let transformed = transformThinkingParts(responseBody);
+      if (isClaude) {
+        transformed = stripThinkingFromResponse(transformed);
+      }
       return new Response(JSON.stringify(transformed), init);
     }
 

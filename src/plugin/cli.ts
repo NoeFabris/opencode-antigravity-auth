@@ -30,7 +30,7 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
   }
 }
 
-export type LoginMode = "add" | "fresh" | "manage" | "check" | "cancel";
+export type LoginMode = "add" | "fresh" | "manage" | "check" | "verify" | "cancel";
 
 export interface ExistingAccountInfo {
   email?: string;
@@ -61,7 +61,7 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
     console.log("");
 
     while (true) {
-      const answer = await rl.question("(a)dd new, (f)resh start, (m)anage, (c)heck quotas? [a/f/m/c]: ");
+      const answer = await rl.question("(a)dd new, (f)resh start, (c)heck quotas, (v)erify blocked? [a/f/c/v]: ");
       const normalized = answer.trim().toLowerCase();
 
       if (normalized === "a" || normalized === "add") {
@@ -70,14 +70,14 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
       if (normalized === "f" || normalized === "fresh") {
         return { mode: "fresh" };
       }
-      if (normalized === "m" || normalized === "manage") {
-        return { mode: "manage" };
-      }
       if (normalized === "c" || normalized === "check") {
         return { mode: "check" };
       }
+      if (normalized === "v" || normalized === "verify") {
+        return { mode: "verify" };
+      }
 
-      console.log("Please enter 'a', 'f', 'm', or 'c'.");
+      console.log("Please enter 'a', 'f', 'c', or 'v'.");
     }
   } finally {
     rl.close();
@@ -111,8 +111,8 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
       case "check":
         return { mode: "check" };
 
-      case "manage":
-        return { mode: "manage" };
+      case "verify":
+        return { mode: "verify" };
 
       case "select-account": {
         const accountAction = await showAccountDetails(action.account);

@@ -26,6 +26,8 @@ export const GITIGNORE_ENTRIES = [
   ".gitignore",
   "antigravity-accounts.json",
   "antigravity-accounts.json.*.tmp",
+  "antigravity-blocked-accounts.json",
+  "antigravity-blocked-accounts.json.*.tmp",
   "antigravity-signature-cache.json",
   "antigravity-logs/",
 ];
@@ -193,9 +195,8 @@ export interface AccountMetadataV3 {
   cooldownReason?: CooldownReason;
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
-  /** Cached soft quota data */
-  cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
-  cachedQuotaUpdatedAt?: number;
+  /** History of previous fingerprints for this account */
+  fingerprintHistory?: import("./fingerprint").FingerprintVersion[];
 }
 
 export interface AccountStorageV3 {
@@ -211,7 +212,7 @@ export interface AccountStorageV3 {
 type AnyAccountStorage = AccountStorageV1 | AccountStorage | AccountStorageV3;
 
 /**
- * Gets the legacy Windows config directory (%APPDATA%\opencode).
+ * Gets the legacy Windows config directory (%APPDATA%\\opencode).
  * Used for migration from older plugin versions.
  */
 function getLegacyWindowsConfigDir(): string {
@@ -226,7 +227,7 @@ function getLegacyWindowsConfigDir(): string {
  * 1. OPENCODE_CONFIG_DIR env var (if set)
  * 2. ~/.config/opencode (all platforms, including Windows)
  *
- * On Windows, also checks for legacy %APPDATA%\opencode path for migration.
+ * On Windows, also checks for legacy %APPDATA%\\opencode path for migration.
  */
 function getConfigDir(): string {
   // 1. Check for explicit override via env var
@@ -263,7 +264,6 @@ function migrateLegacyWindowsConfig(): boolean {
   try {
     // Ensure new config directory exists
     const newConfigDir = getConfigDir();
-
     mkdirSync(newConfigDir, { recursive: true });
 
     // Try rename first (atomic, but fails across filesystems)
@@ -322,10 +322,21 @@ export function getStoragePath(): string {
   return getStoragePathWithMigration();
 }
 
-/**
- * Gets the config directory path. Exported for use by other modules.
- */
-export { getConfigDir };
+export function getBlockedAccountsPath(): string {
+  return join(getConfigDir(), "antigravity-blocked-accounts.json");
+}
+
+export interface BlockedAccountMetadataV1 extends AccountMetadataV3 {
+  blockedAt: number;
+  blockedReason?: string;
+  /** Most recent Google verification URL (best-effort) */
+  verifyUrl?: string;
+}
+
+export interface BlockedAccountStorageV1 {
+  version: 1;
+  accounts: BlockedAccountMetadataV1[];
+}
 
 const LOCK_OPTIONS = {
   stale: 10000,
@@ -362,8 +373,38 @@ async function ensureFileExists(path: string): Promise<void> {
   }
 }
 
+async function ensureBlockedAccountsFileExists(path: string): Promise<void> {
+  try {
+    await fs.access(path);
+  } catch {
+    await fs.mkdir(dirname(path), { recursive: true });
+    await fs.writeFile(
+      path,
+      JSON.stringify({ version: 1, accounts: [] }, null, 2),
+      { encoding: "utf-8", mode: 0o600 },
+    );
+  }
+}
+
 async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await ensureFileExists(path);
+  let release: (() => Promise<void>) | null = null;
+  try {
+    release = await lockfile.lock(path, LOCK_OPTIONS);
+    return await fn();
+  } finally {
+    if (release) {
+      try {
+        await release();
+      } catch (unlockError) {
+        log.warn("Failed to release lock", { error: String(unlockError) });
+      }
+    }
+  }
+}
+
+async function withBlockedFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  await ensureBlockedAccountsFileExists(path);
   let release: (() => Promise<void>) | null = null;
   try {
     release = await lockfile.lock(path, LOCK_OPTIONS);
@@ -643,15 +684,95 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   }
 }
 
-export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
+export interface SaveAccountsOptions {
+  /**
+   * When true (default), merges with on-disk storage under a file lock.
+   * When false, overwrites on-disk storage with `storage`.
+   */
+  merge?: boolean;
+  /**
+   * Refresh tokens that are newly created in-memory and should be persisted even
+   * if they are not present on disk yet.
+   */
+  addedRefreshTokens?: string[];
+  /** Refresh tokens that should be removed from disk. */
+  removedRefreshTokens?: string[];
+  /**
+   * When true (default), prevents stale writers from re-introducing refresh
+   * tokens that were deleted from disk by another process.
+   */
+  preserveDeletions?: boolean;
+}
+
+export async function saveAccounts(
+  storage: AccountStorageV3,
+  options: SaveAccountsOptions = {},
+): Promise<void> {
   const path = getStoragePath();
   const configDir = dirname(path);
   await fs.mkdir(configDir, { recursive: true });
   await ensureGitignore(configDir);
 
   await withFileLock(path, async () => {
-    const existing = await loadAccountsUnsafe();
-    const merged = existing ? mergeAccountStorage(existing, storage) : storage;
+    const shouldMerge = options.merge !== false;
+    const preserveDeletions = options.preserveDeletions !== false;
+    const existing = shouldMerge ? await loadAccountsUnsafe() : null;
+
+    let merged = existing ? mergeAccountStorage(existing, storage) : storage;
+
+    const removedSet = new Set(options.removedRefreshTokens ?? []);
+    if (removedSet.size > 0) {
+      merged = {
+        ...merged,
+        accounts: merged.accounts.filter((a) => !removedSet.has(a.refreshToken)),
+      };
+    }
+
+    // Prevent stale processes from resurrecting deleted accounts:
+    // if an account refresh token is present only in the incoming `storage`
+    // (not on disk), we drop it unless it is explicitly marked as "added".
+    if (existing && preserveDeletions) {
+      const diskTokens = new Set(existing.accounts.map((a) => a.refreshToken).filter(Boolean));
+      const addedTokens = new Set(options.addedRefreshTokens ?? []);
+      const incomingTokens = new Set(storage.accounts.map((a) => a.refreshToken).filter(Boolean));
+
+      const staleIncoming = new Set<string>();
+      for (const token of incomingTokens) {
+        if (!diskTokens.has(token) && !addedTokens.has(token)) {
+          staleIncoming.add(token);
+        }
+      }
+
+      if (staleIncoming.size > 0) {
+        merged = {
+          ...merged,
+          accounts: merged.accounts.filter((a) => !staleIncoming.has(a.refreshToken)),
+        };
+      }
+    }
+
+    // Clamp indices after any removals/pruning so we don't write invalid indices.
+    const len = merged.accounts.length;
+    const clampIndex = (idx: unknown): number => {
+      if (len <= 0) return 0;
+      const n = typeof idx === "number" && Number.isFinite(idx) ? idx : 0;
+      return Math.min(Math.max(0, Math.trunc(n)), len - 1);
+    };
+    const clampFamilyIndex = (idx: unknown): number => {
+      if (len <= 0) return -1;
+      const n = typeof idx === "number" && Number.isFinite(idx) ? Math.trunc(idx) : 0;
+      if (n < 0) return -1;
+      return Math.min(n, len - 1);
+    };
+    merged.activeIndex = clampIndex(merged.activeIndex);
+    if (merged.activeIndexByFamily && typeof merged.activeIndexByFamily === "object") {
+      const family = merged.activeIndexByFamily;
+      merged.activeIndexByFamily = {
+        ...family,
+        ...(family.claude !== undefined ? { claude: clampFamilyIndex(family.claude) } : {}),
+        ...(family.gemini !== undefined ? { gemini: clampFamilyIndex(family.gemini) } : {}),
+      };
+    }
 
     const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
     const content = JSON.stringify(merged, null, 2);
@@ -707,13 +828,16 @@ async function loadAccountsUnsafe(): Promise<AccountStorageV3 | null> {
     await ensureSecurePermissions(path);
 
     const content = await fs.readFile(path, "utf-8");
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(content) as any;
 
     if (parsed.version === 1) {
       return migrateV2ToV3(migrateV1ToV2(parsed));
     }
     if (parsed.version === 2) {
       return migrateV2ToV3(parsed);
+    }
+    if (parsed.version !== 3 || !Array.isArray(parsed.accounts)) {
+      return null;
     }
 
     return {
@@ -737,6 +861,87 @@ export async function clearAccounts(): Promise<void> {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
       log.error("Failed to clear account storage", { error: String(error) });
+    }
+  }
+}
+
+export async function loadBlockedAccounts(): Promise<BlockedAccountStorageV1> {
+  const path = getBlockedAccountsPath();
+  const empty: BlockedAccountStorageV1 = { version: 1, accounts: [] };
+
+  try {
+    return await withBlockedFileLock(path, async () => {
+      // Best effort to normalize permissions for pre-existing files.
+      await ensureSecurePermissions(path);
+
+      const content = await fs.readFile(path, "utf-8");
+      const parsed = JSON.parse(content) as Partial<BlockedAccountStorageV1> | null;
+
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        parsed.version !== 1 ||
+        !Array.isArray(parsed.accounts)
+      ) {
+        return empty;
+      }
+
+      const map = new Map<string, BlockedAccountMetadataV1>();
+      for (const acc of parsed.accounts) {
+        if (!acc || typeof acc !== "object") continue;
+        const refreshToken = (acc as any).refreshToken;
+        if (typeof refreshToken !== "string" || !refreshToken) continue;
+        const blockedAt = typeof (acc as any).blockedAt === "number" ? (acc as any).blockedAt : 0;
+        map.set(refreshToken, { ...(acc as any), blockedAt });
+      }
+
+      return {
+        version: 1,
+        accounts: Array.from(map.values()),
+      };
+    });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return empty;
+    }
+    log.error("Failed to load blocked account storage", { error: String(error) });
+    return empty;
+  }
+}
+
+export async function saveBlockedAccounts(storage: BlockedAccountStorageV1): Promise<void> {
+  const path = getBlockedAccountsPath();
+  const configDir = dirname(path);
+  await fs.mkdir(configDir, { recursive: true });
+  await ensureGitignore(configDir);
+
+  await withBlockedFileLock(path, async () => {
+    const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+    const content = JSON.stringify(storage, null, 2);
+
+    try {
+      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+      await fs.rename(tempPath, path);
+    } catch (error) {
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // ignore cleanup errors
+      }
+      throw error;
+    }
+  });
+}
+
+export async function clearBlockedAccounts(): Promise<void> {
+  try {
+    const path = getBlockedAccountsPath();
+    await fs.unlink(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      log.error("Failed to clear blocked account storage", { error: String(error) });
     }
   }
 }

@@ -3,10 +3,14 @@ import {
   deduplicateAccountsByEmail,
   migrateV2ToV3,
   loadAccounts,
+  loadBlockedAccounts,
+  saveAccounts,
   type AccountMetadata,
   type AccountStorage,
+  type AccountStorageV3,
 } from "./storage";
 import { promises as fs } from "node:fs";
+import lockfile from "proper-lockfile";
 import {
   existsSync,
   readFileSync,
@@ -219,6 +223,7 @@ vi.mock("node:fs", async () => {
       writeFile: vi.fn(),
       mkdir: vi.fn().mockResolvedValue(undefined),
       access: vi.fn().mockResolvedValue(undefined),
+      chmod: vi.fn().mockResolvedValue(undefined),
       unlink: vi.fn(),
       rename: vi.fn().mockResolvedValue(undefined),
       appendFile: vi.fn(),
@@ -431,6 +436,227 @@ describe("Storage Migration", () => {
     });
   });
 
+  describe("enabled persistence", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("persists explicit enabled=false when saving accounts", async () => {
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        const error = new Error("ENOENT") as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        return Promise.reject(error);
+      });
+
+      const incoming: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r-disabled",
+            addedAt: now,
+            lastUsed: now,
+            enabled: false,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      await saveAccounts(incoming);
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts temp write call not found");
+      const saved = JSON.parse(saveCall[1] as string) as AccountStorageV3;
+
+      expect(saved.accounts[0]?.enabled).toBe(false);
+    });
+
+    it("preserves existing enabled=false during merge when incoming omits enabled", async () => {
+      const existingOnDisk: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r1",
+            addedAt: now,
+            lastUsed: now - 5000,
+            enabled: false,
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        return Promise.resolve(JSON.stringify(existingOnDisk));
+      });
+
+      const incomingWithoutEnabled: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r1",
+            addedAt: now,
+            lastUsed: now,
+            // intentionally omitted `enabled`
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      await saveAccounts(incomingWithoutEnabled, { merge: true });
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts temp write call not found");
+      const saved = JSON.parse(saveCall[1] as string) as AccountStorageV3;
+
+      expect(saved.accounts[0]?.enabled).toBe(false);
+    });
+  });
+
+  describe("activeIndexByFamily clamping", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("clamps defined family indices without creating missing keys", async () => {
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        const error = new Error("ENOENT") as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        return Promise.reject(error);
+      });
+
+      const incoming: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r-family",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+        activeIndex: 99,
+        activeIndexByFamily: {
+          claude: 99,
+        },
+      };
+
+      await saveAccounts(incoming);
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts temp write call not found");
+      const saved = JSON.parse(saveCall[1] as string) as AccountStorageV3;
+
+      expect(saved.activeIndexByFamily?.claude).toBe(0);
+      expect(saved.activeIndexByFamily).not.toHaveProperty("gemini");
+    });
+
+    it("preserves -1 sentinel values for family indices", async () => {
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        const error = new Error("ENOENT") as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        return Promise.reject(error);
+      });
+
+      const incoming: AccountStorageV3 = {
+        version: 3,
+        accounts: [
+          {
+            refreshToken: "r-family",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+        activeIndex: 0,
+        activeIndexByFamily: {
+          claude: -1,
+          gemini: 99,
+        },
+      };
+
+      await saveAccounts(incoming);
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts temp write call not found");
+      const saved = JSON.parse(saveCall[1] as string) as AccountStorageV3;
+
+      expect(saved.activeIndexByFamily?.claude).toBe(-1);
+      expect(saved.activeIndexByFamily?.gemini).toBe(0);
+    });
+  });
+
+  describe("blocked account storage loading", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("loads blocked accounts under lock and normalizes malformed entries", async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          version: 1,
+          accounts: [
+            { refreshToken: "r1", blockedAt: 123 },
+            { refreshToken: "r1", blockedAt: "bad" },
+            { refreshToken: "", blockedAt: 456 },
+            null,
+          ],
+        })
+      );
+
+      const result = await loadBlockedAccounts();
+
+      expect(lockfile.lock).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(fs.chmod)).toHaveBeenCalledTimes(1);
+      expect(result.version).toBe(1);
+      expect(result.accounts).toHaveLength(1);
+      expect(result.accounts[0]?.refreshToken).toBe("r1");
+      expect(result.accounts[0]?.blockedAt).toBe(0);
+    });
+
+    it("creates blocked storage file when missing before locked read", async () => {
+      vi.mocked(fs.access).mockRejectedValueOnce(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+      );
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ version: 1, accounts: [] }));
+
+      await loadBlockedAccounts();
+
+      const createCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes("antigravity-blocked-accounts.json") &&
+          !call[0].includes(".tmp")
+      );
+      expect(createCall).toBeDefined();
+      expect(lockfile.lock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("ensureGitignore", () => {
     const configDir = "/tmp/opencode-test";
 
@@ -470,6 +696,8 @@ describe("Storage Migration", () => {
         ".gitignore",
         "antigravity-accounts.json",
         "antigravity-accounts.json.*.tmp",
+        "antigravity-blocked-accounts.json",
+        "antigravity-blocked-accounts.json.*.tmp",
         "antigravity-signature-cache.json",
         "antigravity-logs/",
       ].join("\n");
@@ -534,6 +762,8 @@ describe("Storage Migration", () => {
         ".gitignore",
         "antigravity-accounts.json",
         "antigravity-accounts.json.*.tmp",
+        "antigravity-blocked-accounts.json",
+        "antigravity-blocked-accounts.json.*.tmp",
         "antigravity-signature-cache.json",
         "antigravity-logs/",
       ].join("\n");

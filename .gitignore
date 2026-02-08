@@ -5,6 +5,15 @@ node_modules
 out
 dist
 *.tgz
+index.js
+index.js.map
+index.d.ts
+index.d.ts.map
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+src/**/*.d.ts.map
+!src/shims.d.ts
 
 # code coverage
 coverage
@@ -39,6 +48,9 @@ antigravity-debug-*.log
 
 # Test artifacts
 test-file.ts
+
+# Local scratch files
+.tmp-origin-accounts.ts
 
 # Local subrepos (not part of this project)
 CLIProxyAPI/
