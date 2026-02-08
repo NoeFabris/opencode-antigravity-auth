@@ -172,7 +172,6 @@ function sanitizeGoogleSigninParams(url: URL, accountEmail?: string): URL {
   if (accountEmail && accountEmail.trim()) {
     const trimmedEmail = accountEmail.trim();
     if (!out.searchParams.get("Email")) out.searchParams.set("Email", trimmedEmail);
-    if (!out.searchParams.get("authuser")) out.searchParams.set("authuser", trimmedEmail);
   }
 
   return out;
@@ -3869,12 +3868,12 @@ function getHeaderStyleFromUrl(
   }
   const modelWithSuffix = extractModelFromUrlWithSuffix(urlString);
   if (!modelWithSuffix) {
-    return "gemini-cli";
+    return cliFirst ? "gemini-cli" : "antigravity";
   }
   const { quotaPreference } = resolveModelWithTier(modelWithSuffix, {
     cli_first: cliFirst,
   });
-  return quotaPreference ?? "gemini-cli";
+  return quotaPreference ?? (cliFirst ? "gemini-cli" : "antigravity");
 }
 
 function isExplicitQuotaFromUrl(urlString: string): boolean {
