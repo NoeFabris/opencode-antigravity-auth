@@ -265,6 +265,11 @@ type VerificationScanResult = {
   verifyUrl?: string;
 };
 
+type VerificationPrecheckResult =
+  | { status: "non_diagnostic" }
+  | { status: "blocked"; message: string; verifyUrl?: string }
+  | { status: "license"; message: string };
+
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -404,6 +409,54 @@ function extractValidationUrlAndMessage(
   return { isValidationRequired, validationUrl, message: upstreamMessage };
 }
 
+async function precheckVerificationViaFetchAvailableModels(params: {
+  endpoint: string;
+  accessToken: string;
+  projectId: string;
+  userAgent: string;
+  accountEmail?: string;
+}): Promise<VerificationPrecheckResult> {
+  try {
+    const resp = await fetchWithTimeout(
+      `${params.endpoint}/v1internal:fetchAvailableModels`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.accessToken}`,
+          "Content-Type": "application/json",
+          "User-Agent": params.userAgent,
+        },
+        body: JSON.stringify({ project: params.projectId }),
+      },
+      7_000,
+    );
+
+    if (resp.ok) {
+      // Non-diagnostic. This endpoint can still succeed for blocked accounts.
+      return { status: "non_diagnostic" };
+    }
+
+    const text = await resp.text().catch(() => "");
+    if (isGeminiCodeAssistLicenseError(text)) {
+      return { status: "license", message: summarizeUpstreamLicenseMessage(text) };
+    }
+
+    const extracted = extractValidationUrlAndMessage(text, params.accountEmail);
+    if (resp.status === 403 && extracted.isValidationRequired) {
+      return {
+        status: "blocked",
+        message: summarizeUpstreamValidationMessage(extracted.message ?? text),
+        verifyUrl: extracted.validationUrl,
+      };
+    }
+
+    return { status: "non_diagnostic" };
+  } catch {
+    // Best-effort precheck only. Fall back to the generate probe.
+    return { status: "non_diagnostic" };
+  }
+}
+
 async function scanAccountForVerification(
   account: any,
   client: PluginClient,
@@ -456,12 +509,44 @@ async function scanAccountForVerification(
 
     const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
     const quotaUserAgent = ANTIGRAVITY_HEADERS["User-Agent"] || "antigravity/windows/amd64";
-    // Use a real generateContent call to reliably trigger account verification blocks
-    // (VALIDATION_REQUIRED) and license errors (#3501). fetchAvailableModels can succeed
-    // even when generate requests are blocked.
-    //
-    // Use the streaming endpoint to match runtime behavior and ensure we receive the full
-    // validation URL (often includes a long `plt=` token).
+    // First do a lightweight fetchAvailableModels precheck. If it already returns
+    // VALIDATION_REQUIRED or #3501 license errors, we can short-circuit. Otherwise,
+    // fall back to a real generate probe because fetchAvailableModels can still succeed
+    // when generate requests are blocked.
+    const precheck = await precheckVerificationViaFetchAvailableModels({
+      endpoint,
+      accessToken: authRecord.access ?? "",
+      projectId: effectiveProjectId,
+      userAgent: quotaUserAgent,
+      accountEmail: email,
+    });
+    if (precheck.status === "blocked") {
+      return {
+        index,
+        origin,
+        refreshToken,
+        email,
+        enabled,
+        status: "blocked",
+        message: precheck.message,
+        verifyUrl: precheck.verifyUrl,
+      };
+    }
+    if (precheck.status === "license") {
+      return {
+        index,
+        origin,
+        refreshToken,
+        email,
+        enabled,
+        status: "license",
+        message: precheck.message,
+      };
+    }
+
+    // Use a real generateContent call to reliably trigger account verification blocks.
+    // Use the streaming endpoint to match runtime behavior and capture full validation
+    // URLs (often includes a long `plt=` token).
     const url = `${endpoint}/v1internal:streamGenerateContent?alt=sse`;
     const body = {
       project: effectiveProjectId,
