@@ -1555,8 +1555,30 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 const response = await fetch(prepared.request, prepared.init);
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
-
-
+                // [PATCH] Auto-disable accounts requiring verification
+                if (response.status === 403) {
+                  const cloned = response.clone();
+                  const bodyText = await cloned.text();
+                  if (bodyText.toLowerCase().includes("verify your account")) {
+                    const email = account.email || `Account ${account.index + 1}`;
+                    log.warn(`Account disabled due to verification requirement: ${email}`);
+                    
+                    await showToast(
+                      `⚠️ Account disabled: Verification required for ${email}`,
+                      "error"
+                    );
+                    
+                    // Disable account and save
+                    account.enabled = false;
+                    accountManager.requestSaveToDisk();
+                    
+                    // Force switch to next account
+                    shouldSwitchAccount = true;
+                    // Reset capacity retry count as we are switching accounts
+                    capacityRetryCount = 0; 
+                    continue;
+                  }
+                }
 
                 // Handle 429 rate limit (or Service Overloaded) with improved logic
                 if (response.status === 429 || response.status === 503 || response.status === 529) {
