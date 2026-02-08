@@ -123,9 +123,9 @@ export async function select<T>(
       linesWritten += 1;
     };
 
-    // Subtitle renders as 4 lines:
-    // 1) blank "│" spacer, 2) subtitle line, 3) blank line, plus header counted separately.
-    const subtitleLines = subtitle ? 4 : 0;
+    // Subtitle renders as 3 lines:
+    // 1) blank "│" spacer, 2) subtitle line, 3) blank line. Header is counted separately.
+    const subtitleLines = subtitle ? 3 : 0;
     const fixedLines = 1 + subtitleLines + 2; // header + subtitle + (help + bottom)
     // Keep a small safety margin so the final newline doesn't scroll the terminal.
     const maxVisibleItems = Math.max(1, Math.min(items.length, rows - fixedLines - 1));
