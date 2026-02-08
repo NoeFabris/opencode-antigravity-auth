@@ -117,7 +117,7 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
       case "select-account": {
         const accountAction = await showAccountDetails(action.account);
         if (accountAction === "delete") {
-          return { mode: "manage", deleteAccountIndex: action.account.index };
+          return { mode: "add", deleteAccountIndex: action.account.index };
         }
         if (accountAction === "refresh") {
           return { mode: "add", refreshAccountIndex: action.account.index };
