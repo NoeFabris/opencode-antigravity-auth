@@ -381,7 +381,7 @@ async function ensureBlockedAccountsFileExists(path: string): Promise<void> {
     await fs.writeFile(
       path,
       JSON.stringify({ version: 1, accounts: [] }, null, 2),
-      "utf-8",
+      { encoding: "utf-8", mode: 0o600 },
     );
   }
 }
@@ -902,7 +902,7 @@ export async function saveBlockedAccounts(storage: BlockedAccountStorageV1): Pro
     const content = JSON.stringify(storage, null, 2);
 
     try {
-      await fs.writeFile(tempPath, content, "utf-8");
+      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
       await fs.rename(tempPath, path);
     } catch (error) {
       try {
