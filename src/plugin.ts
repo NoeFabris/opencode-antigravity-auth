@@ -2744,7 +2744,7 @@ function getHeaderStyleFromUrl(urlString: string, family: ModelFamily): HeaderSt
     return "antigravity";
   }
   const { quotaPreference } = resolveModelWithTier(modelWithSuffix);
-  return quotaPreference === "gemini-cli" ? "antigravity" : (quotaPreference ?? "antigravity");
+  return quotaPreference ?? "antigravity";
 }
 
 function isExplicitQuotaFromUrl(urlString: string): boolean {

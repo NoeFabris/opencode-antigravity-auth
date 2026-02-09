@@ -171,7 +171,7 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   
   // All models default to Antigravity quota unless cli_first is enabled
   // Fallback to gemini-cli happens at the account rotation level when Antigravity is exhausted
-  const preferGeminiCli = options.cli_first === true && !isAntigravity && !isImageModel && !isClaudeModel;
+  const preferGeminiCli = (options.cli_first === true || modelWithoutQuota === "gemini-3-pro-preview") && !isAntigravity && !isImageModel && !isClaudeModel;
   const quotaPreference = preferGeminiCli ? "gemini-cli" as const : "antigravity" as const;
   const explicitQuota = isAntigravity || isImageModel;
 
