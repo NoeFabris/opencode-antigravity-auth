@@ -72,12 +72,14 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
    opencode auth login
    ```
 
-3. **Add models** — copy the [full configuration](#models) below
+3. **Add models** — choose one:
+   - Run `opencode auth login` → select **"Configure models in opencode.json"** (auto-configures all models)
+   - Or manually copy the [full configuration](#models) below
 
 4. **Use it:**
 
    ```bash
-   opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
+   opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
    ```
 
 </details>
@@ -100,7 +102,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 ### Verification
 
 ```bash
-opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
 ```
 
 </details>
@@ -111,23 +113,36 @@ opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
 
 ### Model Reference
 
-All models use Antigravity quota by default with automatic fallback to Gemini CLI when exhausted.
+**Antigravity quota** (default routing for Claude and Gemini):
 
 | Model | Variants | Notes |
 |-------|----------|-------|
-| `gemini-3-pro` | low, high | Gemini 3 Pro with thinking |
-| `gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
-| `gemini-2.5-pro` | — | Gemini 2.5 Pro |
-| `gemini-2.5-flash` | — | Gemini 2.5 Flash |
-| `claude-sonnet-4-5` | — | Claude Sonnet 4.5 |
-| `claude-sonnet-4-5-thinking` | low, max | Claude Sonnet with extended thinking |
-| `claude-opus-4-5-thinking` | low, max | Claude Opus with extended thinking |
+| `antigravity-gemini-3-pro` | low, high | Gemini 3 Pro with thinking |
+| `antigravity-gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
+| `antigravity-claude-sonnet-4-5` | — | Claude Sonnet 4.5 |
+| `antigravity-claude-sonnet-4-5-thinking` | low, max | Claude Sonnet with extended thinking |
+| `antigravity-claude-opus-4-5-thinking` | low, max | Claude Opus 4.5 with extended thinking |
+| `antigravity-claude-opus-4-6-thinking` | low, max | Claude Opus 4.6 with extended thinking |
 
-> **Quota Behavior:** The plugin tries Antigravity quota first across ALL accounts. Only when Antigravity is exhausted on all accounts does it fall back to Gemini CLI quota. Model names are automatically transformed for the target API (e.g., `gemini-3-flash` → `gemini-3-flash-preview` for CLI).
+**Gemini CLI quota** (separate from Antigravity; used when `cli_first` is true or as fallback):
+
+| Model | Notes |
+|-------|-------|
+| `gemini-2.5-flash` | Gemini 2.5 Flash |
+| `gemini-2.5-pro` | Gemini 2.5 Pro |
+| `gemini-3-flash-preview` | Gemini 3 Flash (preview) |
+| `gemini-3-pro-preview` | Gemini 3 Pro (preview) |
+
+> **Routing Behavior:**
+> - **Antigravity-first (default):** Gemini models use Antigravity quota across accounts.
+> - **CLI-first (`cli_first: true`):** Gemini models use Gemini CLI quota first.
+> - When a Gemini quota pool is exhausted, the plugin automatically falls back to the other pool.
+> - Claude and image models always use Antigravity.
+> Model names are automatically transformed for the target API (e.g., `antigravity-gemini-3-flash` → `gemini-3-flash-preview` for CLI).
 
 **Using variants:**
 ```bash
-opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
 ```
 
 For details on variant configuration and thinking levels, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
@@ -144,8 +159,8 @@ Add this to your `~/.config/opencode/opencode.json`:
   "provider": {
     "google": {
       "models": {
-        "gemini-3-pro": {
-          "name": "Gemini 3 Pro",
+        "antigravity-gemini-3-pro": {
+          "name": "Gemini 3 Pro (Antigravity)",
           "limit": { "context": 1048576, "output": 65535 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
@@ -153,8 +168,8 @@ Add this to your `~/.config/opencode/opencode.json`:
             "high": { "thinkingLevel": "high" }
           }
         },
-        "gemini-3-flash": {
-          "name": "Gemini 3 Flash",
+        "antigravity-gemini-3-flash": {
+          "name": "Gemini 3 Flash (Antigravity)",
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
@@ -164,38 +179,57 @@ Add this to your `~/.config/opencode/opencode.json`:
             "high": { "thinkingLevel": "high" }
           }
         },
-        "gemini-2.5-pro": {
-          "name": "Gemini 2.5 Pro",
-          "limit": { "context": 1048576, "output": 65536 },
+        "antigravity-claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5 (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-claude-sonnet-4-5-thinking": {
+          "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "antigravity-claude-opus-4-5-thinking": {
+          "name": "Claude Opus 4.5 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "antigravity-claude-opus-4-6-thinking": {
+          "name": "Claude Opus 4.6 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
         },
         "gemini-2.5-flash": {
-          "name": "Gemini 2.5 Flash",
+          "name": "Gemini 2.5 Flash (Gemini CLI)",
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
-        "claude-sonnet-4-5": {
-          "name": "Claude Sonnet 4.5",
-          "limit": { "context": 200000, "output": 64000 },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
-        "claude-sonnet-4-5-thinking": {
-          "name": "Claude Sonnet 4.5 Thinking",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
-          }
+        "gemini-3-flash-preview": {
+          "name": "Gemini 3 Flash Preview (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
-        "claude-opus-4-5-thinking": {
-          "name": "Claude Opus 4.5 Thinking",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
-          }
+        "gemini-3-pro-preview": {
+          "name": "Gemini 3 Pro Preview (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         }
       }
     }
@@ -218,6 +252,7 @@ opencode auth login  # Run again to add more accounts
 ```
 
 **Account management options (via `opencode auth login`):**
+- **Configure models** — Auto-configure all plugin models in opencode.json
 - **Check quotas** — View remaining API quota for each account
 - **Manage accounts** — Enable/disable specific accounts for rotation
 
@@ -428,8 +463,8 @@ If you encounter errors during a session:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/gemini-3-pro" },
-    "document-writer": { "model": "google/gemini-3-flash" }
+    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
+    "document-writer": { "model": "google/antigravity-gemini-3-flash" }
   }
 }
 ```
@@ -566,9 +601,9 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/gemini-3-pro" },
-    "document-writer": { "model": "google/gemini-3-flash" },
-    "multimodal-looker": { "model": "google/gemini-3-flash" }
+    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
+    "document-writer": { "model": "google/antigravity-gemini-3-flash" },
+    "multimodal-looker": { "model": "google/antigravity-gemini-3-flash" }
   }
 }
 ```
@@ -599,7 +634,7 @@ Most users don't need to configure anything — defaults work well.
 |--------|---------|--------------
 | `keep_thinking` | `false` | Preserve Claude's thinking across turns. **Warning:** enabling may degrade model stability. |
 | `session_recovery` | `true` | Auto-recover from tool errors |
-| `web_search.default_mode` | `"off"` | Gemini Google Search: `"auto"` or `"off"` |
+| `cli_first` | `false` | Route Gemini models to Gemini CLI first (Claude and image models stay on Antigravity). |
 
 ### Account Rotation
 

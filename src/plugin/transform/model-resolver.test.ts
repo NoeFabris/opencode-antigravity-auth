@@ -53,6 +53,36 @@ describe("resolveModelWithTier", () => {
     });
   });
 
+  describe("cli_first quota preference", () => {
+    it("prefers gemini-cli when cli_first is true and no prefix is set", () => {
+      const result = resolveModelWithTier("gemini-3-flash", { cli_first: true });
+      expect(result.quotaPreference).toBe("gemini-cli");
+      expect(result.explicitQuota).toBe(false);
+    });
+
+    it("keeps antigravity when antigravity prefix is explicit", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3-flash", { cli_first: true });
+      expect(result.quotaPreference).toBe("antigravity");
+      expect(result.explicitQuota).toBe(true);
+    });
+
+    it("keeps antigravity for Claude models when cli_first is true", () => {
+      const result = resolveModelWithTier("claude-sonnet-4-5-thinking", { cli_first: true });
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("keeps antigravity for image models when cli_first is true", () => {
+      const result = resolveModelWithTier("gemini-3-pro-image", { cli_first: true });
+      expect(result.quotaPreference).toBe("antigravity");
+      expect(result.explicitQuota).toBe(true);
+    });
+
+    it("defaults to antigravity when cli_first is false", () => {
+      const result = resolveModelWithTier("gemini-3-flash", { cli_first: false });
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+  });
+
   describe("Antigravity Gemini 3 with tier suffix", () => {
     it("antigravity-gemini-3-pro-low gets thinkingLevel from tier", () => {
       const result = resolveModelWithTier("antigravity-gemini-3-pro-low");

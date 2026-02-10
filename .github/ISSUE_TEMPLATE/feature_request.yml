@@ -9,6 +9,10 @@ body:
 
         **Please write a descriptive title above** (e.g., "Add support for custom retry strategies")
 
+        > 🌐 **ENGLISH ONLY**
+        > 
+        > Issues must be written in English. Issues in other languages will be closed immediately.
+
         Check if this feature has already been requested:
         - [Existing feature requests](https://github.com/NoeFabris/opencode-antigravity-auth/issues?q=is%3Aissue+label%3Aenhancement)
         - [Discussions](https://github.com/NoeFabris/opencode-antigravity-auth/discussions)

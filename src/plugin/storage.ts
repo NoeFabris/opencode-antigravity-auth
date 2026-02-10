@@ -177,7 +177,7 @@ export interface AccountStorage {
   activeIndex: number;
 }
 
-export type CooldownReason = "auth-failure" | "network-error" | "project-error";
+export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required";
 
 export interface AccountMetadataV3 {
   email?: string;
@@ -194,6 +194,11 @@ export interface AccountMetadataV3 {
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
   proxyUrl?: string;  // URL like "http://user:pass@host:port" (SOCKS5 not supported)
+  /** Set when Google asks the user to verify this account before requests can continue. */
+  verificationRequired?: boolean;
+  verificationRequiredAt?: number;
+  verificationRequiredReason?: string;
+  verificationUrl?: string;
   /** Cached soft quota data */
   cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
   cachedQuotaUpdatedAt?: number;
@@ -338,6 +343,18 @@ const LOCK_OPTIONS = {
   },
 };
 
+/**
+ * Ensures the file has secure permissions (0600) on POSIX systems.
+ * This is a best-effort operation and ignores errors on Windows/unsupported FS.
+ */
+async function ensureSecurePermissions(path: string): Promise<void> {
+  try {
+    await fs.chmod(path, 0o600);
+  } catch {
+    // Ignore errors (e.g. Windows, file doesn't exist, FS doesn't support chmod)
+  }
+}
+
 async function ensureFileExists(path: string): Promise<void> {
   try {
     await fs.access(path);
@@ -346,7 +363,7 @@ async function ensureFileExists(path: string): Promise<void> {
     await fs.writeFile(
       path,
       JSON.stringify({ version: 3, accounts: [], activeIndex: 0 }, null, 2),
-      "utf-8",
+      { encoding: "utf-8", mode: 0o600 },
     );
   }
 }
@@ -545,6 +562,9 @@ export function migrateV2ToV3(v2: AccountStorage): AccountStorageV3 {
 export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   try {
     const path = getStoragePath();
+    // Ensure permissions are correct on load (fixes existing files)
+    await ensureSecurePermissions(path);
+
     const content = await fs.readFile(path, "utf-8");
     const data = JSON.parse(content) as AnyAccountStorage;
 
@@ -643,7 +663,7 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
     const content = JSON.stringify(merged, null, 2);
 
     try {
-      await fs.writeFile(tempPath, content, "utf-8");
+      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
       await fs.rename(tempPath, path);
     } catch (error) {
       // Clean up temp file on failure to prevent accumulation
@@ -657,9 +677,41 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
   });
 }
 
+/**
+ * Save accounts storage by replacing the entire file (no merge).
+ * Use this for destructive operations like delete where we need to
+ * remove accounts that would otherwise be merged back from existing storage.
+ */
+export async function saveAccountsReplace(storage: AccountStorageV3): Promise<void> {
+  const path = getStoragePath();
+  const configDir = dirname(path);
+  await fs.mkdir(configDir, { recursive: true });
+  await ensureGitignore(configDir);
+
+  await withFileLock(path, async () => {
+    const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+    const content = JSON.stringify(storage, null, 2);
+
+    try {
+      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+      await fs.rename(tempPath, path);
+    } catch (error) {
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
+  });
+}
+
 async function loadAccountsUnsafe(): Promise<AccountStorageV3 | null> {
   try {
     const path = getStoragePath();
+    // Ensure permissions are correct on load (fixes existing files)
+    await ensureSecurePermissions(path);
+
     const content = await fs.readFile(path, "utf-8");
     const parsed = JSON.parse(content);
 

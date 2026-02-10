@@ -2,7 +2,7 @@ import { ANSI } from './ansi';
 import { select, type MenuItem } from './select';
 import { confirm } from './confirm';
 
-export type AccountStatus = 'active' | 'rate-limited' | 'expired' | 'unknown';
+export type AccountStatus = 'active' | 'rate-limited' | 'expired' | 'verification-required' | 'unknown';
 
 export interface AccountInfo {
   email?: string;
@@ -19,10 +19,12 @@ export type AuthMenuAction =
   | { type: 'select-account'; account: AccountInfo }
   | { type: 'delete-all' }
   | { type: 'check' }
-  | { type: 'manage' }
+  | { type: 'verify' }
+  | { type: 'verify-all' }
+  | { type: 'configure-models' }
   | { type: 'cancel' };
 
-export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'cancel';
+export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'verify' | 'cancel';
 
 function formatRelativeTime(timestamp: number | undefined): string {
   if (!timestamp) return 'never';
@@ -44,22 +46,32 @@ function getStatusBadge(status: AccountStatus | undefined): string {
     case 'active': return `${ANSI.green}[active]${ANSI.reset}`;
     case 'rate-limited': return `${ANSI.yellow}[rate-limited]${ANSI.reset}`;
     case 'expired': return `${ANSI.red}[expired]${ANSI.reset}`;
+    case 'verification-required': return `${ANSI.red}[needs verification]${ANSI.reset}`;
     default: return '';
   }
 }
 
 export async function showAuthMenu(accounts: AccountInfo[]): Promise<AuthMenuAction> {
   const items: MenuItem<AuthMenuAction>[] = [
-    { label: 'Add new account', value: { type: 'add' } },
-    { label: 'Check quotas', value: { type: 'check' } },
-    { label: 'Manage accounts (enable/disable)', value: { type: 'manage' } },
+    { label: 'Actions', value: { type: 'cancel' }, kind: 'heading' },
+    { label: 'Add account', value: { type: 'add' }, color: 'cyan' },
+    { label: 'Check quotas', value: { type: 'check' }, color: 'cyan' },
+    { label: 'Verify one account', value: { type: 'verify' }, color: 'cyan' },
+    { label: 'Verify all accounts', value: { type: 'verify-all' }, color: 'cyan' },
+    { label: 'Configure models in opencode.json', value: { type: 'configure-models' }, color: 'cyan' },
+
+    { label: '', value: { type: 'cancel' }, separator: true },
+
+    { label: 'Accounts', value: { type: 'cancel' }, kind: 'heading' },
 
     ...accounts.map(account => {
-      const badge = getStatusBadge(account.status);
+      const statusBadge = getStatusBadge(account.status);
+      const currentBadge = account.isCurrentAccount ? ` ${ANSI.cyan}[current]${ANSI.reset}` : '';
       const disabledBadge = account.enabled === false ? ` ${ANSI.red}[disabled]${ANSI.reset}` : '';
-      const label = account.email || `Account ${account.index + 1}`;
-      const fullLabel = `${label}${badge ? ' ' + badge : ''}${disabledBadge}`;
-      
+      const baseLabel = account.email || `Account ${account.index + 1}`;
+      const numbered = `${account.index + 1}. ${baseLabel}`;
+      const fullLabel = `${numbered}${currentBadge}${statusBadge ? ' ' + statusBadge : ''}${disabledBadge}`;
+
       return {
         label: fullLabel,
         hint: account.lastUsed ? `used ${formatRelativeTime(account.lastUsed)}` : '',
@@ -67,13 +79,17 @@ export async function showAuthMenu(accounts: AccountInfo[]): Promise<AuthMenuAct
       };
     }),
 
+    { label: '', value: { type: 'cancel' }, separator: true },
+
+    { label: 'Danger zone', value: { type: 'cancel' }, kind: 'heading' },
     { label: 'Delete all accounts', value: { type: 'delete-all' }, color: 'red' as const },
   ];
 
   while (true) {
     const result = await select(items, { 
-      message: 'Manage accounts',
-      subtitle: 'Select account'
+      message: 'Google accounts (Antigravity)',
+      subtitle: 'Select an action or account',
+      clearScreen: true,
     });
 
     if (!result) return { type: 'cancel' };
@@ -91,22 +107,23 @@ export async function showAccountDetails(account: AccountInfo): Promise<AccountA
   const label = account.email || `Account ${account.index + 1}`;
   const badge = getStatusBadge(account.status);
   const disabledBadge = account.enabled === false ? ` ${ANSI.red}[disabled]${ANSI.reset}` : '';
-  
-  console.log('');
-  console.log(`${ANSI.bold}Account: ${label}${badge ? ' ' + badge : ''}${disabledBadge}${ANSI.reset}`);
-  console.log(`${ANSI.dim}Added: ${formatDate(account.addedAt)}${ANSI.reset}`);
-  console.log(`${ANSI.dim}Last used: ${formatRelativeTime(account.lastUsed)}${ANSI.reset}`);
-  console.log('');
+  const header = `${label}${badge ? ' ' + badge : ''}${disabledBadge}`;
+  const subtitleParts = [
+    `Added: ${formatDate(account.addedAt)}`,
+    `Last used: ${formatRelativeTime(account.lastUsed)}`,
+  ];
 
   while (true) {
     const result = await select([
       { label: 'Back', value: 'back' as const },
+      { label: 'Verify account access', value: 'verify' as const, color: 'cyan' },
       { label: account.enabled === false ? 'Enable account' : 'Disable account', value: 'toggle' as const, color: account.enabled === false ? 'green' : 'yellow' },
       { label: 'Refresh token', value: 'refresh' as const, color: 'cyan' },
       { label: 'Delete this account', value: 'delete' as const, color: 'red' },
     ], { 
-      message: 'Account options',
-      subtitle: 'Select action'
+      message: header,
+      subtitle: subtitleParts.join(' | '),
+      clearScreen: true,
     });
 
     if (result === 'delete') {

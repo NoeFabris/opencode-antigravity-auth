@@ -7,6 +7,7 @@ import {
   type AccountInfo,
   type AccountStatus,
 } from "./ui/auth-menu";
+import { updateOpencodeConfig } from "./config/updater";
 
 export async function promptProjectId(): Promise<string> {
   const rl = createInterface({ input, output });
@@ -29,7 +30,7 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
   }
 }
 
-export type LoginMode = "add" | "fresh" | "manage" | "check" | "cancel";
+export type LoginMode = "add" | "fresh" | "manage" | "check" | "verify" | "verify-all" | "cancel";
 
 export interface ExistingAccountInfo {
   email?: string;
@@ -46,6 +47,8 @@ export interface LoginMenuResult {
   deleteAccountIndex?: number;
   refreshAccountIndex?: number;
   toggleAccountIndex?: number;
+  verifyAccountIndex?: number;
+  verifyAll?: boolean;
   deleteAll?: boolean;
 }
 
@@ -60,7 +63,7 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
     console.log("");
 
     while (true) {
-      const answer = await rl.question("(a)dd new, (f)resh start, (m)anage, (c)heck quotas? [a/f/m/c]: ");
+      const answer = await rl.question("(a)dd new, (f)resh start, (c)heck quotas, (v)erify account, (va) verify all? [a/f/c/v/va]: ");
       const normalized = answer.trim().toLowerCase();
 
       if (normalized === "a" || normalized === "add") {
@@ -69,14 +72,17 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
       if (normalized === "f" || normalized === "fresh") {
         return { mode: "fresh" };
       }
-      if (normalized === "m" || normalized === "manage") {
-        return { mode: "manage" };
-      }
       if (normalized === "c" || normalized === "check") {
         return { mode: "check" };
       }
+      if (normalized === "v" || normalized === "verify") {
+        return { mode: "verify" };
+      }
+      if (normalized === "va" || normalized === "verify-all" || normalized === "all") {
+        return { mode: "verify-all", verifyAll: true };
+      }
 
-      console.log("Please enter 'a', 'f', 'm', or 'c'.");
+      console.log("Please enter 'a', 'f', 'c', 'v', or 'va'.");
     }
   } finally {
     rl.close();
@@ -110,8 +116,11 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
       case "check":
         return { mode: "check" };
 
-      case "manage":
-        return { mode: "manage" };
+      case "verify":
+        return { mode: "verify" };
+
+      case "verify-all":
+        return { mode: "verify-all", verifyAll: true };
 
       case "select-account": {
         const accountAction = await showAccountDetails(action.account);
@@ -124,11 +133,24 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         if (accountAction === "toggle") {
           return { mode: "manage", toggleAccountIndex: action.account.index };
         }
+        if (accountAction === "verify") {
+          return { mode: "verify", verifyAccountIndex: action.account.index };
+        }
         continue;
       }
 
       case "delete-all":
         return { mode: "fresh", deleteAll: true };
+
+      case "configure-models": {
+        const result = await updateOpencodeConfig();
+        if (result.success) {
+          console.log(`\n✓ Models configured in ${result.configPath}\n`);
+        } else {
+          console.log(`\n✗ Failed to configure models: ${result.error}\n`);
+        }
+        continue;
+      }
 
       case "cancel":
         return { mode: "cancel" };

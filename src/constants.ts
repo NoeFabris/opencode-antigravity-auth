@@ -70,8 +70,29 @@ export const GEMINI_CLI_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
  */
 export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
 
+/**
+ * Antigravity version string - SINGLE SOURCE OF TRUTH.
+ * Update this value when a new version is needed.
+ * Used by ANTIGRAVITY_HEADERS, fingerprint.ts, and all version-dependent code.
+ * 
+ * @remarks
+ * This version MUST be kept in sync with Google's supported Antigravity versions.
+ * Using an outdated version will cause "This version of Antigravity is no longer supported" errors.
+ * 
+ * @see https://github.com/NoeFabris/opencode-antigravity-auth/issues/324
+ */
+export const ANTIGRAVITY_VERSION = "1.15.8" as const;
+
+/**
+ * Default headers for Antigravity API requests.
+ * 
+ * Uses ANTIGRAVITY_VERSION to ensure the User-Agent version stays in sync
+ * with the single source of truth, preventing "version no longer supported" errors.
+ * 
+ * @see https://github.com/NoeFabris/opencode-antigravity-auth/issues/324
+ */
 export const ANTIGRAVITY_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/1.104.0 Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36",
+  "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${ANTIGRAVITY_VERSION} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
   "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
   "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
 } as const;
@@ -81,13 +102,6 @@ export const GEMINI_CLI_HEADERS = {
   "X-Goog-Api-Client": "gl-node/22.18.0",
   "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
 } as const;
-
-/**
- * Antigravity version string - SINGLE SOURCE OF TRUTH.
- * Update this value when a new version is needed.
- * Used by both constants.ts and fingerprint.ts
- */
-export const ANTIGRAVITY_VERSION = "1.15.8" as const;
 
 const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "linux/amd64", "darwin/amd64", "linux/arm64"] as const;
 
@@ -209,9 +223,9 @@ export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
 
 /**
  * Model used for Google Search grounding requests.
- * Uses gemini-3-flash for fast, cost-effective search operations.
+ * Uses gemini-2.5-flash for fast, cost-effective search operations. (3-flash is always at capacity and doesn't support souce citation).
  */
-export const SEARCH_MODEL = "gemini-3-flash";
+export const SEARCH_MODEL = "gemini-2.5-flash";
 
 /**
  * Thinking budget for deep search (more thorough analysis).

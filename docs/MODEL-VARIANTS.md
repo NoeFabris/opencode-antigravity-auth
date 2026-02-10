@@ -9,7 +9,7 @@ OpenCode's variant system allows you to configure thinking budget dynamically in
 When you define a model with `variants`, OpenCode shows variant options in the model picker. Selecting a variant passes the `providerOptions` to the plugin, which extracts the thinking configuration.
 
 ```bash
-opencode run "Hello" --model=google/claude-sonnet-4-5-thinking --variant=max
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
 ```
 
 ---
@@ -63,30 +63,12 @@ Gemini 3 models use string-based thinking levels. Available levels differ by mod
 
 ```json
 {
-  "gemini-3-pro": {
-    "name": "Gemini 3 Pro",
+  "antigravity-gemini-3-pro": {
+    "name": "Gemini 3 Pro (Antigravity)",
     "limit": { "context": 1048576, "output": 65535 },
     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
     "variants": {
       "low": { "thinkingLevel": "low" },
-      "high": { "thinkingLevel": "high" }
-    }
-  }
-}
-```
-
-### Gemini 3 Flash Example
-
-```json
-{
-  "gemini-3-flash": {
-    "name": "Gemini 3 Flash",
-    "limit": { "context": 1048576, "output": 65536 },
-    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-    "variants": {
-      "minimal": { "thinkingLevel": "minimal" },
-      "low": { "thinkingLevel": "low" },
-      "medium": { "thinkingLevel": "medium" },
       "high": { "thinkingLevel": "high" }
     }
   }
@@ -126,8 +108,8 @@ Claude models use token-based thinking budgets:
 
 ```json
 {
-  "claude-sonnet-4-5-thinking": {
-    "name": "Claude Sonnet 4.5 Thinking",
+  "antigravity-claude-sonnet-4-5-thinking": {
+    "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
     "limit": { "context": 200000, "output": 64000 },
     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
     "variants": {

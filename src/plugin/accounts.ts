@@ -164,6 +164,10 @@ export interface ManagedAccount {
   /** Cached quota data from last checkAccountsQuota() call */
   cachedQuota?: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
   cachedQuotaUpdatedAt?: number;
+  verificationRequired?: boolean;
+  verificationRequiredAt?: number;
+  verificationRequiredReason?: string;
+  verificationUrl?: string;
 }
 
 function nowMs(): number {
@@ -378,6 +382,10 @@ export class AccountManager {
             proxyUrl: acc.proxyUrl,
             cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
             cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
+            verificationRequired: acc.verificationRequired,
+            verificationRequiredAt: acc.verificationRequiredAt,
+            verificationRequiredReason: acc.verificationRequiredReason,
+            verificationUrl: acc.verificationUrl,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -468,7 +476,11 @@ export class AccountManager {
   getCurrentAccountForFamily(family: ModelFamily): ManagedAccount | null {
     const currentIndex = this.currentAccountIndexByFamily[family];
     if (currentIndex >= 0 && currentIndex < this.accounts.length) {
-      return this.accounts[currentIndex] ?? null;
+      const account = this.accounts[currentIndex] ?? null;
+      // Only return account if it's enabled - disabled accounts should not be selected
+      if (account && account.enabled !== false) {
+        return account;
+      }
     }
     return null;
   }
@@ -794,6 +806,88 @@ export class AccountManager {
     });
   }
 
+  setAccountEnabled(accountIndex: number, enabled: boolean): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    account.enabled = enabled;
+
+    if (!enabled) {
+      for (const family of Object.keys(this.currentAccountIndexByFamily) as ModelFamily[]) {
+        if (this.currentAccountIndexByFamily[family] === accountIndex) {
+          const next = this.accounts.find((a, i) => i !== accountIndex && a.enabled !== false);
+          this.currentAccountIndexByFamily[family] = next?.index ?? -1;
+        }
+      }
+    }
+
+    this.requestSaveToDisk();
+    return true;
+  }
+
+  markAccountVerificationRequired(accountIndex: number, reason?: string, verifyUrl?: string): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+
+    account.verificationRequired = true;
+    account.verificationRequiredAt = nowMs();
+    account.verificationRequiredReason = reason?.trim() || undefined;
+
+    const normalizedVerifyUrl = verifyUrl?.trim();
+    if (normalizedVerifyUrl) {
+      account.verificationUrl = normalizedVerifyUrl;
+    }
+
+    if (account.enabled !== false) {
+      this.setAccountEnabled(accountIndex, false);
+    } else {
+      this.requestSaveToDisk();
+    }
+
+    return true;
+  }
+
+  clearAccountVerificationRequired(accountIndex: number, enableAccount = false): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+
+    const wasVerificationRequired = account.verificationRequired === true;
+    const hadMetadata = (
+      account.verificationRequiredAt !== undefined ||
+      account.verificationRequiredReason !== undefined ||
+      account.verificationUrl !== undefined
+    );
+
+    account.verificationRequired = false;
+    account.verificationRequiredAt = undefined;
+    account.verificationRequiredReason = undefined;
+    account.verificationUrl = undefined;
+
+    if (enableAccount && wasVerificationRequired && account.enabled === false) {
+      this.setAccountEnabled(accountIndex, true);
+    } else if (wasVerificationRequired || hadMetadata) {
+      this.requestSaveToDisk();
+    }
+
+    return true;
+  }
+
+  removeAccountByIndex(accountIndex: number): boolean {
+    if (accountIndex < 0 || accountIndex >= this.accounts.length) {
+      return false;
+    }
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    return this.removeAccount(account);
+  }
+
   removeAccount(account: ManagedAccount): boolean {
     const idx = this.accounts.indexOf(account);
     if (idx < 0) {
@@ -911,6 +1005,7 @@ export class AccountManager {
         managedProjectId: a.parts.managedProjectId,
         addedAt: a.addedAt,
         lastUsed: a.lastUsed,
+        enabled: a.enabled,
         lastSwitchReason: a.lastSwitchReason,
         rateLimitResetTimes: Object.keys(a.rateLimitResetTimes).length > 0 ? a.rateLimitResetTimes : undefined,
         coolingDownUntil: a.coolingDownUntil,
@@ -920,6 +1015,10 @@ export class AccountManager {
         proxyUrl: a.proxyUrl,
         cachedQuota: a.cachedQuota && Object.keys(a.cachedQuota).length > 0 ? a.cachedQuota : undefined,
         cachedQuotaUpdatedAt: a.cachedQuotaUpdatedAt,
+        verificationRequired: a.verificationRequired,
+        verificationRequiredAt: a.verificationRequiredAt,
+        verificationRequiredReason: a.verificationRequiredReason,
+        verificationUrl: a.verificationUrl,
       })),
       activeIndex: claudeIndex,
       activeIndexByFamily: {

@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.4.5] - 2026-02-05
+
+### Added
+
+- **Configure Models Menu Action** - Auth login menu now includes a "Configure models" action that writes plugin model definitions directly into `opencode.json`, making setup easier for new users
+
+- **`cli_first` Config Option** - New configuration option to route Gemini models to Gemini CLI quota first, useful for users who want to preserve Antigravity quota for Claude models
+
+- **`toast_scope` Configuration** - Control toast visibility per session with `toast_scope: "root_only"` to suppress toasts in subagent sessions
+
+- **Soft Quota Protection** - Skip accounts over 90% usage threshold to prevent Google penalties, with configurable `soft_quota_threshold_percent` and wait/retry behavior
+
+- **Gemini CLI Quota Management** - Enhanced quota display with dual quota pool support (Antigravity + Gemini CLI)
+
+- **`OPENCODE_CONFIG_DIR` Environment Variable** - Custom config location support for non-standard setups
+
+- **`quota_refresh_interval_minutes`** - Background quota cache refresh (default 15 minutes)
+
+- **`soft_quota_cache_ttl_minutes`** - Cache freshness control for soft quota checks
+
+### Changed
+
+- **Model Naming and Routing** - Documented antigravity-prefixed model names and automatic mapping to CLI preview names (e.g., `antigravity-gemini-3-flash` → `gemini-3-flash-preview`)
+
+- **Antigravity-First Quota Strategy** - Exhausts Antigravity quota across ALL accounts before falling back to Gemini CLI quota (previously per-account)
+
+- **Quota Routing Respects `cli_first`** - Fallback behavior updated to respect `cli_first` preference
+
+- **Config Directory Resolution** - Now prioritizes `OPENCODE_CONFIG_DIR` environment variable
+
+- **Enhanced Debug Logging** - Process ID included for better traceability across concurrent sessions
+
+- **Improved Quota Group Resolution** - More consistent quota management with `resolveQuotaGroup` function
+
+### Fixed
+
+- **#337**: Skip disabled accounts in proactive token refresh
+- **#233**: Skip sandbox endpoints for Gemini CLI models (fixes 404/403 cascade)
+- **Windows Config Auto-Migration**: Automatically migrates config from `%APPDATA%\opencode\` to `~/.config/opencode/`
+- **Root Session Detection**: Reset `isChildSession` flag correctly for root sessions
+- **Stale Quota Cache**: Prevent spin loop on stale quota cache
+- **Quota Group Default**: Fix quota group selection defaulting to `gemini-pro` when model is null
+
+### Removed
+
+- **Fingerprint Headers for Gemini CLI** - Removed fingerprint headers from Gemini CLI model requests to align with official behavior
+- **`web_search` Configuration Leftovers** - Cleaned up remaining `web_search` config remnants from schema
+
+### Documentation
+
+- Updated README with model configuration options and simplified setup instructions
+- Updated MODEL-VARIANTS.md with Antigravity model names and configuration guidance
+- Updated CONFIGURATION.md to clarify `quota_fallback` behavior across accounts
+- Updated MULTI-ACCOUNT.md with dual quota pool and fallback flow details
+
+---
+
 ## [1.3.2] - 2026-01-27
 
 ### Added
