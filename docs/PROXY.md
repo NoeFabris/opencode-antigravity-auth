@@ -109,7 +109,7 @@ opencode run "Hello" --model=google/claude-sonnet-4-5
 
 ### Proxy Connection Failed
 
-```
+```text
 Error: Failed to create proxy agent for http://proxy:8080: connect ECONNREFUSED
 ```
 
@@ -121,7 +121,7 @@ Error: Failed to create proxy agent for http://proxy:8080: connect ECONNREFUSED
 
 ### Invalid Proxy URL Format
 
-```
+```text
 Error: Invalid proxy URL format: http://***:***@:invalid
 ```
 
