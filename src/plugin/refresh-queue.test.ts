@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProactiveRefreshQueue } from "./refresh-queue";
 import { AccountManager } from "./accounts";
-import type { AccountStorageV3 } from "./storage";
+import type { AccountStorageV4 } from "./storage";
 import type { PluginClient } from "./types";
 
 // Mock PluginClient
@@ -22,8 +22,8 @@ describe("ProactiveRefreshQueue", () => {
   describe("getAccountsNeedingRefresh", () => {
     it("skips disabled accounts", () => {
       const now = Date.now();
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           {
             refreshToken: "r1",
@@ -75,8 +75,8 @@ describe("ProactiveRefreshQueue", () => {
 
     it("includes accounts with undefined enabled (default to enabled)", () => {
       const now = Date.now();
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           {
             refreshToken: "r1",
@@ -109,8 +109,8 @@ describe("ProactiveRefreshQueue", () => {
 
     it("skips expired accounts", () => {
       const now = Date.now();
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           {
             refreshToken: "r1",
@@ -142,8 +142,8 @@ describe("ProactiveRefreshQueue", () => {
 
     it("skips accounts that don't need refresh yet", () => {
       const now = Date.now();
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           {
             refreshToken: "r1",

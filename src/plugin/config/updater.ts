@@ -1,7 +1,7 @@
 /**
  * OpenCode configuration file updater.
  *
- * Updates ~/.config/opencode/opencode.json with plugin models.
+ * Updates ~/.config/opencode/opencode.json(c) with plugin models.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -43,6 +43,17 @@ export interface UpdateConfigOptions {
 
 const PLUGIN_NAME = "opencode-antigravity-auth@latest";
 const SCHEMA_URL = "https://opencode.ai/config.json";
+const OPENCODE_JSON_FILENAME = "opencode.json";
+const OPENCODE_JSONC_FILENAME = "opencode.jsonc";
+
+function stripJsonCommentsAndTrailingCommas(json: string): string {
+  return json
+    .replace(
+      /\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g,
+      (match: string, group: string | undefined) => (group ? "" : match)
+    )
+    .replace(/,(\s*[}\]])/g, "$1");
+}
 
 /**
  * Get the opencode config directory path.
@@ -53,10 +64,24 @@ export function getOpencodeConfigDir(): string {
 }
 
 /**
- * Get the opencode.json config file path.
+ * Get the opencode config file path.
+ *
+ * Prefers opencode.jsonc when present so we update the active config file
+ * instead of creating a new opencode.json.
  */
 export function getOpencodeConfigPath(): string {
-  return join(getOpencodeConfigDir(), "opencode.json");
+  const configDir = getOpencodeConfigDir();
+  const jsoncPath = join(configDir, OPENCODE_JSONC_FILENAME);
+  const jsonPath = join(configDir, OPENCODE_JSON_FILENAME);
+
+  if (existsSync(jsoncPath)) {
+    return jsoncPath;
+  }
+  if (existsSync(jsonPath)) {
+    return jsonPath;
+  }
+
+  return jsonPath;
 }
 
 // =============================================================================
@@ -64,10 +89,10 @@ export function getOpencodeConfigPath(): string {
 // =============================================================================
 
 /**
- * Updates the opencode.json configuration file with plugin models.
+ * Updates the opencode configuration file with plugin models.
  *
  * This function:
- * 1. Reads existing opencode.json (or creates default structure)
+ * 1. Reads existing opencode.json/opencode.jsonc (or creates default structure)
  * 2. Replaces `provider.google.models` with plugin models
  * 3. Writes back to disk with proper formatting
  *
@@ -90,7 +115,7 @@ export async function updateOpencodeConfig(
     // Read existing config or create default
     if (existsSync(configPath)) {
       const content = readFileSync(configPath, "utf-8");
-      config = JSON.parse(content) as OpencodeConfig;
+      config = JSON.parse(stripJsonCommentsAndTrailingCommas(content)) as OpencodeConfig;
     } else {
       // Create default config structure
       config = {

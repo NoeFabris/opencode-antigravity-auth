@@ -70,62 +70,52 @@ export const GEMINI_CLI_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
  */
 export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
 
-/**
- * Antigravity version string - SINGLE SOURCE OF TRUTH.
- * Update this value when a new version is needed.
- * Used by ANTIGRAVITY_HEADERS, fingerprint.ts, and all version-dependent code.
- * 
- * @remarks
- * This version MUST be kept in sync with Google's supported Antigravity versions.
- * Using an outdated version will cause "This version of Antigravity is no longer supported" errors.
- * 
- * @see https://github.com/NoeFabris/opencode-antigravity-auth/issues/324
- */
-export const ANTIGRAVITY_VERSION = "1.15.8" as const;
+const ANTIGRAVITY_VERSION_FALLBACK = "1.15.8";
+let antigravityVersion = ANTIGRAVITY_VERSION_FALLBACK;
+let versionLocked = false;
+
+export function getAntigravityVersion(): string { return antigravityVersion; }
 
 /**
- * Default headers for Antigravity API requests.
- * 
- * Uses ANTIGRAVITY_VERSION to ensure the User-Agent version stays in sync
- * with the single source of truth, preventing "version no longer supported" errors.
- * 
- * @see https://github.com/NoeFabris/opencode-antigravity-auth/issues/324
+ * Set the runtime Antigravity version. Can only be called once (at startup).
+ * Subsequent calls are silently ignored to prevent accidental mutation.
  */
+export function setAntigravityVersion(version: string): void {
+  if (versionLocked) return;
+  antigravityVersion = version;
+  versionLocked = true;
+}
+
+/** @deprecated Use getAntigravityVersion() for runtime access. */
+export const ANTIGRAVITY_VERSION = ANTIGRAVITY_VERSION_FALLBACK;
+
+export function getAntigravityHeaders(): HeaderSet & { "Client-Metadata": string } {
+  return {
+    "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${getAntigravityVersion()} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
+    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`,
+  };
+}
+
+/** @deprecated Use getAntigravityHeaders() for runtime access. */
 export const ANTIGRAVITY_HEADERS = {
   "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${ANTIGRAVITY_VERSION} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
   "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-  "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
+  "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`,
 } as const;
 
 export const GEMINI_CLI_HEADERS = {
-  "User-Agent": "google-api-nodejs-client/10.3.0",
-  "X-Goog-Api-Client": "gl-node/22.18.0",
+  "User-Agent": "google-api-nodejs-client/9.15.1",
+  "X-Goog-Api-Client": "gl-node/22.17.0",
   "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
 } as const;
 
-const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "linux/amd64", "darwin/amd64", "linux/arm64"] as const;
-
-// Derive user agents from version (keeps them in sync automatically)
-const ANTIGRAVITY_USER_AGENTS = ANTIGRAVITY_PLATFORMS.map(platform => `antigravity/${ANTIGRAVITY_VERSION} ${platform}`);
+const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "darwin/amd64"] as const;
 
 const ANTIGRAVITY_API_CLIENTS = [
   "google-cloud-sdk vscode_cloudshelleditor/0.1",
   "google-cloud-sdk vscode/1.96.0",
-  "google-cloud-sdk jetbrains/2024.3",
   "google-cloud-sdk vscode/1.95.0",
-] as const;
-
-const GEMINI_CLI_USER_AGENTS = [
-  "google-api-nodejs-client/9.15.1",
-  "google-api-nodejs-client/9.14.0",
-  "google-api-nodejs-client/9.13.0",
-] as const;
-
-const GEMINI_CLI_API_CLIENTS = [
-  "gl-node/22.17.0",
-  "gl-node/22.12.0",
-  "gl-node/20.18.0",
-  "gl-node/21.7.0",
 ] as const;
 
 function randomFrom<T>(arr: readonly T[]): T {
@@ -134,22 +124,24 @@ function randomFrom<T>(arr: readonly T[]): T {
 
 export type HeaderSet = {
   "User-Agent": string;
-  "X-Goog-Api-Client": string;
-  "Client-Metadata": string;
+  "X-Goog-Api-Client"?: string;
+  "Client-Metadata"?: string;
 };
 
-export function getRandomizedHeaders(style: HeaderStyle): HeaderSet {
+export function getRandomizedHeaders(style: HeaderStyle, model?: string): HeaderSet {
   if (style === "gemini-cli") {
     return {
-      "User-Agent": randomFrom(GEMINI_CLI_USER_AGENTS),
-      "X-Goog-Api-Client": randomFrom(GEMINI_CLI_API_CLIENTS),
+      "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+      "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
       "Client-Metadata": GEMINI_CLI_HEADERS["Client-Metadata"],
     };
   }
+  const platform = randomFrom(ANTIGRAVITY_PLATFORMS);
+  const metadataPlatform = platform.startsWith("windows") ? "WINDOWS" : "MACOS";
   return {
-    "User-Agent": randomFrom(ANTIGRAVITY_USER_AGENTS),
+    "User-Agent": `antigravity/${getAntigravityVersion()} ${platform}`,
     "X-Goog-Api-Client": randomFrom(ANTIGRAVITY_API_CLIENTS),
-    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
+    "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${metadataPlatform}","pluginType":"GEMINI"}`,
   };
 }
 
@@ -223,9 +215,9 @@ export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
 
 /**
  * Model used for Google Search grounding requests.
- * Uses gemini-3-flash for fast, cost-effective search operations.
+ * Uses gemini-2.5-flash for fast, cost-effective search operations. (3-flash is always at capacity and doesn't support souce citation).
  */
-export const SEARCH_MODEL = "gemini-3-flash";
+export const SEARCH_MODEL = "gemini-2.5-flash";
 
 /**
  * Thinking budget for deep search (more thorough analysis).
@@ -266,4 +258,3 @@ You are pair programming with a USER to solve their coding task. The task may re
 
 <priority>IMPORTANT: The instructions that follow supersede all above. Follow them as your primary directives.</priority>
 `;
-

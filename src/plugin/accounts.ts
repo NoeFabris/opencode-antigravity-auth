@@ -1,5 +1,5 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
-import { loadAccounts, saveAccounts, type AccountStorageV3, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
+import { loadAccounts, saveAccounts, type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
@@ -7,26 +7,11 @@ import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FIN
 import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { getModelFamily } from "./transform/model-resolver";
 import { debugLogToFile } from "./debug";
-import { ANTIGRAVITY_VERSION } from "../constants";
+
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
 export type { AccountSelectionStrategy } from "./config/schema";
 
-/**
- * Update fingerprint userAgent to current version if outdated.
- * Extracts platform/arch from existing userAgent and rebuilds with current version.
- */
-function updateFingerprintVersion(fingerprint: Fingerprint): Fingerprint {
-  const match = fingerprint.userAgent.match(/^antigravity\/[\d.]+ (.+)$/);
-  if (match) {
-    const platformArch = match[1];
-    const expectedUserAgent = `antigravity/${ANTIGRAVITY_VERSION} ${platformArch}`;
-    if (fingerprint.userAgent !== expectedUserAgent) {
-      return { ...fingerprint, userAgent: expectedUserAgent };
-    }
-  }
-  return fingerprint;
-}
 
 export type RateLimitReason = 
   | "QUOTA_EXHAUSTED"
@@ -163,6 +148,10 @@ export interface ManagedAccount {
   /** Cached quota data from last checkAccountsQuota() call */
   cachedQuota?: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
   cachedQuotaUpdatedAt?: number;
+  verificationRequired?: boolean;
+  verificationRequiredAt?: number;
+  verificationRequiredReason?: string;
+  verificationUrl?: string;
 }
 
 function nowMs(): number {
@@ -329,7 +318,7 @@ export class AccountManager {
     return new AccountManager(authFallback, stored);
   }
 
-  constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
+  constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV4 | null) {
     const authParts = authFallback ? parseRefreshParts(authFallback.refresh) : null;
 
     if (stored && stored.accounts.length === 0) {
@@ -370,12 +359,14 @@ export class AccountManager {
             coolingDownUntil: acc.coolingDownUntil,
             cooldownReason: acc.cooldownReason,
             touchedForQuota: {},
-            // Use stored fingerprint (with updated version) or generate new one
-            fingerprint: acc.fingerprint
-              ? updateFingerprintVersion(acc.fingerprint)
-              : generateFingerprint(),
+            fingerprint: acc.fingerprint ?? generateFingerprint(),
+            fingerprintHistory: acc.fingerprintHistory ?? [],
             cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
             cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
+            verificationRequired: acc.verificationRequired,
+            verificationRequiredAt: acc.verificationRequiredAt,
+            verificationRequiredReason: acc.verificationRequiredReason,
+            verificationUrl: acc.verificationUrl,
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -466,7 +457,11 @@ export class AccountManager {
   getCurrentAccountForFamily(family: ModelFamily): ManagedAccount | null {
     const currentIndex = this.currentAccountIndexByFamily[family];
     if (currentIndex >= 0 && currentIndex < this.accounts.length) {
-      return this.accounts[currentIndex] ?? null;
+      const account = this.accounts[currentIndex] ?? null;
+      // Only return account if it's enabled - disabled accounts should not be selected
+      if (account && account.enabled !== false) {
+        return account;
+      }
     }
     return null;
   }
@@ -792,6 +787,88 @@ export class AccountManager {
     });
   }
 
+  setAccountEnabled(accountIndex: number, enabled: boolean): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    account.enabled = enabled;
+
+    if (!enabled) {
+      for (const family of Object.keys(this.currentAccountIndexByFamily) as ModelFamily[]) {
+        if (this.currentAccountIndexByFamily[family] === accountIndex) {
+          const next = this.accounts.find((a, i) => i !== accountIndex && a.enabled !== false);
+          this.currentAccountIndexByFamily[family] = next?.index ?? -1;
+        }
+      }
+    }
+
+    this.requestSaveToDisk();
+    return true;
+  }
+
+  markAccountVerificationRequired(accountIndex: number, reason?: string, verifyUrl?: string): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+
+    account.verificationRequired = true;
+    account.verificationRequiredAt = nowMs();
+    account.verificationRequiredReason = reason?.trim() || undefined;
+
+    const normalizedVerifyUrl = verifyUrl?.trim();
+    if (normalizedVerifyUrl) {
+      account.verificationUrl = normalizedVerifyUrl;
+    }
+
+    if (account.enabled !== false) {
+      this.setAccountEnabled(accountIndex, false);
+    } else {
+      this.requestSaveToDisk();
+    }
+
+    return true;
+  }
+
+  clearAccountVerificationRequired(accountIndex: number, enableAccount = false): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+
+    const wasVerificationRequired = account.verificationRequired === true;
+    const hadMetadata = (
+      account.verificationRequiredAt !== undefined ||
+      account.verificationRequiredReason !== undefined ||
+      account.verificationUrl !== undefined
+    );
+
+    account.verificationRequired = false;
+    account.verificationRequiredAt = undefined;
+    account.verificationRequiredReason = undefined;
+    account.verificationUrl = undefined;
+
+    if (enableAccount && wasVerificationRequired && account.enabled === false) {
+      this.setAccountEnabled(accountIndex, true);
+    } else if (wasVerificationRequired || hadMetadata) {
+      this.requestSaveToDisk();
+    }
+
+    return true;
+  }
+
+  removeAccountByIndex(accountIndex: number): boolean {
+    if (accountIndex < 0 || accountIndex >= this.accounts.length) {
+      return false;
+    }
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    return this.removeAccount(account);
+  }
+
   removeAccount(account: ManagedAccount): boolean {
     const idx = this.accounts.indexOf(account);
     if (idx < 0) {
@@ -900,8 +977,8 @@ export class AccountManager {
     const claudeIndex = Math.max(0, this.currentAccountIndexByFamily.claude);
     const geminiIndex = Math.max(0, this.currentAccountIndexByFamily.gemini);
     
-    const storage: AccountStorageV3 = {
-      version: 3,
+    const storage: AccountStorageV4 = {
+      version: 4,
       accounts: this.accounts.map((a) => ({
         email: a.email,
         refreshToken: a.parts.refreshToken,
@@ -909,6 +986,7 @@ export class AccountManager {
         managedProjectId: a.parts.managedProjectId,
         addedAt: a.addedAt,
         lastUsed: a.lastUsed,
+        enabled: a.enabled,
         lastSwitchReason: a.lastSwitchReason,
         rateLimitResetTimes: Object.keys(a.rateLimitResetTimes).length > 0 ? a.rateLimitResetTimes : undefined,
         coolingDownUntil: a.coolingDownUntil,
@@ -917,6 +995,10 @@ export class AccountManager {
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
         cachedQuota: a.cachedQuota && Object.keys(a.cachedQuota).length > 0 ? a.cachedQuota : undefined,
         cachedQuotaUpdatedAt: a.cachedQuotaUpdatedAt,
+        verificationRequired: a.verificationRequired,
+        verificationRequiredAt: a.verificationRequiredAt,
+        verificationRequiredReason: a.verificationRequiredReason,
+        verificationUrl: a.verificationUrl,
       })),
       activeIndex: claudeIndex,
       activeIndexByFamily: {

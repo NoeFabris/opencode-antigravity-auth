@@ -1685,6 +1685,60 @@ describe("extractVariantThinkingConfig", () => {
       google: { thinkingConfig: { thinkingBudget: "high" } },
     })).toBeUndefined();
   });
+
+  it("extracts thinkingBudget from generationConfig when providerOptions is undefined", () => {
+    const result = extractVariantThinkingConfig(undefined, {
+      thinkingConfig: { thinkingBudget: 8192 },
+    });
+    expect(result).toEqual({ thinkingBudget: 8192 });
+  });
+
+  it("extracts thinkingBudget from generationConfig when providerOptions has no google key", () => {
+    const result = extractVariantThinkingConfig({}, {
+      thinkingConfig: { thinkingBudget: 4096 },
+    });
+    expect(result).toEqual({ thinkingBudget: 4096 });
+  });
+
+  it("prefers providerOptions over generationConfig", () => {
+    const result = extractVariantThinkingConfig(
+      { google: { thinkingConfig: { thinkingBudget: 32000 } } },
+      { thinkingConfig: { thinkingBudget: 8192 } },
+    );
+    expect(result).toEqual({ thinkingBudget: 32000 });
+  });
+
+  it("prefers providerOptions thinkingLevel over generationConfig budget", () => {
+    const result = extractVariantThinkingConfig(
+      { google: { thinkingLevel: "low" } },
+      { thinkingConfig: { thinkingBudget: 8192 } },
+    );
+    expect(result).toEqual({ thinkingLevel: "low" });
+  });
+
+  it("ignores generationConfig when providerOptions has googleSearch only", () => {
+    const result = extractVariantThinkingConfig(
+      { google: { googleSearch: { mode: "auto" } } },
+      { thinkingConfig: { thinkingBudget: 8192 } },
+    );
+    expect(result).toEqual({
+      googleSearch: { mode: "auto" },
+      thinkingBudget: 8192,
+    });
+  });
+
+  it("does not overwrite thinkingBudget: 0 from providerOptions with generationConfig fallback", () => {
+    const result = extractVariantThinkingConfig(
+      { google: { thinkingConfig: { thinkingBudget: 0 } } },
+      { thinkingConfig: { thinkingBudget: 8192 } },
+    );
+    expect(result).toEqual({ thinkingBudget: 0 });
+  });
+
+  it("returns undefined when both sources have no thinking config", () => {
+    expect(extractVariantThinkingConfig(undefined, {})).toBeUndefined();
+    expect(extractVariantThinkingConfig(undefined, { temperature: 0.5 })).toBeUndefined();
+  });
 });
 
 describe("deduplicateThinkingText", () => {

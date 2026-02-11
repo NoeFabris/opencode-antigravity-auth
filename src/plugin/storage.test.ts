@@ -373,7 +373,7 @@ describe("Storage Migration", () => {
       vi.clearAllMocks();
     });
 
-    it("migrates V2 storage on load and persists V3", async () => {
+    it("migrates V2 storage on load and persists V4", async () => {
       const v2Data = {
         version: 2,
         accounts: [
@@ -402,7 +402,7 @@ describe("Storage Migration", () => {
       const result = await loadAccounts();
 
       expect(result).not.toBeNull();
-      expect(result?.version).toBe(3);
+      expect(result?.version).toBe(4);
 
       const account = result?.accounts[0];
       if (!account) throw new Error("Account not found");
@@ -419,7 +419,7 @@ describe("Storage Migration", () => {
       if (!saveCall) throw new Error("saveAccounts was not called (tmp file not found)");
 
       const savedContent = JSON.parse(saveCall[1] as string);
-      expect(savedContent.version).toBe(3);
+      expect(savedContent.version).toBe(4);
       expect(savedContent.accounts[0].rateLimitResetTimes).toEqual({
         "gemini-antigravity": future,
       });

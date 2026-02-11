@@ -46,6 +46,26 @@ const envVarDescriptions: Record<string, string> = {
   proactive_refresh_check_interval_seconds:
     "Interval between proactive refresh checks in seconds.",
   auto_update: "Enable automatic plugin updates. Env: OPENCODE_ANTIGRAVITY_AUTO_UPDATE=1",
+  quota_fallback:
+    "Deprecated: accepted for backward compatibility but ignored at runtime. Gemini fallback between Antigravity and Gemini CLI is always enabled.",
+  cli_first:
+    "Prefer gemini-cli routing before Antigravity for Gemini models. When false (default), Antigravity is tried first and gemini-cli is fallback.",
+  toast_scope:
+    "Controls which sessions show toast notifications. 'root_only' (default) shows in root session only, 'all' shows in all sessions.",
+  scheduling_mode:
+    "Rate limit scheduling strategy. 'cache_first' (default) waits for cooldowns, 'balance' distributes across accounts, 'performance_first' picks fastest available.",
+  max_cache_first_wait_seconds:
+    "Maximum seconds to wait for a rate-limited account in cache_first mode before switching.",
+  failure_ttl_seconds:
+    "Time in seconds before a failed account is eligible for retry.",
+  request_jitter_max_ms:
+    "Maximum random jitter in milliseconds added to outgoing requests to avoid thundering herd.",
+  soft_quota_threshold_percent:
+    "Percentage of quota usage that triggers soft quota warnings and preemptive account switching.",
+  quota_refresh_interval_minutes:
+    "Interval in minutes between quota usage checks. Set to 0 to disable periodic checks.",
+  soft_quota_cache_ttl_minutes:
+    "TTL for cached soft quota data. 'auto' (default) calculates from refresh interval, or set a fixed number of minutes.",
 };
 
 const signatureCacheDescriptions: Record<string, string> = {
