@@ -1357,10 +1357,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
       const parts = parseRefreshParts(auth.refresh);
       const projectId = parts.managedProjectId || parts.projectId || "unknown";
 
-      // Resolve account early so we can pass proxyUrl to token refresh
-      const accountManager = await AccountManager.loadFromDisk(auth);
-      const accounts = accountManager.getAccounts();
-      const account = accounts.find(a => a.parts.refreshToken === parts.refreshToken);
+      const account = activeAccountManager
+        ?.getAccounts()
+        .find(a => a.parts.refreshToken === parts.refreshToken);
 
       // Ensure we have a valid access token
       let accessToken = auth.access;
