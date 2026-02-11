@@ -4,14 +4,14 @@ import {
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_ENDPOINT_PROD,
-  ANTIGRAVITY_HEADERS,
   ANTIGRAVITY_PROVIDER_ID,
+  getAntigravityHeaders,
   type HeaderStyle,
 } from "./constants";
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId, type LoginMenuResult } from "./plugin/cli";
+import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
   startAntigravityDebugRequest, 
@@ -483,7 +483,7 @@ async function verifyAccountAccess(
     ANTIGRAVITY_DEFAULT_PROJECT_ID;
 
   const headers: Record<string, string> = {
-    ...ANTIGRAVITY_HEADERS,
+    ...getAntigravityHeaders(),
     Authorization: `Bearer ${refreshedAuth.access}`,
     "Content-Type": "application/json",
   };
@@ -2560,7 +2560,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             let refreshAccountIndex: number | undefined;
             const existingStorage = await loadAccounts();
             if (existingStorage && existingStorage.accounts.length > 0) {
-              let menuResult: LoginMenuResult = { mode: "cancel" };
+              let menuResult;
               while (true) {
                 const now = Date.now();
                 const existingAccounts = existingStorage.accounts.map((acc, idx) => {
@@ -2970,8 +2970,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   log.error("Failed to clear stored Antigravity OAuth credentials", { error: String(storeError) });
                 }
 
-                menuResult = { mode: "fresh" };
-                startFresh = true;
+                return {
+                  url: "",
+                  instructions: "All accounts deleted. Run `opencode auth login` to reauthenticate.",
+                  method: "auto",
+                  callback: async () => ({
+                    type: "success",
+                    refresh: "",
+                    access: "",
+                    expires: 0,
+                    projectId: "",
+                  }),
+                };
               }
 
               if (menuResult.refreshAccountIndex !== undefined) {
