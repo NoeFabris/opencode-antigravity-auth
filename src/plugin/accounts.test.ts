@@ -1835,7 +1835,7 @@ describe("AccountManager", () => {
 
 describe("resolveQuotaGroup", () => {
   it("returns model-based quota group when model is provided", () => {
-    expect(resolveQuotaGroup("claude", "claude-opus-4-5")).toBe("claude");
+    expect(resolveQuotaGroup("claude", "claude-opus-4-6")).toBe("claude");
     expect(resolveQuotaGroup("gemini", "gemini-2.5-pro")).toBe("gemini-pro");
     expect(resolveQuotaGroup("gemini", "gemini-2.5-flash")).toBe("gemini-flash");
   });

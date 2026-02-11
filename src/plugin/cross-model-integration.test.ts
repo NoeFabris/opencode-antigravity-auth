@@ -55,7 +55,7 @@ describe("Cross-Model Session Integration", () => {
       };
 
       const payload = {
-        model: "claude-opus-4-5-thinking-medium",
+        model: "claude-opus-4-6-thinking-medium",
         ...geminiSessionHistory,
         contents: [
           ...geminiSessionHistory.contents,
@@ -67,7 +67,7 @@ describe("Cross-Model Session Integration", () => {
       };
 
       const result = sanitizeCrossModelPayload(payload, {
-        targetModel: "claude-opus-4-5-thinking-medium",
+        targetModel: "claude-opus-4-6-thinking-medium",
       });
 
       const sanitized = result.payload as typeof payload;
@@ -129,7 +129,7 @@ describe("Cross-Model Session Integration", () => {
 
     it("handles the exact bug reproduction scenario from issue", () => {
       const payload = {
-        model: "claude-opus-4-5-thinking-medium",
+        model: "claude-opus-4-6-thinking-medium",
         contents: [
           {
             role: "user",
@@ -195,7 +195,7 @@ describe("Cross-Model Session Integration", () => {
       };
 
       const result = sanitizeCrossModelPayload(payload, {
-        targetModel: "claude-opus-4-5-thinking-medium",
+        targetModel: "claude-opus-4-6-thinking-medium",
       });
 
       const sanitized = result.payload as typeof payload;
@@ -359,7 +359,7 @@ describe("Cross-Model Session Integration", () => {
     });
 
     it("correctly identifies Claude models", () => {
-      expect(getModelFamily("claude-opus-4-5-thinking-medium")).toBe("claude");
+      expect(getModelFamily("claude-opus-4-6-thinking-medium")).toBe("claude");
       expect(getModelFamily("claude-sonnet-4-5")).toBe("claude");
       expect(getModelFamily("claude-sonnet-4")).toBe("claude");
       expect(getModelFamily("claude-3-opus")).toBe("claude");
@@ -431,7 +431,7 @@ describe("Cross-Model Session Integration", () => {
       };
 
       const result = sanitizeCrossModelPayload(payload, {
-        targetModel: "claude-opus-4-5",
+        targetModel: "claude-opus-4-6",
       });
 
       const sanitized = result.payload as typeof payload;

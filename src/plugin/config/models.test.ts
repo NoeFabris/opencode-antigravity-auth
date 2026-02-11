@@ -15,7 +15,6 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
     const modelNames = Object.keys(OPENCODE_MODEL_DEFINITIONS).sort();
 
     expect(modelNames).toEqual([
-      "antigravity-claude-opus-4-5-thinking",
       "antigravity-claude-opus-4-6-thinking",
       "antigravity-claude-sonnet-4-5",
       "antigravity-claude-sonnet-4-5-thinking",
@@ -44,11 +43,6 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
 
   it("defines thinking budget variants for Claude thinking models", () => {
     expect(getModel("antigravity-claude-sonnet-4-5-thinking").variants).toEqual({
-      low: { thinkingConfig: { thinkingBudget: 8192 } },
-      max: { thinkingConfig: { thinkingBudget: 32768 } },
-    });
-
-    expect(getModel("antigravity-claude-opus-4-5-thinking").variants).toEqual({
       low: { thinkingConfig: { thinkingBudget: 8192 } },
       max: { thinkingConfig: { thinkingBudget: 32768 } },
     });

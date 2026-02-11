@@ -114,9 +114,9 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("antigravity-claude-opus-4-5-thinking gets default max budget (32768)", () => {
-      const result = resolveModelWithTier("antigravity-claude-opus-4-5-thinking");
-      expect(result.actualModel).toBe("claude-opus-4-5-thinking");
+    it("antigravity-claude-opus-4-6-thinking gets default max budget (32768)", () => {
+      const result = resolveModelWithTier("antigravity-claude-opus-4-6-thinking");
+      expect(result.actualModel).toBe("claude-opus-4-6-thinking");
       expect(result.thinkingBudget).toBe(32768);
       expect(result.isThinkingModel).toBe(true);
       expect(result.quotaPreference).toBe("antigravity");
@@ -208,13 +208,13 @@ describe("resolveModelWithVariant", () => {
 
   describe("backward compatibility", () => {
     it("tier-suffixed models work without variant config", () => {
-      const lowResult = resolveModelWithVariant("claude-opus-4-5-thinking-low");
+      const lowResult = resolveModelWithVariant("claude-opus-4-6-thinking-low");
       expect(lowResult.thinkingBudget).toBe(8192);
 
-      const medResult = resolveModelWithVariant("claude-opus-4-5-thinking-medium");
+      const medResult = resolveModelWithVariant("claude-opus-4-6-thinking-medium");
       expect(medResult.thinkingBudget).toBe(16384);
 
-      const highResult = resolveModelWithVariant("claude-opus-4-5-thinking-high");
+      const highResult = resolveModelWithVariant("claude-opus-4-6-thinking-high");
       expect(highResult.thinkingBudget).toBe(32768);
     });
 

@@ -4,7 +4,7 @@ Guidance for AI agents working with this repository.
 
 ## Overview
 
-This is an **OpenCode plugin** that enables OAuth authentication with Google's Antigravity API. It allows access to models like `gemini-3-pro-high` and `claude-opus-4-5-thinking` using Google credentials.
+This is an **OpenCode plugin** that enables OAuth authentication with Google's Antigravity API. It allows access to models like `gemini-3-pro-high` and `claude-opus-4-6-thinking` using Google credentials.
 
 ## Build & Test
 

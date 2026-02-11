@@ -4,7 +4,7 @@
 #
 # Models tested:
 # 1. Gemini (google/antigravity-gemini-3-pro-low, gemini-3-flash)
-# 2. Claude via Anthropic (anthropic/claude-opus-4-5)
+# 2. Claude via Anthropic (anthropic/claude-opus-4-6)
 # 3. Claude via Google (google/antigravity-claude-*-thinking-*)
 # 4. OpenAI (openai/gpt-5.2-medium)
 
@@ -52,7 +52,7 @@ if [ -z "$SID" ]; then
 else
   log_info "Session: $SID"
   log_info "Step 2: Anthropic Claude Opus + tool..."
-  opencode run -s "$SID" -m anthropic/claude-opus-4-5 \
+  opencode run -s "$SID" -m anthropic/claude-opus-4-6 \
     "Run: echo 'Test1-Anthropic-Claude'" \
     > /tmp/e2e-t1-s2.log 2>&1 || true
   
@@ -77,7 +77,7 @@ if [ -z "$SID" ]; then
 else
   log_info "Session: $SID"
   log_info "Step 2: Google Claude Opus Thinking + tool..."
-  opencode run -s "$SID" -m google/antigravity-claude-opus-4-5-thinking-low \
+  opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking-low \
     "Run: echo 'Test2-Google-Claude'" \
     > /tmp/e2e-t2-s2.log 2>&1 || true
   
@@ -119,7 +119,7 @@ echo ""
 # Test 4: Anthropic Claude → Gemini (reverse)
 echo "Test 4: Anthropic Claude → Gemini (reverse direction)"
 log_info "Step 1: Anthropic Claude with tool..."
-opencode run -m anthropic/claude-opus-4-5 \
+opencode run -m anthropic/claude-opus-4-6 \
   "Run: echo 'Test4-Anthropic-Start'" \
   > /tmp/e2e-t4-s1.log 2>&1 || true
 
@@ -185,12 +185,12 @@ else
   CHAIN_OK=true
   
   log_info "Turn 2: Anthropic Claude..."
-  opencode run -s "$SID" -m anthropic/claude-opus-4-5 \
+  opencode run -s "$SID" -m anthropic/claude-opus-4-6 \
     "Run: echo 'Turn2'" > /tmp/e2e-t6-s2.log 2>&1 || true
   check_signature_error /tmp/e2e-t6-s2.log && CHAIN_OK=false
   
   log_info "Turn 3: Google Claude Opus..."
-  opencode run -s "$SID" -m google/antigravity-claude-opus-4-5-thinking-low \
+  opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking-low \
     "Run: echo 'Turn3'" > /tmp/e2e-t6-s3.log 2>&1 || true
   check_signature_error /tmp/e2e-t6-s3.log && CHAIN_OK=false
   
@@ -228,7 +228,7 @@ if [ -z "$SID" ]; then
 else
   log_info "Session: $SID"
   log_info "Step 2: Anthropic Claude Opus..."
-  opencode run -s "$SID" -m anthropic/claude-opus-4-5 \
+  opencode run -s "$SID" -m anthropic/claude-opus-4-6 \
     "Run: echo 'Test7-Anthropic-Claude'" \
     > /tmp/e2e-t7-s2.log 2>&1 || true
   
@@ -255,7 +255,7 @@ else
   TRIPLE_OK=true
   
   log_info "Step 2: Anthropic Claude..."
-  opencode run -s "$SID" -m anthropic/claude-opus-4-5 \
+  opencode run -s "$SID" -m anthropic/claude-opus-4-6 \
     "Run: echo 'Triple-2'" > /tmp/e2e-t8-s2.log 2>&1 || true
   check_signature_error /tmp/e2e-t8-s2.log && TRIPLE_OK=false
   
