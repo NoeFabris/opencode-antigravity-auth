@@ -11,7 +11,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import * as storageModule from "./storage";
-import type { AccountStorageV3, AccountMetadataV3 } from "./storage";
+import type { AccountStorageV4, AccountMetadataV3 } from "./storage";
 
 vi.mock("proper-lockfile", () => ({
   default: {
@@ -46,9 +46,9 @@ function createMockAccount(overrides: Partial<AccountMetadataV3> = {}): AccountM
   };
 }
 
-function createMockStorage(accounts: AccountMetadataV3[], activeIndex = 0): AccountStorageV3 {
+function createMockStorage(accounts: AccountMetadataV3[], activeIndex = 0): AccountStorageV4 {
   return {
-    version: 3,
+    version: 4,
     accounts,
     activeIndex,
   };
@@ -83,7 +83,7 @@ describe("loadAccounts", () => {
       const result = await storageModule.loadAccounts();
 
       expect(result).not.toBeNull();
-      expect(result?.version).toBe(3);
+      expect(result?.version).toBe(4);
       expect(result?.accounts).toHaveLength(1);
     });
 
@@ -141,7 +141,7 @@ describe("loadAccounts", () => {
     });
 
     it("returns null on invalid storage format", async () => {
-      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ version: 3, notAccounts: [] }));
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ version: 4, notAccounts: [] }));
 
       const result = await storageModule.loadAccounts();
 
@@ -175,7 +175,7 @@ describe("loadAccounts", () => {
 
       const result = await storageModule.loadAccounts();
 
-      expect(result?.version).toBe(3);
+      expect(result?.version).toBe(4);
       expect(result?.accounts).toHaveLength(1);
     });
   });
@@ -197,7 +197,7 @@ describe("saveAccounts", () => {
     const writtenContent = vi.mocked(fs.writeFile).mock.calls[0]?.[1];
     expect(writtenContent).toBeDefined();
     const parsed = JSON.parse(writtenContent as string);
-    expect(parsed.version).toBe(3);
+    expect(parsed.version).toBe(4);
     expect(parsed.accounts).toHaveLength(1);
   });
 });

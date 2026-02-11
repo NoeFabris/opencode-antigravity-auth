@@ -1,5 +1,5 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
-import { loadAccounts, saveAccounts, type AccountStorageV3, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
+import { loadAccounts, saveAccounts, type AccountStorageV4, type AccountMetadataV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
@@ -7,26 +7,11 @@ import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FIN
 import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { getModelFamily } from "./transform/model-resolver";
 import { debugLogToFile } from "./debug";
-import { ANTIGRAVITY_VERSION } from "../constants";
+
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
 export type { AccountSelectionStrategy } from "./config/schema";
 
-/**
- * Update fingerprint userAgent to current version if outdated.
- * Extracts platform/arch from existing userAgent and rebuilds with current version.
- */
-function updateFingerprintVersion(fingerprint: Fingerprint): Fingerprint {
-  const match = fingerprint.userAgent.match(/^antigravity\/[\d.]+ (.+)$/);
-  if (match) {
-    const platformArch = match[1];
-    const expectedUserAgent = `antigravity/${ANTIGRAVITY_VERSION} ${platformArch}`;
-    if (fingerprint.userAgent !== expectedUserAgent) {
-      return { ...fingerprint, userAgent: expectedUserAgent };
-    }
-  }
-  return fingerprint;
-}
 
 export type RateLimitReason = 
   | "QUOTA_EXHAUSTED"
@@ -334,7 +319,7 @@ export class AccountManager {
     return new AccountManager(authFallback, stored);
   }
 
-  constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
+  constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV4 | null) {
     const authParts = authFallback ? parseRefreshParts(authFallback.refresh) : null;
 
     if (stored && stored.accounts.length === 0) {
@@ -375,10 +360,8 @@ export class AccountManager {
             coolingDownUntil: acc.coolingDownUntil,
             cooldownReason: acc.cooldownReason,
             touchedForQuota: {},
-            // Use stored fingerprint (with updated version) or generate new one
-            fingerprint: acc.fingerprint
-              ? updateFingerprintVersion(acc.fingerprint)
-              : generateFingerprint(),
+            fingerprint: acc.fingerprint ?? generateFingerprint(),
+            fingerprintHistory: acc.fingerprintHistory ?? [],
             proxyUrl: acc.proxyUrl,
             cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
             cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
@@ -996,8 +979,8 @@ export class AccountManager {
     const claudeIndex = Math.max(0, this.currentAccountIndexByFamily.claude);
     const geminiIndex = Math.max(0, this.currentAccountIndexByFamily.gemini);
     
-    const storage: AccountStorageV3 = {
-      version: 3,
+    const storage: AccountStorageV4 = {
+      version: 4,
       accounts: this.accounts.map((a) => ({
         email: a.email,
         refreshToken: a.parts.refreshToken,

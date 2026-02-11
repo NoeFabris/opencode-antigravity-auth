@@ -7,7 +7,7 @@ import {
   ANTIGRAVITY_SCOPES,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_LOAD_ENDPOINTS,
-  ANTIGRAVITY_HEADERS,
+  getAntigravityHeaders,
   GEMINI_CLI_HEADERS,
 } from "../constants";
 import { createLogger } from "../plugin/logger";
@@ -142,7 +142,7 @@ async function fetchProjectID(accessToken: string): Promise<string> {
     "Content-Type": "application/json",
     "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
     "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
-    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
+    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
   };
 
   const loadEndpoints = Array.from(

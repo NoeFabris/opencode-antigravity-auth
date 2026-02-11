@@ -1,6 +1,6 @@
 import {
   ANTIGRAVITY_ENDPOINT_PROD,
-  ANTIGRAVITY_HEADERS,
+  getAntigravityHeaders,
   ANTIGRAVITY_PROVIDER_ID,
 } from "../constants";
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./auth";
@@ -189,7 +189,7 @@ async function fetchAvailableModels(
   proxyUrl?: string,
 ): Promise<FetchAvailableModelsResponse> {
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
-  const quotaUserAgent = ANTIGRAVITY_HEADERS["User-Agent"] || "antigravity/windows/amd64";
+  const quotaUserAgent = getAntigravityHeaders()["User-Agent"] || "antigravity/windows/amd64";
   const errors: string[] = [];
 
   const body = projectId ? { project: projectId } : {};

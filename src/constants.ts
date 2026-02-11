@@ -70,27 +70,34 @@ export const GEMINI_CLI_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
  */
 export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
 
-/**
- * Antigravity version string - SINGLE SOURCE OF TRUTH.
- * Update this value when a new version is needed.
- * Used by ANTIGRAVITY_HEADERS, fingerprint.ts, and all version-dependent code.
- * 
- * @remarks
- * This version MUST be kept in sync with Google's supported Antigravity versions.
- * Using an outdated version will cause "This version of Antigravity is no longer supported" errors.
- * 
- * @see https://github.com/NoeFabris/opencode-antigravity-auth/issues/324
- */
-export const ANTIGRAVITY_VERSION = "1.15.8" as const;
+const ANTIGRAVITY_VERSION_FALLBACK = "1.15.8";
+let antigravityVersion = ANTIGRAVITY_VERSION_FALLBACK;
+let versionLocked = false;
+
+export function getAntigravityVersion(): string { return antigravityVersion; }
 
 /**
- * Default headers for Antigravity API requests.
- * 
- * Uses ANTIGRAVITY_VERSION to ensure the User-Agent version stays in sync
- * with the single source of truth, preventing "version no longer supported" errors.
- * 
- * @see https://github.com/NoeFabris/opencode-antigravity-auth/issues/324
+ * Set the runtime Antigravity version. Can only be called once (at startup).
+ * Subsequent calls are silently ignored to prevent accidental mutation.
  */
+export function setAntigravityVersion(version: string): void {
+  if (versionLocked) return;
+  antigravityVersion = version;
+  versionLocked = true;
+}
+
+/** @deprecated Use getAntigravityVersion() for runtime access. */
+export const ANTIGRAVITY_VERSION = ANTIGRAVITY_VERSION_FALLBACK;
+
+export function getAntigravityHeaders(): HeaderSet & { "Client-Metadata": string } {
+  return {
+    "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${getAntigravityVersion()} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
+    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
+  };
+}
+
+/** @deprecated Use getAntigravityHeaders() for runtime access. */
 export const ANTIGRAVITY_HEADERS = {
   "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${ANTIGRAVITY_VERSION} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
   "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
@@ -105,13 +112,13 @@ export const GEMINI_CLI_HEADERS = {
 
 const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "linux/amd64", "darwin/amd64", "linux/arm64"] as const;
 
-// Derive user agents from version (keeps them in sync automatically)
-const ANTIGRAVITY_USER_AGENTS = ANTIGRAVITY_PLATFORMS.map(platform => `antigravity/${ANTIGRAVITY_VERSION} ${platform}`);
+function getAntigravityUserAgents(): string[] {
+  return ANTIGRAVITY_PLATFORMS.map(platform => `antigravity/${getAntigravityVersion()} ${platform}`);
+}
 
 const ANTIGRAVITY_API_CLIENTS = [
   "google-cloud-sdk vscode_cloudshelleditor/0.1",
   "google-cloud-sdk vscode/1.96.0",
-  "google-cloud-sdk jetbrains/2024.3",
   "google-cloud-sdk vscode/1.95.0",
 ] as const;
 
@@ -147,9 +154,9 @@ export function getRandomizedHeaders(style: HeaderStyle): HeaderSet {
     };
   }
   return {
-    "User-Agent": randomFrom(ANTIGRAVITY_USER_AGENTS),
+    "User-Agent": randomFrom(getAntigravityUserAgents()),
     "X-Goog-Api-Client": randomFrom(ANTIGRAVITY_API_CLIENTS),
-    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
+    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
   };
 }
 
