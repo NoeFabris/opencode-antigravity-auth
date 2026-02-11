@@ -3151,7 +3151,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         refreshToken: parts.refreshToken,
                         projectId: parts.projectId ?? updatedAccounts[refreshAccountIndex]?.projectId,
                         managedProjectId: parts.managedProjectId ?? updatedAccounts[refreshAccountIndex]?.managedProjectId,
-                        proxyUrl: process.env.ANTIGRAVITY_LOGIN_PROXY ?? updatedAccounts[refreshAccountIndex]?.proxyUrl,
+                        proxyUrl: process.env.ANTIGRAVITY_LOGIN_PROXY !== undefined
+                          ? process.env.ANTIGRAVITY_LOGIN_PROXY
+                          : updatedAccounts[refreshAccountIndex]?.proxyUrl,
                         addedAt: updatedAccounts[refreshAccountIndex]?.addedAt ?? Date.now(),
                         lastUsed: Date.now(),
                       };
