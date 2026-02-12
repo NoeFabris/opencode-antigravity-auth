@@ -84,6 +84,39 @@ The correct key is `plugin` (singular):
 
 **Not** `"plugins"` (will cause "Unrecognized key" error).
 
+### "Invalid SemVer: beta"
+
+**Error:**
+```
+Invalid SemVer
+{
+  "name": "UnknownError",
+  "data": {
+    "message": "Error: Invalid SemVer: beta ... isOutdated (src/bun/registry.ts:...)"
+  }
+}
+```
+
+**Why this happens:** OpenCode's cache may keep the plugin dependency as a dist-tag (`"beta"`) in `~/.cache/opencode/package.json` and `~/.cache/opencode/bun.lock`. Some OpenCode versions compare plugin versions as strict semver and fail on non-numeric tags.
+
+**Fix (recommended):** Re-resolve the dependency in OpenCode cache so it is pinned to a real version.
+
+**macOS / Linux:**
+```bash
+cd ~/.cache/opencode
+bun add opencode-antigravity-auth@latest
+```
+
+**Windows (PowerShell):**
+```powershell
+Set-Location "$env:USERPROFILE\.cache\opencode"
+bun add opencode-antigravity-auth@latest
+```
+
+Then restart OpenCode.
+
+> If you intentionally run beta channel, use `bun add opencode-antigravity-auth@beta` instead.
+
 ---
 
 ## Gemini CLI Permission Error
