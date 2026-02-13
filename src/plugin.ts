@@ -2730,6 +2730,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     await saveAccounts(existingStorage);
                   }
                   console.log("");
+                  console.log("\nPress Enter to return to the menu...");
+                  const { createInterface } = await import("node:readline/promises");
+                  const { stdin, stdout } = await import("node:process");
+                  const rl = createInterface({ input: stdin, output: stdout });
+                  await rl.question("");
+                  rl.close();
                   continue;
                 }
 
