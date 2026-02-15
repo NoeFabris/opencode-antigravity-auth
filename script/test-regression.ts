@@ -56,6 +56,7 @@ const GEMINI_FLASH = "google/antigravity-gemini-3-flash";
 const GEMINI_FLASH_CLI_QUOTA = "google/gemini-2.5-flash";
 const CLAUDE_SONNET = "google/antigravity-claude-sonnet-4-5-thinking-low";
 const CLAUDE_OPUS = "google/antigravity-claude-opus-4-5-thinking-low";
+const OPENCODE_BIN = process.platform === "win32" ? "opencode.cmd" : "opencode";
 
 const SANITY_TESTS: MultiTurnTest[] = [
   {
@@ -291,8 +292,9 @@ async function runTurn(
       ? ["run", prompt, "--session", sessionId, "--model", model]
       : ["run", prompt, "--model", model, "--title", sessionTitle];
 
-    const proc = spawn("opencode", args, {
+    const proc = spawn(OPENCODE_BIN, args, {
       stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
       cwd: process.cwd(),
     });
 
@@ -345,8 +347,9 @@ async function runTurn(
 
 async function deleteSession(sessionId: string): Promise<void> {
   return new Promise((resolve) => {
-    const proc = spawn("opencode", ["session", "delete", sessionId, "--force"], {
+    const proc = spawn(OPENCODE_BIN, ["session", "delete", sessionId, "--force"], {
       stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
       timeout: 10000,
       cwd: process.cwd(),
     });

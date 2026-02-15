@@ -33,6 +33,7 @@ const MODELS: ModelTest[] = [
 
 const TEST_PROMPT = "Reply with exactly one word: WORKING";
 const DEFAULT_TIMEOUT_MS = 120_000;
+const OPENCODE_BIN = process.platform === "win32" ? "opencode.cmd" : "opencode";
 
 interface TestResult {
   success: boolean;
@@ -44,8 +45,9 @@ async function testModel(model: string, timeoutMs: number): Promise<TestResult> 
   const start = Date.now();
 
   return new Promise((resolve) => {
-    const proc = spawn("opencode", ["run", TEST_PROMPT, "--model", model], {
+    const proc = spawn(OPENCODE_BIN, ["run", TEST_PROMPT, "--model", model], {
       stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
     });
 
     let stdout = "";
