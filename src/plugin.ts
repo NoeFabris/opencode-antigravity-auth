@@ -11,8 +11,16 @@ import {
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import {
+  promptAccountProxyConfiguration,
+  promptAddAnotherAccount,
+  isTTY,
+  promptLoginMode,
+  promptOAuthProxyConfiguration,
+  promptProjectId,
+} from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
+import { fetchWithProxy, ProxyExhaustedError } from "./plugin/proxy";
 import {
   startAntigravityDebugRequest, 
   logAntigravityDebugResponse,
@@ -39,7 +47,13 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
+import {
+  clearAccounts,
+  loadAccounts,
+  saveAccounts,
+  saveAccountsReplace,
+  type ProxyConfig,
+} from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
@@ -155,7 +169,7 @@ async function triggerAsyncQuotaRefreshForAccount(
       return;
     }
     
-    const results = await checkAccountsQuota([singleAccount], client, providerId);
+    const results = await checkAccountsQuota([singleAccount], client, providerId, [accountIndex]);
     
     if (results[0]?.status === "ok" && results[0]?.quota?.groups) {
       accountManager.updateQuotaCache(accountIndex, results[0].quota.groups);
@@ -441,6 +455,8 @@ async function verifyAccountAccess(
     email?: string;
     projectId?: string;
     managedProjectId?: string;
+    proxies?: ProxyConfig[];
+    accountIndex?: number;
   },
   client: PluginClient,
   providerId: string,
@@ -463,7 +479,7 @@ async function verifyAccountAccess(
 
   let refreshedAuth: Awaited<ReturnType<typeof refreshAccessToken>>;
   try {
-    refreshedAuth = await refreshAccessToken(auth, client, providerId);
+    refreshedAuth = await refreshAccessToken(auth, client, providerId, account.proxies, account.accountIndex);
   } catch (error) {
     if (error instanceof AntigravityTokenRefreshError) {
       return { status: "error", message: error.message };
@@ -505,12 +521,17 @@ async function verifyAccountAccess(
 
   let response: Response;
   try {
-    response = await fetch(`${ANTIGRAVITY_ENDPOINT_PROD}/v1internal:streamGenerateContent?alt=sse`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
+    response = await fetchWithProxy(
+      `${ANTIGRAVITY_ENDPOINT_PROD}/v1internal:streamGenerateContent?alt=sse`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      },
+      account.proxies,
+      account.accountIndex,
+    );
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       return { status: "error", message: "Verification check timed out." };
@@ -730,6 +751,8 @@ function parseOAuthCallbackInput(
 
 async function promptManualOAuthInput(
   fallbackState: string,
+  proxies?: ProxyConfig[],
+  accountIndex?: number,
 ): Promise<AntigravityTokenExchangeResult> {
   console.log("1. Open the URL above in your browser and complete Google sign-in.");
   console.log("2. After approving, copy the full redirected localhost URL from the address bar.");
@@ -743,7 +766,7 @@ async function promptManualOAuthInput(
     return { type: "failed", error: params.error };
   }
 
-  return exchangeAntigravity(params.code, params.state);
+  return exchangeAntigravity(params.code, params.state, proxies, accountIndex);
 }
 
 function clampInt(value: number, min: number, max: number): number {
@@ -756,6 +779,7 @@ function clampInt(value: number, min: number, max: number): number {
 async function persistAccountPool(
   results: Array<Extract<AntigravityTokenExchangeResult, { type: "success" }>>,
   replaceAll: boolean = false,
+  resultProxies: Array<ProxyConfig[] | undefined> = [],
 ): Promise<void> {
   if (results.length === 0) {
     return;
@@ -780,7 +804,8 @@ async function persistAccountPool(
     }
   }
 
-  for (const result of results) {
+  for (const [resultIndex, result] of results.entries()) {
+    const configuredProxies = resultProxies[resultIndex];
     const parts = parseRefreshParts(result.refresh);
     if (!parts.refreshToken) {
       continue;
@@ -809,6 +834,7 @@ async function persistAccountPool(
         addedAt: now,
         lastUsed: now,
         enabled: true,
+        proxies: configuredProxies !== undefined ? [...configuredProxies] : [],
       });
       continue;
     }
@@ -828,6 +854,7 @@ async function persistAccountPool(
       projectId: parts.projectId ?? existing.projectId,
       managedProjectId: parts.managedProjectId ?? existing.managedProjectId,
       lastUsed: now,
+      proxies: configuredProxies !== undefined ? [...configuredProxies] : existing.proxies ?? [],
     };
     
     // Update the token index if the token changed
@@ -1352,11 +1379,17 @@ export const createAntigravityPlugin = (providerId: string) => async (
       const parts = parseRefreshParts(auth.refresh);
       const projectId = parts.managedProjectId || parts.projectId || "unknown";
 
+      const searchAccount = activeAccountManager?.getAccounts().find((acc) => {
+        return acc.parts.refreshToken === parts.refreshToken;
+      });
+      const searchProxies = searchAccount?.proxies;
+      const searchAccountIndex = searchAccount?.index;
+
       // Ensure we have a valid access token
       let accessToken = auth.access;
       if (!accessToken || accessTokenExpired(auth)) {
         try {
-          const refreshed = await refreshAccessToken(auth, client, providerId);
+          const refreshed = await refreshAccessToken(auth, client, providerId, searchProxies, searchAccountIndex);
           accessToken = refreshed?.access;
         } catch (error) {
           return `Error: Failed to refresh access token: ${error instanceof Error ? error.message : String(error)}`;
@@ -1376,6 +1409,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
         accessToken,
         projectId,
         ctx.abort,
+        searchProxies,
+        searchAccountIndex,
       );
     },
   });
@@ -1705,7 +1740,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             if (accessTokenExpired(authRecord)) {
               try {
-                const refreshed = await refreshAccessToken(authRecord, client, providerId);
+                const refreshed = await refreshAccessToken(authRecord, client, providerId, account.proxies, account.index);
                 if (!refreshed) {
                   const { failures, shouldCooldown, cooldownMs } = trackAccountFailure(account.index);
                   getHealthTracker().recordFailure(account.index);
@@ -1779,7 +1814,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             let projectContext: ProjectContextResult;
             try {
-              projectContext = await ensureProjectContext(authRecord);
+              projectContext = await ensureProjectContext(authRecord, account.proxies, account.index);
               resetAccountFailureState(account.index);
             } catch (error) {
               const { failures, shouldCooldown, cooldownMs } = trackAccountFailure(account.index);
@@ -1847,7 +1882,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
               try {
                 pushDebug("thinking-warmup: start");
-                const warmupResponse = await fetch(warmupUrl, warmupInit);
+                const warmupResponse = await fetchWithProxy(
+                  warmupUrl,
+                  warmupInit,
+                  account.proxies,
+                  account.index,
+                );
                 const transformed = await transformAntigravityResponse(
                   warmupResponse,
                   true,
@@ -2007,7 +2047,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                const response = await fetch(prepared.request, prepared.init);
+                const response = await fetchWithProxy(
+                  prepared.request,
+                  prepared.init,
+                  account.proxies,
+                  account.index,
+                );
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
 
@@ -2441,6 +2486,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = false;
                 }
 
+                if (error instanceof ProxyExhaustedError && i === ANTIGRAVITY_ENDPOINT_FALLBACKS.length - 1) {
+                  const proxyErrorMessage = error.proxyCount > 0
+                    ? `All proxies failed for ${account.email || `Account ${account.index + 1}`}. Check proxy configuration.`
+                    : `No enabled proxy configured for ${account.email || `Account ${account.index + 1}`}. Refusing direct connection to avoid IP leakage.`
+                  await showToast(proxyErrorMessage, "error")
+                }
+
                 // Handle recoverable thinking errors - retry with forced recovery
                 if (error instanceof Error && error.message === "THINKING_RECOVERY_NEEDED") {
                   // Only retry once with forced recovery to avoid infinite loops
@@ -2452,10 +2504,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   }
                   
                   // Already tried with forced recovery, give up and return error
-                  const recoveryError = error as any;
-                  const originalError = recoveryError.originalError || { error: { message: "Thinking recovery triggered" } };
-                  
-                  const recoveryMessage = `${originalError.error?.message || "Session recovery failed"}\n\n[RECOVERY] Thinking block corruption could not be resolved. Try starting a new session.`;
+                  const originalError = (
+                    typeof error === "object" &&
+                    error !== null &&
+                    "originalError" in error &&
+                    typeof (error as { originalError?: unknown }).originalError === "object" &&
+                    (error as { originalError?: unknown }).originalError !== null
+                  )
+                    ? (error as { originalError: { error?: { message?: string } } }).originalError
+                    : undefined;
+                  const originalMessage = originalError?.error?.message || "Thinking recovery triggered";
+
+                  const recoveryMessage = `${originalMessage || "Session recovery failed"}\n\n[RECOVERY] Thinking block corruption could not be resolved. Try starting a new session.`;
                   
                   return new Response(JSON.stringify({
                     type: "error",
@@ -2734,6 +2794,33 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 }
 
                 if (menuResult.mode === "manage") {
+                  if (menuResult.configureProxyAccountIndex !== undefined) {
+                    const proxyAccountIndex = menuResult.configureProxyAccountIndex;
+                    const acc = existingStorage.accounts[proxyAccountIndex];
+                    if (!acc) {
+                      console.log(`\nAccount ${proxyAccountIndex + 1} not found.\n`);
+                      continue;
+                    }
+
+                    const label = acc.email || `Account ${proxyAccountIndex + 1}`;
+                    const updatedProxies = await promptAccountProxyConfiguration(label, acc.proxies ?? []);
+                    if (updatedProxies === undefined) {
+                      console.log("\nProxy configuration cancelled.\n");
+                      continue;
+                    }
+
+                    acc.proxies = [...updatedProxies];
+                    await saveAccounts(existingStorage);
+                    activeAccountManager?.setAccountProxies(proxyAccountIndex, updatedProxies);
+
+                    if (updatedProxies.length === 0) {
+                      console.log(`\nCleared proxies for ${label}.\n`);
+                    } else {
+                      const enabledCount = updatedProxies.filter((proxy) => proxy.enabled !== false).length;
+                      console.log(`\nUpdated proxies for ${label}: ${updatedProxies.length} configured (${enabledCount} enabled).\n`);
+                    }
+                  }
+
                   if (menuResult.toggleAccountIndex !== undefined) {
                     const acc = existingStorage.accounts[menuResult.toggleAccountIndex];
                     if (acc) {
@@ -2771,7 +2858,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       const label = account.email || `Account ${i + 1}`;
                       process.stdout.write(`- [${i + 1}/${existingStorage.accounts.length}] ${label} ... `);
 
-                      const verification = await verifyAccountAccess(account, client, providerId);
+                      const verification = await verifyAccountAccess({ ...account, accountIndex: i }, client, providerId);
                       if (verification.status === "ok") {
                         const { changed, wasVerificationRequired } = clearStoredAccountVerificationRequired(account, true);
                         if (changed) {
@@ -2853,7 +2940,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   const label = account.email || `Account ${verifyAccountIndex + 1}`;
                   console.log(`\nChecking verification status for ${label}...\n`);
 
-                  const verification = await verifyAccountAccess(account, client, providerId);
+                  const verification = await verifyAccountAccess({ ...account, accountIndex: verifyAccountIndex }, client, providerId);
 
                   if (verification.status === "ok") {
                     const { changed, wasVerificationRequired } = clearStoredAccountVerificationRequired(account, true);
@@ -3014,7 +3101,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
             while (accounts.length < MAX_OAUTH_ACCOUNTS) {
               console.log(`\n=== Antigravity OAuth (Account ${accounts.length + 1}) ===`);
 
+              const defaultProxies =
+                refreshAccountIndex !== undefined
+                  ? existingStorage?.accounts[refreshAccountIndex]?.proxies ?? []
+                  : [];
+              const proxies = await promptOAuthProxyConfiguration(defaultProxies);
+              if (proxies.length > 0) {
+                console.log("\nProxy configured for this account.");
+                console.log("Ensure your browser/system login environment is also routed through the same proxy to avoid IP leakage during Google sign-in.\n");
+              }
+
               const projectId = await promptProjectId();
+              const accountIndexBase = startFresh ? 0 : (existingStorage?.accounts.length ?? 0);
+              const accountIndex =
+                refreshAccountIndex !== undefined
+                  ? refreshAccountIndex
+                  : accountIndexBase + accounts.length;
 
               const result = await (async (): Promise<AntigravityTokenExchangeResult> => {
                 const authorization = await authorizeAntigravity(projectId);
@@ -3028,7 +3130,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     console.log("Could not open browser automatically.");
                     console.log("Please open the URL above manually in your local browser.\n");
                   }
-                  return promptManualOAuthInput(fallbackState);
+                  return promptManualOAuthInput(fallbackState, proxies, accountIndex);
                 }
 
                 let listener: OAuthListener | null = null;
@@ -3066,7 +3168,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                           await listener.close();
                         } catch {}
                         
-                        return promptManualOAuthInput(fallbackState);
+                        return promptManualOAuthInput(fallbackState, proxies, accountIndex);
                       }
                       throw err;
                     }
@@ -3076,7 +3178,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       return { type: "failed", error: "Missing code or state in callback URL" };
                     }
 
-                    return exchangeAntigravity(params.code, params.state);
+                    return exchangeAntigravity(params.code, params.state, proxies, accountIndex);
                   } catch (error) {
                     if (error instanceof Error && error.message !== "SOFT_TIMEOUT") {
                       return {
@@ -3095,7 +3197,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   }
                 }
 
-                return promptManualOAuthInput(fallbackState);
+                return promptManualOAuthInput(fallbackState, proxies, accountIndex);
               })();
 
               if (result.type === "failed") {
@@ -3129,29 +3231,42 @@ export const createAntigravityPlugin = (providerId: string) => async (
               try {
                 if (refreshAccountIndex !== undefined) {
                   const currentStorage = await loadAccounts();
-                  if (currentStorage) {
+                  const parts = parseRefreshParts(result.refresh);
+                  let refreshedInPlace = false;
+
+                  if (currentStorage && parts.refreshToken) {
                     const updatedAccounts = [...currentStorage.accounts];
-                    const parts = parseRefreshParts(result.refresh);
-                    if (parts.refreshToken) {
+                    const currentAccount = updatedAccounts[refreshAccountIndex];
+
+                    if (currentAccount) {
                       updatedAccounts[refreshAccountIndex] = {
-                        email: result.email ?? updatedAccounts[refreshAccountIndex]?.email,
+                        ...currentAccount,
+                        email: result.email ?? currentAccount.email,
                         refreshToken: parts.refreshToken,
-                        projectId: parts.projectId ?? updatedAccounts[refreshAccountIndex]?.projectId,
-                        managedProjectId: parts.managedProjectId ?? updatedAccounts[refreshAccountIndex]?.managedProjectId,
-                        addedAt: updatedAccounts[refreshAccountIndex]?.addedAt ?? Date.now(),
+                        projectId: parts.projectId ?? currentAccount.projectId,
+                        managedProjectId: parts.managedProjectId ?? currentAccount.managedProjectId,
+                        addedAt: currentAccount.addedAt ?? Date.now(),
                         lastUsed: Date.now(),
+                        proxies: [...proxies],
                       };
+
                       await saveAccounts({
                         version: 4,
                         accounts: updatedAccounts,
                         activeIndex: currentStorage.activeIndex,
                         activeIndexByFamily: currentStorage.activeIndexByFamily,
                       });
+                      activeAccountManager?.setAccountProxies(refreshAccountIndex, proxies);
+                      refreshedInPlace = true;
                     }
+                  }
+
+                  if (!refreshedInPlace) {
+                    await persistAccountPool([result], false, [proxies]);
                   }
                 } else {
                   const isFirstAccount = accounts.length === 1;
-                  await persistAccountPool([result], isFirstAccount && startFresh);
+                  await persistAccountPool([result], isFirstAccount && startFresh, [proxies]);
                 }
               } catch {
               }
@@ -3180,7 +3295,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 break;
               }
             }
-
             const primary = accounts[0];
             if (!primary) {
               return {
@@ -3212,7 +3326,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             };
           }
 
-          // TUI flow (`/connect`) does not support per-account prompts.
+          // TUI flow (`/connect`) does not support per-account selection prompts.
           // Default to adding new accounts (non-destructive).
           // Users can run `opencode auth logout` first if they want a fresh start.
           const projectId = "";
@@ -3220,9 +3334,19 @@ export const createAntigravityPlugin = (providerId: string) => async (
           // Check existing accounts count for toast message
           const existingStorage = await loadAccounts();
           const existingCount = existingStorage?.accounts.length ?? 0;
+          const defaultProxyAccount = existingStorage?.accounts[existingStorage?.activeIndex ?? 0];
+          const defaultProxies = defaultProxyAccount?.proxies ?? [];
+          const proxies = isTTY() ? await promptOAuthProxyConfiguration(defaultProxies) : [];
+          if (proxies.length > 0) {
+            console.log("\nProxy configured for this OAuth flow.");
+            console.log("Ensure your browser/system login environment is also routed through the same proxy to avoid IP leakage during Google sign-in.\n");
+          }
+          const accountIndex = existingCount;
+          const proxyReminder = proxies.length > 0
+            ? "\nProxy is enabled. Ensure your browser/system login environment also uses the same proxy to avoid IP leakage."
+            : "";
 
           const useManualFlow = isHeadless || shouldSkipLocalServer();
-
           let listener: OAuthListener | null = null;
           if (!useManualFlow) {
             try {
@@ -3247,7 +3371,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             return {
               url: authorization.url,
               instructions:
-                "Complete sign-in in your browser. We'll automatically detect the redirect back to localhost.",
+                "Complete sign-in in your browser. We'll automatically detect the redirect back to localhost." + proxyReminder,
               method: "auto",
               callback: async (): Promise<AntigravityTokenExchangeResult> => {
                 const CALLBACK_TIMEOUT_MS = 30000;
@@ -3275,10 +3399,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     return { type: "failed", error: "Missing code or state in callback URL" };
                   }
 
-                  const result = await exchangeAntigravity(params.code, params.state);
+                  const result = await exchangeAntigravity(params.code, params.state, proxies, accountIndex);
                   if (result.type === "success") {
                     try {
-                      await persistAccountPool([result], false);
+                      await persistAccountPool([result], false, [proxies]);
                     } catch {
                     }
 
@@ -3317,7 +3441,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
           return {
             url: authorization.url,
             instructions:
-              "Visit the URL above, complete OAuth, then paste either the full redirect URL or the authorization code.",
+              "Visit the URL above, complete OAuth, then paste either the full redirect URL or the authorization code." + proxyReminder,
             method: "code",
             callback: async (codeInput: string): Promise<AntigravityTokenExchangeResult> => {
               const params = parseOAuthCallbackInput(codeInput, fallbackState);
@@ -3325,11 +3449,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 return { type: "failed", error: params.error };
               }
 
-              const result = await exchangeAntigravity(params.code, params.state);
+              const result = await exchangeAntigravity(params.code, params.state, proxies, accountIndex);
               if (result.type === "success") {
                 try {
                   // TUI flow adds to existing accounts (non-destructive)
-                  await persistAccountPool([result], false);
+                  await persistAccountPool([result], false, [proxies]);
                 } catch {
                   // ignore
                 }

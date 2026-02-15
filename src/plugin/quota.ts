@@ -6,10 +6,11 @@ import {
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./auth";
 import { logQuotaFetch, logQuotaStatus } from "./debug";
 import { ensureProjectContext } from "./project";
+import { fetchWithProxy } from "./proxy";
 import { refreshAccessToken } from "./token";
 import { getModelFamily } from "./transform/model-resolver";
 import type { PluginClient, OAuthAuthDetails } from "./types";
-import type { AccountMetadataV3 } from "./storage";
+import type { AccountMetadataV3, ProxyConfig } from "./storage";
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -172,11 +173,11 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): Quot
   return { groups, modelCount: totalCount };
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS, proxies?: ProxyConfig[], accountIndex?: number): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetchWithProxy(url, { ...options, signal: controller.signal }, proxies, accountIndex);
   } finally {
     clearTimeout(timeout);
   }
@@ -185,6 +186,8 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = F
 async function fetchAvailableModels(
   accessToken: string,
   projectId: string,
+  proxies?: ProxyConfig[],
+  accountIndex?: number,
 ): Promise<FetchAvailableModelsResponse> {
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   const quotaUserAgent = getAntigravityHeaders()["User-Agent"] || "antigravity/windows/amd64";
@@ -199,7 +202,7 @@ async function fetchAvailableModels(
       "User-Agent": quotaUserAgent,
     },
     body: JSON.stringify(body),
-  });
+  }, FETCH_TIMEOUT_MS, proxies, accountIndex);
 
   if (response.ok) {
     return (await response.json()) as FetchAvailableModelsResponse;
@@ -217,6 +220,8 @@ async function fetchAvailableModels(
 async function fetchGeminiCliQuota(
   accessToken: string,
   projectId: string,
+  proxies?: ProxyConfig[],
+  accountIndex?: number,
 ): Promise<RetrieveUserQuotaResponse> {
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   // Use Gemini CLI user-agent to get CLI quota buckets (not Antigravity buckets)
@@ -235,7 +240,7 @@ async function fetchGeminiCliQuota(
         "User-Agent": geminiCliUserAgent,
       },
       body: JSON.stringify(body),
-    });
+    }, FETCH_TIMEOUT_MS, proxies, accountIndex);
 
     if (response.ok) {
       const data = (await response.json()) as RetrieveUserQuotaResponse;
@@ -311,6 +316,7 @@ export async function checkAccountsQuota(
   accounts: AccountMetadataV3[],
   client: PluginClient,
   providerId = ANTIGRAVITY_PROVIDER_ID,
+  accountIndexes?: number[],
 ): Promise<AccountQuotaResult[]> {
   const results: AccountQuotaResult[] = [];
   
@@ -318,19 +324,20 @@ export async function checkAccountsQuota(
 
   for (const [index, account] of accounts.entries()) {
     const disabled = account.enabled === false;
+    const effectiveAccountIndex = accountIndexes?.[index] ?? index;
 
     let auth = buildAuthFromAccount(account);
 
     try {
       if (accessTokenExpired(auth)) {
-        const refreshed = await refreshAccessToken(auth, client, providerId);
+        const refreshed = await refreshAccessToken(auth, client, providerId, account.proxies, effectiveAccountIndex);
         if (!refreshed) {
           throw new Error("Token refresh failed");
         }
         auth = refreshed;
       }
 
-      const projectContext = await ensureProjectContext(auth);
+      const projectContext = await ensureProjectContext(auth, account.proxies, effectiveAccountIndex);
       auth = projectContext.auth;
       const updatedAccount = applyAccountUpdates(account, auth);
 
@@ -339,9 +346,9 @@ export async function checkAccountsQuota(
       
       // Fetch both Antigravity and Gemini CLI quotas in parallel
       const [antigravityResponse, geminiCliResponse] = await Promise.all([
-        fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
+        fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId, account.proxies, effectiveAccountIndex)
           .catch((error): FetchAvailableModelsResponse => ({ models: undefined })),
-        fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
+        fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId, account.proxies, effectiveAccountIndex),
       ]);
 
       // Process Antigravity quota
@@ -364,7 +371,7 @@ export async function checkAccountsQuota(
       }
 
       results.push({
-        index,
+        index: effectiveAccountIndex,
         email: account.email,
         status: "ok",
         disabled,
@@ -376,17 +383,17 @@ export async function checkAccountsQuota(
       // Log quota status for each family
       for (const [family, groupQuota] of Object.entries(quotaResult.groups)) {
         const remainingPercent = (groupQuota.remainingFraction ?? 0) * 100;
-        logQuotaStatus(account.email, index, remainingPercent, family);
+        logQuotaStatus(account.email, effectiveAccountIndex, remainingPercent, family);
       }
     } catch (error) {
       results.push({
-        index,
+        index: effectiveAccountIndex,
         email: account.email,
         status: "error",
         disabled,
         error: error instanceof Error ? error.message : String(error),
       });
-      logQuotaFetch("error", undefined, `account=${account.email ?? index} error=${error instanceof Error ? error.message : String(error)}`);
+      logQuotaFetch("error", undefined, `account=${account.email ?? effectiveAccountIndex} error=${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

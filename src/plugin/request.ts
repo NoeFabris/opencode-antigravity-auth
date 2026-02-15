@@ -593,8 +593,27 @@ const STREAM_ACTION = "streamGenerateContent";
 /**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
  */
-export function isGenerativeLanguageRequest(input: RequestInfo): input is string {
-  return typeof input === "string" && input.includes("generativelanguage.googleapis.com");
+export function isGenerativeLanguageRequest(input: RequestInfo | URL): boolean {
+  const targetHost = "generativelanguage.googleapis.com";
+
+  const matchesUrl = (value: string): boolean => {
+    try {
+      return new URL(value).hostname.toLowerCase() === targetHost;
+    } catch {
+      return value.toLowerCase().includes(targetHost);
+    }
+  };
+
+  if (typeof input === "string") {
+    return matchesUrl(input);
+  }
+
+  if (input instanceof URL) {
+    return input.hostname.toLowerCase() === targetHost;
+  }
+
+  const candidate = (input as Request).url;
+  return typeof candidate === "string" && matchesUrl(candidate);
 }
 
 /**
@@ -663,7 +682,12 @@ export function prepareAntigravityRequest(
     headers.delete("x-goog-user-project");
   }
 
-  const match = input.match(/\/models\/([^:]+):(\w+)/);
+  const inputUrl = typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
+  const match = inputUrl.match(/\/models\/([^:]+):(\w+)/);
   if (!match) {
     return {
       request: input,

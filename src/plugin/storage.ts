@@ -179,6 +179,11 @@ export interface AccountStorage {
 
 export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required";
 
+export interface ProxyConfig {
+  url: string
+  enabled?: boolean
+}
+
 export interface AccountMetadataV3 {
   email?: string;
   refreshToken: string;
@@ -202,6 +207,8 @@ export interface AccountMetadataV3 {
   /** Cached soft quota data */
   cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
   cachedQuotaUpdatedAt?: number;
+  /** Per-account proxy configuration for failover routing */
+  proxies?: ProxyConfig[];
 }
 
 export interface AccountStorageV3 {
@@ -229,6 +236,61 @@ type AnyAccountStorage =
   | AccountStorage
   | AccountStorageV3
   | AccountStorageV4;
+
+const SUPPORTED_PROXY_PROTOCOLS = new Set([
+  "http:",
+  "https:",
+  "socks4:",
+  "socks4a:",
+  "socks5:",
+  "socks5h:",
+]);
+
+function normalizeProxyConfigs(value: unknown): ProxyConfig[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const dedup = new Map<string, ProxyConfig>();
+
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+
+    const rawUrl = (raw as { url?: unknown }).url;
+    if (typeof rawUrl !== "string" || !rawUrl.trim()) {
+      continue;
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      continue;
+    }
+
+    if (!SUPPORTED_PROXY_PROTOCOLS.has(parsed.protocol.toLowerCase())) {
+      continue;
+    }
+
+    const enabledRaw = (raw as { enabled?: unknown }).enabled;
+    const normalizedUrl = parsed.toString();
+    const proxy: ProxyConfig = enabledRaw === false
+      ? { url: normalizedUrl, enabled: false }
+      : { url: normalizedUrl };
+    dedup.set(proxy.url, proxy);
+  }
+
+  return [...dedup.values()];
+}
+
+function normalizeAccountMetadata(account: AccountMetadataV3): AccountMetadataV3 {
+  return {
+    ...account,
+    proxies: normalizeProxyConfigs((account as { proxies?: unknown }).proxies),
+  };
+}
 
 /**
  * Gets the legacy Windows config directory (%APPDATA%\opencode).
@@ -580,6 +642,7 @@ export function migrateV3ToV4(v3: AccountStorageV3): AccountStorageV4 {
       ...acc,
       fingerprint: undefined,
       fingerprintHistory: undefined,
+      proxies: normalizeProxyConfigs((acc as { proxies?: unknown }).proxies),
     })),
     activeIndex: v3.activeIndex,
     activeIndexByFamily: v3.activeIndexByFamily,
@@ -660,6 +723,11 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
 
     // Deduplicate accounts by email (keeps newest entry for each email)
     const deduplicatedAccounts = deduplicateAccountsByEmail(validAccounts);
+    const normalizedAccounts = deduplicatedAccounts.map(normalizeAccountMetadata);
+    const shouldBackfillProxies = normalizedAccounts.some((_, idx) => {
+      const original = deduplicatedAccounts[idx] as { proxies?: unknown } | undefined;
+      return !Array.isArray(original?.proxies);
+    });
 
     // Clamp activeIndex to valid range after deduplication
     let activeIndex =
@@ -667,16 +735,31 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
       Number.isFinite(storage.activeIndex)
         ? storage.activeIndex
         : 0;
-    if (deduplicatedAccounts.length > 0) {
-      activeIndex = Math.min(activeIndex, deduplicatedAccounts.length - 1);
+    if (normalizedAccounts.length > 0) {
+      activeIndex = Math.min(activeIndex, normalizedAccounts.length - 1);
       activeIndex = Math.max(activeIndex, 0);
     } else {
       activeIndex = 0;
     }
 
+    if (shouldBackfillProxies) {
+      try {
+        await saveAccounts({
+          version: 4,
+          accounts: normalizedAccounts,
+          activeIndex,
+          activeIndexByFamily: storage.activeIndexByFamily,
+        });
+      } catch (saveError) {
+        log.warn("Failed to persist proxy backfill", {
+          error: String(saveError),
+        });
+      }
+    }
+
     return {
       version: 4,
-      accounts: deduplicatedAccounts,
+      accounts: normalizedAccounts,
       activeIndex,
       activeIndexByFamily: storage.activeIndexByFamily,
     };
@@ -754,21 +837,33 @@ async function loadAccountsUnsafe(): Promise<AccountStorageV4 | null> {
     await ensureSecurePermissions(path);
 
     const content = await fs.readFile(path, "utf-8");
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(content) as AnyAccountStorage;
 
     if (parsed.version === 1) {
-      return migrateV3ToV4(migrateV2ToV3(migrateV1ToV2(parsed)));
+      const migrated = migrateV3ToV4(migrateV2ToV3(migrateV1ToV2(parsed)));
+      return {
+        ...migrated,
+        accounts: deduplicateAccountsByEmail(migrated.accounts).map(normalizeAccountMetadata),
+      };
     }
     if (parsed.version === 2) {
-      return migrateV3ToV4(migrateV2ToV3(parsed));
+      const migrated = migrateV3ToV4(migrateV2ToV3(parsed));
+      return {
+        ...migrated,
+        accounts: deduplicateAccountsByEmail(migrated.accounts).map(normalizeAccountMetadata),
+      };
     }
     if (parsed.version === 3) {
-      return migrateV3ToV4(parsed);
+      const migrated = migrateV3ToV4(parsed);
+      return {
+        ...migrated,
+        accounts: deduplicateAccountsByEmail(migrated.accounts).map(normalizeAccountMetadata),
+      };
     }
 
     return {
       ...parsed,
-      accounts: deduplicateAccountsByEmail(parsed.accounts),
+      accounts: deduplicateAccountsByEmail(parsed.accounts).map(normalizeAccountMetadata),
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

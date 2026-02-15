@@ -24,7 +24,7 @@ export type AuthMenuAction =
   | { type: 'configure-models' }
   | { type: 'cancel' };
 
-export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'verify' | 'cancel';
+export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'proxy' | 'verify' | 'cancel';
 
 function formatRelativeTime(timestamp: number | undefined): string {
   if (!timestamp) return 'never';
@@ -118,6 +118,7 @@ export async function showAccountDetails(account: AccountInfo): Promise<AccountA
       { label: 'Back', value: 'back' as const },
       { label: 'Verify account access', value: 'verify' as const, color: 'cyan' },
       { label: account.enabled === false ? 'Enable account' : 'Disable account', value: 'toggle' as const, color: account.enabled === false ? 'green' : 'yellow' },
+      { label: 'Manage proxies', value: 'proxy' as const, color: 'cyan' },
       { label: 'Refresh token', value: 'refresh' as const, color: 'cyan' },
       { label: 'Delete this account', value: 'delete' as const, color: 'red' },
     ], { 

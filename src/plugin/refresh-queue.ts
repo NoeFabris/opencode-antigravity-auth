@@ -224,7 +224,7 @@ export class ProactiveRefreshQueue {
       minutesUntilExpiry,
     });
 
-    return refreshAccessToken(auth, this.client, this.providerId);
+    return refreshAccessToken(auth, this.client, this.providerId, account.proxies, account.index);
   }
 
   /**

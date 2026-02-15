@@ -3,7 +3,9 @@ import { formatRefreshParts, parseRefreshParts, calculateTokenExpiry } from "./a
 import { clearCachedAuth, storeCachedAuth } from "./cache";
 import { createLogger } from "./logger";
 import { invalidateProjectContextCache } from "./project";
+import { fetchWithProxy } from "./proxy";
 import type { OAuthAuthDetails, PluginClient, RefreshParts } from "./types";
+import type { ProxyConfig } from "./storage";
 
 const log = createLogger("token");
 
@@ -86,6 +88,8 @@ export async function refreshAccessToken(
   auth: OAuthAuthDetails,
   client: PluginClient,
   providerId: string,
+  proxies?: ProxyConfig[],
+  accountIndex?: number,
 ): Promise<OAuthAuthDetails | undefined> {
   const parts = parseRefreshParts(auth.refresh);
   if (!parts.refreshToken) {
@@ -94,7 +98,7 @@ export async function refreshAccessToken(
 
   try {
     const startTime = Date.now();
-    const response = await fetch("https://oauth2.googleapis.com/token", {
+    const response = await fetchWithProxy("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -105,7 +109,7 @@ export async function refreshAccessToken(
         client_id: ANTIGRAVITY_CLIENT_ID,
         client_secret: ANTIGRAVITY_CLIENT_SECRET,
       }),
-    });
+    }, proxies, accountIndex);
 
     if (!response.ok) {
       let errorText: string | undefined;

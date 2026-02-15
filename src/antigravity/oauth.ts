@@ -12,6 +12,8 @@ import {
 } from "../constants";
 import { createLogger } from "../plugin/logger";
 import { calculateTokenExpiry } from "../plugin/auth";
+import { fetchWithProxy } from "../plugin/proxy";
+import type { ProxyConfig } from "../plugin/storage";
 
 const log = createLogger("oauth");
 
@@ -119,17 +121,19 @@ async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeoutMs = FETCH_TIMEOUT_MS,
+  proxies?: ProxyConfig[],
+  accountIndex?: number,
 ): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetchWithProxy(url, { ...options, signal: controller.signal }, proxies, accountIndex);
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function fetchProjectID(accessToken: string): Promise<string> {
+async function fetchProjectID(accessToken: string, proxies?: ProxyConfig[], accountIndex?: number): Promise<string> {
   const errors: string[] = [];
   const loadHeaders: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
@@ -155,7 +159,7 @@ async function fetchProjectID(accessToken: string): Promise<string> {
             pluginType: "GEMINI",
           },
         }),
-      });
+      }, FETCH_TIMEOUT_MS, proxies, accountIndex);
 
       if (!response.ok) {
         const message = await response.text().catch(() => "");
@@ -201,28 +205,36 @@ async function fetchProjectID(accessToken: string): Promise<string> {
 export async function exchangeAntigravity(
   code: string,
   state: string,
+  proxies?: ProxyConfig[],
+  accountIndex?: number,
 ): Promise<AntigravityTokenExchangeResult> {
   try {
     const { verifier, projectId } = decodeState(state);
 
     const startTime = Date.now();
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br",
-        "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+    const tokenResponse = await fetchWithTimeout(
+      "https://oauth2.googleapis.com/token",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "Accept": "*/*",
+          "Accept-Encoding": "gzip, deflate, br",
+          "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+        },
+        body: new URLSearchParams({
+          client_id: ANTIGRAVITY_CLIENT_ID,
+          client_secret: ANTIGRAVITY_CLIENT_SECRET,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: ANTIGRAVITY_REDIRECT_URI,
+          code_verifier: verifier,
+        }),
       },
-      body: new URLSearchParams({
-        client_id: ANTIGRAVITY_CLIENT_ID,
-        client_secret: ANTIGRAVITY_CLIENT_SECRET,
-        code,
-        grant_type: "authorization_code",
-        redirect_uri: ANTIGRAVITY_REDIRECT_URI,
-        code_verifier: verifier,
-      }),
-    });
+      FETCH_TIMEOUT_MS,
+      proxies,
+      accountIndex,
+    );
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
@@ -231,7 +243,7 @@ export async function exchangeAntigravity(
 
     const tokenPayload = (await tokenResponse.json()) as AntigravityTokenResponse;
 
-    const userInfoResponse = await fetch(
+    const userInfoResponse = await fetchWithTimeout(
       "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
       {
         headers: {
@@ -239,6 +251,9 @@ export async function exchangeAntigravity(
           "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
         },
       },
+      FETCH_TIMEOUT_MS,
+      proxies,
+      accountIndex,
     );
 
     const userInfo = userInfoResponse.ok
@@ -252,7 +267,7 @@ export async function exchangeAntigravity(
 
     let effectiveProjectId = projectId;
     if (!effectiveProjectId) {
-      effectiveProjectId = await fetchProjectID(tokenPayload.access_token);
+      effectiveProjectId = await fetchProjectID(tokenPayload.access_token, proxies, accountIndex);
     }
 
     const storedRefresh = `${refreshToken}|${effectiveProjectId || ""}`;

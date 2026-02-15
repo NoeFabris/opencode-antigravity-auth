@@ -14,6 +14,8 @@ import {
   SEARCH_SYSTEM_INSTRUCTION,
 } from "../constants";
 import { createLogger } from "./logger";
+import { fetchWithProxy } from "./proxy";
+import type { ProxyConfig } from "./storage";
 
 const log = createLogger("search");
 
@@ -225,6 +227,8 @@ export async function executeSearch(
   accessToken: string,
   projectId: string,
   abortSignal?: AbortSignal,
+  proxies?: ProxyConfig[],
+  accountIndex?: number,
 ): Promise<string> {
   const { query, urls, thinking = true } = args;
 
@@ -281,7 +285,7 @@ export async function executeSearch(
   });
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithProxy(url, {
       method: "POST",
       headers: {
         ...getAntigravityHeaders(),
@@ -290,7 +294,7 @@ export async function executeSearch(
       },
       body: JSON.stringify(wrappedBody),
       signal: abortSignal ?? AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    });
+    }, proxies, accountIndex);
 
     if (!response.ok) {
       const errorText = await response.text();

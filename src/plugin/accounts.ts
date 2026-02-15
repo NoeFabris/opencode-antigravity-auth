@@ -152,6 +152,7 @@ export interface ManagedAccount {
   verificationRequiredAt?: number;
   verificationRequiredReason?: string;
   verificationUrl?: string;
+  proxies?: import("./storage").ProxyConfig[];
 }
 
 function nowMs(): number {
@@ -367,6 +368,7 @@ export class AccountManager {
             verificationRequiredAt: acc.verificationRequiredAt,
             verificationRequiredReason: acc.verificationRequiredReason,
             verificationUrl: acc.verificationUrl,
+            proxies: acc.proxies ?? [],
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -405,6 +407,7 @@ export class AccountManager {
           enabled: true,
           rateLimitResetTimes: {},
           touchedForQuota: {},
+          proxies: [],
         };
         this.accounts.push(newAccount);
         // Update indices to include the new account
@@ -429,6 +432,7 @@ export class AccountManager {
             enabled: true,
             rateLimitResetTimes: {},
             touchedForQuota: {},
+            proxies: [],
           },
         ];
         this.cursor = 0;
@@ -806,6 +810,15 @@ export class AccountManager {
     this.requestSaveToDisk();
     return true;
   }
+  setAccountProxies(accountIndex: number, proxies: import("./storage").ProxyConfig[]): boolean {
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    account.proxies = [...proxies];
+    this.requestSaveToDisk();
+    return true;
+  }
 
   markAccountVerificationRequired(accountIndex: number, reason?: string, verifyUrl?: string): boolean {
     const account = this.accounts[accountIndex];
@@ -999,6 +1012,7 @@ export class AccountManager {
         verificationRequiredAt: a.verificationRequiredAt,
         verificationRequiredReason: a.verificationRequiredReason,
         verificationUrl: a.verificationUrl,
+        proxies: a.proxies,
       })),
       activeIndex: claudeIndex,
       activeIndexByFamily: {
@@ -1161,6 +1175,7 @@ export class AccountManager {
       addedAt: a.addedAt,
       lastUsed: a.lastUsed,
       enabled: a.enabled,
+      proxies: a.proxies,
     }));
   }
 
