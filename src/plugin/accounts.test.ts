@@ -38,6 +38,24 @@ describe("AccountManager", () => {
     expect(manager.getAccountCount()).toBe(0);
   });
 
+
+  it("defaults missing proxies to [] and allows per-account proxy updates", () => {
+    const stored: AccountStorageV4 = {
+      version: 4,
+      accounts: [
+        { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+      ],
+      activeIndex: 0,
+    };
+
+    const manager = new AccountManager(undefined, stored);
+
+    expect(manager.getAccountsSnapshot()[0]?.proxies).toEqual([]);
+
+    const updated = manager.setAccountProxies(0, [{ url: "http://127.0.0.1:8080" }]);
+    expect(updated).toBe(true);
+    expect(manager.getAccountsSnapshot()[0]?.proxies).toEqual([{ url: "http://127.0.0.1:8080" }]);
+  });
   it("returns current account when not rate-limited for family", () => {
     const stored: AccountStorageV4 = {
       version: 4,

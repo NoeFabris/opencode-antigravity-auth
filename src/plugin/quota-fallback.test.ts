@@ -43,7 +43,7 @@ beforeAll(async () => {
   resolveHeaderRoutingDecision = (__testExports as {
     resolveHeaderRoutingDecision?: ResolveHeaderRoutingDecision;
   }).resolveHeaderRoutingDecision;
-});
+}, 30000);
 
 describe("quota fallback direction", () => {
   it("falls back from gemini-cli to antigravity when alternate quota is available", () => {

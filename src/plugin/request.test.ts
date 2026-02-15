@@ -67,13 +67,36 @@ describe("request.ts", () => {
       expect(isGenerativeLanguageRequest("https://generativelanguage.googleapis.com/v1/models")).toBe(true);
     });
 
-    it("returns false for other URLs", () => {
-      expect(isGenerativeLanguageRequest("https://api.anthropic.com/v1/messages")).toBe(false);
+    it("returns true for mixed-case host strings", () => {
+      expect(isGenerativeLanguageRequest("https://GENERATIVELANGUAGE.GOOGLEAPIS.COM/v1/models")).toBe(true);
     });
 
-    it("returns false for non-string inputs", () => {
-      expect(isGenerativeLanguageRequest({} as any)).toBe(false);
+    it("returns true for Request inputs targeting generativelanguage.googleapis.com", () => {
+      expect(
+        isGenerativeLanguageRequest(new Request("https://generativelanguage.googleapis.com/v1beta/models")),
+      ).toBe(true);
+    });
+
+    it("returns true for URL inputs targeting generativelanguage.googleapis.com", () => {
+      expect(
+        isGenerativeLanguageRequest(new URL("https://generativelanguage.googleapis.com/v1beta/models")),
+      ).toBe(true);
+    });
+
+    it("returns false for non-target hosts", () => {
+      expect(isGenerativeLanguageRequest("https://api.anthropic.com/v1/messages")).toBe(false);
       expect(isGenerativeLanguageRequest(new Request("https://example.com"))).toBe(false);
+      expect(isGenerativeLanguageRequest(new URL("https://example.com"))).toBe(false);
+    });
+
+    it("does not match query strings that merely mention the target host", () => {
+      const disguised = "https://example.com/?next=https://generativelanguage.googleapis.com/v1/models";
+      expect(isGenerativeLanguageRequest(disguised)).toBe(false);
+      expect(isGenerativeLanguageRequest(new Request(disguised))).toBe(false);
+    });
+
+    it("returns false for non-url inputs", () => {
+      expect(isGenerativeLanguageRequest({} as RequestInfo)).toBe(false);
     });
   });
 

@@ -429,6 +429,84 @@ describe("Storage Migration", () => {
       );
       expect(gitignoreCall).toBeDefined();
     });
+
+    it("backfills missing proxies arrays for legacy v4 account entries", async () => {
+      const v4Data = {
+        version: 4,
+        accounts: [
+          {
+            refreshToken: "r1",
+            addedAt: now,
+            lastUsed: now,
+          },
+          {
+            refreshToken: "r2",
+            addedAt: now,
+            lastUsed: now,
+            proxies: [{ url: "http://proxy.local:8080" }],
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        return Promise.resolve(JSON.stringify(v4Data));
+      });
+
+      const result = await loadAccounts();
+
+      expect(result).not.toBeNull();
+      expect(result?.accounts[0]?.proxies).toEqual([]);
+      expect(result?.accounts[1]?.proxies).toEqual([{ url: "http://proxy.local:8080/" }]);
+
+      const saveCall = vi.mocked(fs.writeFile).mock.calls.find(
+        (call) => (call[0] as string).includes(".tmp")
+      );
+      if (!saveCall) throw new Error("saveAccounts was not called for proxy backfill");
+
+      const savedContent = JSON.parse(saveCall[1] as string);
+      expect(savedContent.accounts[0].proxies).toEqual([]);
+    });
+    it("normalizes duplicate proxies by URL and keeps the latest entry", async () => {
+      const v4Data = {
+        version: 4,
+        accounts: [
+          {
+            refreshToken: "r1",
+            addedAt: now,
+            lastUsed: now,
+            proxies: [
+              { url: "http://proxy.local:8080" },
+              { url: "http://proxy.local:8080", enabled: false },
+              { url: "http://backup.local:8080" },
+            ],
+          },
+        ],
+        activeIndex: 0,
+      };
+
+      vi.mocked(fs.readFile).mockImplementation((path) => {
+        if ((path as string).endsWith(".gitignore")) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          return Promise.reject(error);
+        }
+        return Promise.resolve(JSON.stringify(v4Data));
+      });
+
+      const result = await loadAccounts();
+
+      expect(result).not.toBeNull();
+      expect(result?.accounts[0]?.proxies).toEqual([
+        { url: "http://proxy.local:8080/", enabled: false },
+        { url: "http://backup.local:8080/" },
+      ]);
+    });
   });
 
   describe("ensureGitignore", () => {
