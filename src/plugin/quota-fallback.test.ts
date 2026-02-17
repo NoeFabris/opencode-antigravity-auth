@@ -2,9 +2,6 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { HeaderStyle, ModelFamily } from "./accounts";
 
 type ResolveQuotaFallbackHeaderStyle = (input: {
-  quotaFallback: boolean;
-  cliFirst: boolean;
-  explicitQuota: boolean;
   family: ModelFamily;
   headerStyle: HeaderStyle;
   alternateStyle: HeaderStyle | null;
@@ -16,8 +13,20 @@ type GetHeaderStyleFromUrl = (
   cliFirst?: boolean,
 ) => HeaderStyle;
 
+type ResolveHeaderRoutingDecision = (
+  urlString: string,
+  family: ModelFamily,
+  config: unknown,
+) => {
+  cliFirst: boolean;
+  preferredHeaderStyle: HeaderStyle;
+  explicitQuota: boolean;
+  allowQuotaFallback: boolean;
+};
+
 let resolveQuotaFallbackHeaderStyle: ResolveQuotaFallbackHeaderStyle | undefined;
 let getHeaderStyleFromUrl: GetHeaderStyleFromUrl | undefined;
+let resolveHeaderRoutingDecision: ResolveHeaderRoutingDecision | undefined;
 
 beforeAll(async () => {
   vi.mock("@opencode-ai/plugin", () => ({
@@ -31,14 +40,14 @@ beforeAll(async () => {
   getHeaderStyleFromUrl = (__testExports as {
     getHeaderStyleFromUrl?: GetHeaderStyleFromUrl;
   }).getHeaderStyleFromUrl;
+  resolveHeaderRoutingDecision = (__testExports as {
+    resolveHeaderRoutingDecision?: ResolveHeaderRoutingDecision;
+  }).resolveHeaderRoutingDecision;
 });
 
 describe("quota fallback direction", () => {
-  it("falls back from gemini-cli to antigravity when cli_first is enabled", () => {
+  it("falls back from gemini-cli to antigravity when alternate quota is available", () => {
     const result = resolveQuotaFallbackHeaderStyle?.({
-      quotaFallback: true,
-      cliFirst: true,
-      explicitQuota: false,
       family: "gemini",
       headerStyle: "gemini-cli",
       alternateStyle: "antigravity",
@@ -47,30 +56,24 @@ describe("quota fallback direction", () => {
     expect(result).toBe("antigravity");
   });
 
-  it("does not fall back from antigravity when cli_first is enabled", () => {
+  it("falls back from antigravity to gemini-cli when alternate quota is available", () => {
     const result = resolveQuotaFallbackHeaderStyle?.({
-      quotaFallback: true,
-      cliFirst: true,
-      explicitQuota: false,
-      family: "gemini",
-      headerStyle: "antigravity",
-      alternateStyle: "gemini-cli",
-    });
-
-    expect(result).toBeNull();
-  });
-
-  it("falls back from antigravity to gemini-cli when cli_first is disabled", () => {
-    const result = resolveQuotaFallbackHeaderStyle?.({
-      quotaFallback: true,
-      cliFirst: false,
-      explicitQuota: false,
       family: "gemini",
       headerStyle: "antigravity",
       alternateStyle: "gemini-cli",
     });
 
     expect(result).toBe("gemini-cli");
+  });
+
+  it("returns null when no alternate quota is available", () => {
+    const result = resolveQuotaFallbackHeaderStyle?.({
+      family: "gemini",
+      headerStyle: "antigravity",
+      alternateStyle: null,
+    });
+
+    expect(result).toBeNull();
   });
 });
 
@@ -113,5 +116,76 @@ describe("header style resolution", () => {
     );
 
     expect(headerStyle).toBe("antigravity");
+  });
+});
+
+describe("header routing decision", () => {
+  it("defaults to antigravity-first for unsuffixed Gemini when cli_first is disabled", () => {
+    const decision = resolveHeaderRoutingDecision?.(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:streamGenerateContent",
+      "gemini",
+      {
+        cli_first: false,
+      },
+    );
+
+    expect(decision).toMatchObject({
+      cliFirst: false,
+      preferredHeaderStyle: "antigravity",
+      explicitQuota: false,
+      allowQuotaFallback: true,
+    });
+  });
+
+  it("uses gemini-cli-first for unsuffixed Gemini when cli_first is enabled", () => {
+    const decision = resolveHeaderRoutingDecision?.(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:streamGenerateContent",
+      "gemini",
+      {
+        cli_first: true,
+      },
+    );
+
+    expect(decision).toMatchObject({
+      cliFirst: true,
+      preferredHeaderStyle: "gemini-cli",
+      explicitQuota: false,
+      allowQuotaFallback: true,
+    });
+  });
+
+  it("keeps explicit antigravity prefix as primary route while fallback remains available", () => {
+    const decision = resolveHeaderRoutingDecision?.(
+      "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3-flash:streamGenerateContent",
+      "gemini",
+      {
+        cli_first: true,
+      },
+    );
+
+    expect(decision).toMatchObject({
+      cliFirst: true,
+      preferredHeaderStyle: "antigravity",
+      explicitQuota: true,
+      allowQuotaFallback: true,
+    });
+  });
+
+  it("ignores legacy quota_fallback when deciding Gemini fallback availability", () => {
+    const decision = resolveHeaderRoutingDecision?.(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:streamGenerateContent",
+      "gemini",
+      {
+        cli_first: false,
+        quota_fallback: false,
+      },
+    );
+
+    expect(decision).toMatchObject({
+      cliFirst: false,
+      preferredHeaderStyle: "antigravity",
+      explicitQuota: false,
+      allowQuotaFallback: true,
+    });
   });
 });

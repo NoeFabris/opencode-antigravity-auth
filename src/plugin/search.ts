@@ -8,7 +8,7 @@
 
 import {
   ANTIGRAVITY_ENDPOINT,
-  ANTIGRAVITY_HEADERS,
+  getAntigravityHeaders,
   SEARCH_MODEL,
   SEARCH_TIMEOUT_MS,
   SEARCH_SYSTEM_INSTRUCTION,
@@ -284,7 +284,7 @@ export async function executeSearch(
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        ...ANTIGRAVITY_HEADERS,
+        ...getAntigravityHeaders(),
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },

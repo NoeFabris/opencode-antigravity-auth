@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AccountManager, type ModelFamily, type HeaderStyle } from "./accounts";
-import type { AccountStorageV3 } from "./storage";
+import type { AccountStorageV4 } from "./storage";
 
 /**
  * Test: Antigravity-first fallback logic
@@ -21,8 +21,8 @@ describe("Antigravity-first fallback", () => {
 
   describe("hasOtherAccountWithAntigravityAvailable", () => {
     it("returns true when another account has antigravity available", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
@@ -47,8 +47,8 @@ describe("Antigravity-first fallback", () => {
     });
 
     it("returns false when all other accounts are also rate-limited for antigravity", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
@@ -73,8 +73,8 @@ describe("Antigravity-first fallback", () => {
     });
 
     it("skips disabled accounts", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0, enabled: false },
@@ -99,8 +99,8 @@ describe("Antigravity-first fallback", () => {
     });
 
     it("skips cooling down accounts", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
@@ -126,8 +126,8 @@ describe("Antigravity-first fallback", () => {
     });
 
     it("works with model-specific rate limits", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
@@ -152,8 +152,8 @@ describe("Antigravity-first fallback", () => {
     });
 
     it("returns false for Claude family (no gemini-cli fallback)", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
@@ -177,8 +177,8 @@ describe("Antigravity-first fallback", () => {
 
   describe("Pre-check fallback logic", () => {
     it("should switch to account with antigravity rather than fall back to gemini-cli", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
@@ -211,8 +211,8 @@ describe("Antigravity-first fallback", () => {
     });
 
     it("should only fall back to gemini-cli when ALL accounts exhausted antigravity", () => {
-      const stored: AccountStorageV3 = {
-        version: 3,
+      const stored: AccountStorageV4 = {
+        version: 4,
         accounts: [
           { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
           { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },

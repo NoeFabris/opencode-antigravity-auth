@@ -10,6 +10,15 @@
       "type": "boolean",
       "description": "Suppress most toast notifications (rate limit, account switching). Recovery toasts always shown. Env: OPENCODE_ANTIGRAVITY_QUIET=1"
     },
+    "toast_scope": {
+      "default": "root_only",
+      "type": "string",
+      "enum": [
+        "root_only",
+        "all"
+      ],
+      "description": "Controls which sessions show toast notifications. 'root_only' (default) shows in root session only, 'all' shows in all sessions."
+    },
     "debug": {
       "default": false,
       "type": "boolean",
@@ -129,7 +138,8 @@
     },
     "quota_fallback": {
       "default": false,
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Deprecated: accepted for backward compatibility but ignored at runtime. Gemini fallback between Antigravity and Gemini CLI is always enabled."
     },
     "cli_first": {
       "default": false,
@@ -153,6 +163,30 @@
       "default": true,
       "type": "boolean"
     },
+    "scheduling_mode": {
+      "default": "cache_first",
+      "type": "string",
+      "enum": [
+        "cache_first",
+        "balance",
+        "performance_first"
+      ],
+      "description": "Rate limit scheduling strategy. 'cache_first' (default) waits for cooldowns, 'balance' distributes across accounts, 'performance_first' picks fastest available."
+    },
+    "max_cache_first_wait_seconds": {
+      "default": 60,
+      "type": "number",
+      "minimum": 5,
+      "maximum": 300,
+      "description": "Maximum seconds to wait for a rate-limited account in cache_first mode before switching."
+    },
+    "failure_ttl_seconds": {
+      "default": 3600,
+      "type": "number",
+      "minimum": 60,
+      "maximum": 7200,
+      "description": "Time in seconds before a failed account is eligible for retry."
+    },
     "default_retry_after_seconds": {
       "default": 60,
       "type": "number",
@@ -164,6 +198,42 @@
       "type": "number",
       "minimum": 5,
       "maximum": 300
+    },
+    "request_jitter_max_ms": {
+      "default": 0,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 5000,
+      "description": "Maximum random jitter in milliseconds added to outgoing requests to avoid thundering herd."
+    },
+    "soft_quota_threshold_percent": {
+      "default": 90,
+      "type": "number",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Percentage of quota usage that triggers soft quota warnings and preemptive account switching."
+    },
+    "quota_refresh_interval_minutes": {
+      "default": 15,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 60,
+      "description": "Interval in minutes between quota usage checks. Set to 0 to disable periodic checks."
+    },
+    "soft_quota_cache_ttl_minutes": {
+      "default": "auto",
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 120
+        }
+      ],
+      "description": "TTL for cached soft quota data. 'auto' (default) calculates from refresh interval, or set a fixed number of minutes."
     },
     "health_score": {
       "type": "object",

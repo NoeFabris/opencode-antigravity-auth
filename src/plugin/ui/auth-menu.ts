@@ -2,7 +2,7 @@ import { ANSI } from './ansi';
 import { select, type MenuItem } from './select';
 import { confirm } from './confirm';
 
-export type AccountStatus = 'active' | 'rate-limited' | 'expired' | 'unknown';
+export type AccountStatus = 'active' | 'rate-limited' | 'expired' | 'verification-required' | 'unknown';
 
 export interface AccountInfo {
   email?: string;
@@ -20,10 +20,11 @@ export type AuthMenuAction =
   | { type: 'delete-all' }
   | { type: 'check' }
   | { type: 'verify' }
+  | { type: 'verify-all' }
   | { type: 'configure-models' }
   | { type: 'cancel' };
 
-export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'cancel';
+export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'verify' | 'cancel';
 
 function formatRelativeTime(timestamp: number | undefined): string {
   if (!timestamp) return 'never';
@@ -45,6 +46,7 @@ function getStatusBadge(status: AccountStatus | undefined): string {
     case 'active': return `${ANSI.green}[active]${ANSI.reset}`;
     case 'rate-limited': return `${ANSI.yellow}[rate-limited]${ANSI.reset}`;
     case 'expired': return `${ANSI.red}[expired]${ANSI.reset}`;
+    case 'verification-required': return `${ANSI.red}[needs verification]${ANSI.reset}`;
     default: return '';
   }
 }
@@ -54,7 +56,8 @@ export async function showAuthMenu(accounts: AccountInfo[]): Promise<AuthMenuAct
     { label: 'Actions', value: { type: 'cancel' }, kind: 'heading' },
     { label: 'Add account', value: { type: 'add' }, color: 'cyan' },
     { label: 'Check quotas', value: { type: 'check' }, color: 'cyan' },
-    { label: 'Verify blocked accounts', value: { type: 'verify' }, color: 'cyan' },
+    { label: 'Verify one account', value: { type: 'verify' }, color: 'cyan' },
+    { label: 'Verify all accounts', value: { type: 'verify-all' }, color: 'cyan' },
     { label: 'Configure models in opencode.json', value: { type: 'configure-models' }, color: 'cyan' },
 
     { label: '', value: { type: 'cancel' }, separator: true },
@@ -113,6 +116,7 @@ export async function showAccountDetails(account: AccountInfo): Promise<AccountA
   while (true) {
     const result = await select([
       { label: 'Back', value: 'back' as const },
+      { label: 'Verify account access', value: 'verify' as const, color: 'cyan' },
       { label: account.enabled === false ? 'Enable account' : 'Disable account', value: 'toggle' as const, color: account.enabled === false ? 'green' : 'yellow' },
       { label: 'Refresh token', value: 'refresh' as const, color: 'cyan' },
       { label: 'Delete this account', value: 'delete' as const, color: 'red' },

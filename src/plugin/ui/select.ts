@@ -61,6 +61,10 @@ function truncateAnsi(input: string, maxVisibleChars: number): string {
     kept += 1;
   }
 
+  if (out.includes('\x1b[')) {
+    return `${out}${ANSI.reset}${suffix}`;
+  }
+
   return out + suffix;
 }
 

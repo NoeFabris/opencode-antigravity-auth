@@ -1,5 +1,5 @@
 import {
-  ANTIGRAVITY_HEADERS,
+  getAntigravityHeaders,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_LOAD_ENDPOINTS,
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
@@ -14,8 +14,8 @@ const projectContextResultCache = new Map<string, ProjectContextResult>();
 const projectContextPendingCache = new Map<string, Promise<ProjectContextResult>>();
 
 const CODE_ASSIST_METADATA = {
-  ideType: "IDE_UNSPECIFIED",
-  platform: "PLATFORM_UNSPECIFIED",
+  ideType: "ANTIGRAVITY",
+  platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
   pluginType: "GEMINI",
 } as const;
 
@@ -130,7 +130,7 @@ export async function loadManagedProject(
     Authorization: `Bearer ${accessToken}`,
     "User-Agent": "google-api-nodejs-client/9.15.1",
     "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
+    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
   };
 
   const loadEndpoints = Array.from(
@@ -189,7 +189,7 @@ export async function onboardManagedProject(
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${accessToken}`,
-              ...ANTIGRAVITY_HEADERS,
+              ...getAntigravityHeaders(),
             },
             body: JSON.stringify(requestBody),
           },

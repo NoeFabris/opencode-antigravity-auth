@@ -136,7 +136,7 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --var
 > **Routing Behavior:**
 > - **Antigravity-first (default):** Gemini models use Antigravity quota across accounts.
 > - **CLI-first (`cli_first: true`):** Gemini models use Gemini CLI quota first.
-> - With `quota_fallback` enabled, the plugin can spill to the other quota when all accounts are exhausted.
+> - When a Gemini quota pool is exhausted, the plugin automatically falls back to the other pool.
 > - Claude and image models always use Antigravity.
 > Model names are automatically transformed for the target API (e.g., `antigravity-gemini-3-flash` → `gemini-3-flash-preview` for CLI).
 

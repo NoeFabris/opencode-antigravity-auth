@@ -7,7 +7,7 @@ import {
   ANTIGRAVITY_SCOPES,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_LOAD_ENDPOINTS,
-  ANTIGRAVITY_HEADERS,
+  getAntigravityHeaders,
   GEMINI_CLI_HEADERS,
 } from "../constants";
 import { createLogger } from "../plugin/logger";
@@ -135,8 +135,7 @@ async function fetchProjectID(accessToken: string): Promise<string> {
     Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
     "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
-    "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
-    "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
+    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
   };
 
   const loadEndpoints = Array.from(
@@ -151,8 +150,8 @@ async function fetchProjectID(accessToken: string): Promise<string> {
         headers: loadHeaders,
         body: JSON.stringify({
           metadata: {
-            ideType: "IDE_UNSPECIFIED",
-            platform: "PLATFORM_UNSPECIFIED",
+            ideType: "ANTIGRAVITY",
+            platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
             pluginType: "GEMINI",
           },
         }),
@@ -214,7 +213,6 @@ export async function exchangeAntigravity(
         "Accept": "*/*",
         "Accept-Encoding": "gzip, deflate, br",
         "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
-        "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
       },
       body: new URLSearchParams({
         client_id: ANTIGRAVITY_CLIENT_ID,
@@ -239,7 +237,6 @@ export async function exchangeAntigravity(
         headers: {
           Authorization: `Bearer ${tokenPayload.access_token}`,
           "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
-          "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
         },
       },
     );

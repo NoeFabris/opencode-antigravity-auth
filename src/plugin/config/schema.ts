@@ -254,14 +254,10 @@ export const AntigravityConfigSchema = z.object({
   max_rate_limit_wait_seconds: z.number().min(0).max(3600).default(300),
   
   /**
-   * Enable quota fallback for Gemini models.
-   * When the preferred quota (gemini-cli or antigravity) is exhausted,
-   * try the alternate quota on the same account before switching accounts.
-   * 
-   * Only applies when model is requested without explicit quota suffix.
-   * Explicit suffixes like `:antigravity` or `:gemini-cli` always use
-   * that specific quota and switch accounts if exhausted.
-   * 
+   * @deprecated Kept only for backward compatibility.
+   * This flag is ignored at runtime.
+   * Gemini requests always fall back between Antigravity and Gemini CLI quotas.
+   *
    * @default false
    */
   quota_fallback: z.boolean().default(false),
