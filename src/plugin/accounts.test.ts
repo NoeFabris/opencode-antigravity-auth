@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason, resolveQuotaGroup } from "./accounts";
-import type { AccountStorageV4 } from "./storage";
+import { saveAccounts, type AccountStorageV4 } from "./storage";
 import type { OAuthAuthDetails } from "./types";
 
 // Mock storage to prevent test data from leaking to real config files
@@ -1069,6 +1069,8 @@ describe("AccountManager", () => {
   describe("Issue #174: saveToDisk throttling", () => {
     it("requestSaveToDisk coalesces multiple calls into one write", async () => {
       vi.useFakeTimers();
+      const saveMock = vi.mocked(saveAccounts);
+      saveMock.mockClear();
 
       const stored: AccountStorageV4 = {
         version: 4,
@@ -1079,23 +1081,22 @@ describe("AccountManager", () => {
       };
 
       const manager = new AccountManager(undefined, stored);
-      const saveSpy = vi.spyOn(manager, "saveToDisk").mockResolvedValue();
 
       manager.requestSaveToDisk();
       manager.requestSaveToDisk();
       manager.requestSaveToDisk();
 
-      expect(saveSpy).not.toHaveBeenCalled();
+      expect(saveMock).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5500);
 
-      expect(saveSpy).toHaveBeenCalledTimes(1);
-
-      saveSpy.mockRestore();
+      expect(saveMock).toHaveBeenCalledTimes(1);
     });
 
     it("flushSaveToDisk waits for pending save to complete", async () => {
       vi.useFakeTimers();
+      const saveMock = vi.mocked(saveAccounts);
+      saveMock.mockClear();
 
       const stored: AccountStorageV4 = {
         version: 4,
@@ -1106,22 +1107,21 @@ describe("AccountManager", () => {
       };
 
       const manager = new AccountManager(undefined, stored);
-      const saveSpy = vi.spyOn(manager, "saveToDisk").mockResolvedValue();
 
       manager.requestSaveToDisk();
 
       const flushPromise = manager.flushSaveToDisk();
 
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5500);
       await flushPromise;
 
-      expect(saveSpy).toHaveBeenCalledTimes(1);
-
-      saveSpy.mockRestore();
+      expect(saveMock).toHaveBeenCalledTimes(1);
     });
 
     it("does not save again if no new requestSaveToDisk after flush", async () => {
       vi.useFakeTimers();
+      const saveMock = vi.mocked(saveAccounts);
+      saveMock.mockClear();
 
       const stored: AccountStorageV4 = {
         version: 4,
@@ -1132,18 +1132,41 @@ describe("AccountManager", () => {
       };
 
       const manager = new AccountManager(undefined, stored);
-      const saveSpy = vi.spyOn(manager, "saveToDisk").mockResolvedValue();
 
       manager.requestSaveToDisk();
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5500);
 
-      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(saveMock).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(6000);
 
-      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
 
-      saveSpy.mockRestore();
+    it("skips write when account state has not changed", async () => {
+      vi.useFakeTimers();
+      const saveMock = vi.mocked(saveAccounts);
+      saveMock.mockClear();
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      // First save — should write
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(5500);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+
+      // Second save with no state change — should skip
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(5500);
+      expect(saveMock).toHaveBeenCalledTimes(1);
     });
   });
 
