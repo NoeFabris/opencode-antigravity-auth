@@ -1087,7 +1087,7 @@ describe("AccountManager", () => {
 
       expect(saveSpy).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5500);
 
       expect(saveSpy).toHaveBeenCalledTimes(1);
 
@@ -1112,7 +1112,7 @@ describe("AccountManager", () => {
 
       const flushPromise = manager.flushSaveToDisk();
 
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5500);
       await flushPromise;
 
       expect(saveSpy).toHaveBeenCalledTimes(1);
@@ -1135,12 +1135,39 @@ describe("AccountManager", () => {
       const saveSpy = vi.spyOn(manager, "saveToDisk").mockResolvedValue();
 
       manager.requestSaveToDisk();
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5500);
 
       expect(saveSpy).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(6000);
 
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      saveSpy.mockRestore();
+    });
+
+    it("skips write when account state has not changed", async () => {
+      vi.useFakeTimers();
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const saveSpy = vi.spyOn(manager, "saveToDisk").mockResolvedValue();
+
+      // First save — should write
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(5500);
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      // Second save with no state change — should skip
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(5500);
       expect(saveSpy).toHaveBeenCalledTimes(1);
 
       saveSpy.mockRestore();
