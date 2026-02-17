@@ -1,7 +1,7 @@
 # Antigravity Unified Gateway API Specification
 
 **Version:** 1.0
-**Last Updated:** December 13, 2025
+**Last Updated:** February 17, 2026
 **Status:** Verified by Direct API Testing
 
 ---

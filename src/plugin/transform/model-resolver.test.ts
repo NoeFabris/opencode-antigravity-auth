@@ -160,6 +160,15 @@ describe("resolveModelWithTier", () => {
       const result = resolveModelWithTier("gemini-claude-sonnet-4-6-thinking-high");
       expect(result.actualModel).toBe("claude-sonnet-4-6-thinking");
       expect(result.thinkingBudget).toBe(32768);
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("maps gemini-claude-sonnet-4-6-thinking-low to claude-sonnet-4-6-thinking with low budget", () => {
+      const result = resolveModelWithTier("gemini-claude-sonnet-4-6-thinking-low");
+      expect(result.actualModel).toBe("claude-sonnet-4-6-thinking");
+      expect(result.thinkingBudget).toBe(8192);
+      expect(result.isThinkingModel).toBe(true);
       expect(result.quotaPreference).toBe("antigravity");
     });
   });
