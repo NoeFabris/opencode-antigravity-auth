@@ -1143,6 +1143,33 @@ describe("AccountManager", () => {
       expect(saveMock).toHaveBeenCalledTimes(1);
     });
 
+    it("writes when account state changes between debounced saves", async () => {
+      vi.useFakeTimers();
+      const saveMock = vi.mocked(saveAccounts);
+      saveMock.mockClear();
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      // First save
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(5500);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+
+      // Mutate state, then request save — should write again
+      manager.markAccountUsed(0);
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(5500);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+    });
+
     it("skips write when account state has not changed", async () => {
       vi.useFakeTimers();
       const saveMock = vi.mocked(saveAccounts);

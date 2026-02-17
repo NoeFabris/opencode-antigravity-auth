@@ -989,7 +989,7 @@ export class AccountManager {
         lastUsed: a.lastUsed,
         enabled: a.enabled,
         lastSwitchReason: a.lastSwitchReason,
-        rateLimitResetTimes: Object.keys(a.rateLimitResetTimes).length > 0 ? a.rateLimitResetTimes : undefined,
+        rateLimitResetTimes: Object.keys(a.rateLimitResetTimes).length > 0 ? { ...a.rateLimitResetTimes } : undefined,
         coolingDownUntil: a.coolingDownUntil,
         cooldownReason: a.cooldownReason,
         fingerprint: a.fingerprint,
