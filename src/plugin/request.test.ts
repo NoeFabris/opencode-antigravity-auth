@@ -638,7 +638,31 @@ it("removes x-api-key header", () => {
       const wrappedBody = JSON.parse(result.init.body as string) as {
         request?: { generationConfig?: { thinkingConfig?: unknown } };
       };
+      expect(wrappedBody.request).toBeDefined();
       expect(wrappedBody.request?.generationConfig?.thinkingConfig).toBeUndefined();
+    });
+
+    it("preserves thinkingConfig for Claude Sonnet 4.6 thinking variant", () => {
+      const result = prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-sonnet-4-6-thinking:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: "Hello" }] }],
+            generationConfig: {
+              thinkingConfig: { includeThoughts: true, thinkingBudget: 12000 },
+            },
+          }),
+        },
+        mockAccessToken,
+        mockProjectId
+      );
+
+      const wrappedBody = JSON.parse(result.init.body as string) as {
+        request?: { generationConfig?: { thinkingConfig?: unknown } };
+      };
+      expect(wrappedBody.request).toBeDefined();
+      expect(wrappedBody.request?.generationConfig?.thinkingConfig).toBeDefined();
     });
 
     it("identifies Gemini models correctly", () => {
