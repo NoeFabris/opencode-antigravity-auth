@@ -114,6 +114,14 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
+    it("antigravity-claude-sonnet-4-6-thinking gets default max budget (32768)", () => {
+      const result = resolveModelWithTier("antigravity-claude-sonnet-4-6-thinking");
+      expect(result.actualModel).toBe("claude-sonnet-4-6-thinking");
+      expect(result.thinkingBudget).toBe(32768);
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
     it("antigravity-claude-opus-4-5-thinking gets default max budget (32768)", () => {
       const result = resolveModelWithTier("antigravity-claude-opus-4-5-thinking");
       expect(result.actualModel).toBe("claude-opus-4-5-thinking");
@@ -137,6 +145,21 @@ describe("resolveModelWithTier", () => {
       expect(result.actualModel).toBe("gemini-3-pro-image");
       expect(result.isImageModel).toBe(true);
       expect(result.explicitQuota).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+  });
+
+  describe("Claude Sonnet 4.6 aliases", () => {
+    it("maps gemini-claude-sonnet-4-6 to claude-sonnet-4-6", () => {
+      const result = resolveModelWithTier("gemini-claude-sonnet-4-6");
+      expect(result.actualModel).toBe("claude-sonnet-4-6");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("maps gemini-claude-sonnet-4-6-thinking-high to claude-sonnet-4-6-thinking", () => {
+      const result = resolveModelWithTier("gemini-claude-sonnet-4-6-thinking-high");
+      expect(result.actualModel).toBe("claude-sonnet-4-6-thinking");
+      expect(result.thinkingBudget).toBe(32768);
       expect(result.quotaPreference).toBe("antigravity");
     });
   });
