@@ -821,10 +821,10 @@ export function prepareAntigravityRequest(
         const hasAssistantHistory = Array.isArray(requestPayload.contents) &&
           requestPayload.contents.some((c: any) => c?.role === "model" || c?.role === "assistant");
 
-        // For claude-sonnet-4-5 (without -thinking suffix), ignore client's thinkingConfig
-        // Only claude-sonnet-4-5-thinking-* variants should have thinking enabled
-        const isClaudeSonnetNonThinking = effectiveModel.toLowerCase() === "claude-sonnet-4-5";
-        const effectiveUserThinkingConfig = (isClaudeSonnetNonThinking || isImageModel) ? undefined : userThinkingConfig;
+        // Ignore incoming thinkingConfig for non-thinking Claude variants.
+        // Only Claude models with "-thinking" in the resolved model name should allow thinking.
+        const isClaudeNonThinking = isClaude && !isClaudeThinking;
+        const effectiveUserThinkingConfig = (isClaudeNonThinking || isImageModel) ? undefined : userThinkingConfig;
 
         // For image models, add imageConfig instead of thinkingConfig
         if (isImageModel) {
@@ -862,7 +862,7 @@ export function prepareAntigravityRequest(
         } else {
           const finalThinkingConfig = resolveThinkingConfig(
             effectiveUserThinkingConfig,
-            isClaudeSonnetNonThinking ? false : (resolved.isThinkingModel ?? isThinkingCapableModel(effectiveModel)),
+            isClaudeNonThinking ? false : (resolved.isThinkingModel ?? isThinkingCapableModel(effectiveModel)),
             isClaude,
             hasAssistantHistory,
           );
@@ -1727,4 +1727,3 @@ export const __testExports = {
   transformStreamingPayload,
   createStreamingTransformer,
 };
-

@@ -153,6 +153,7 @@ describe("resolveModelWithTier", () => {
     it("maps gemini-claude-sonnet-4-6 to claude-sonnet-4-6", () => {
       const result = resolveModelWithTier("gemini-claude-sonnet-4-6");
       expect(result.actualModel).toBe("claude-sonnet-4-6");
+      expect(result.isThinkingModel).toBe(false);
       expect(result.quotaPreference).toBe("antigravity");
     });
 
@@ -168,6 +169,14 @@ describe("resolveModelWithTier", () => {
       const result = resolveModelWithTier("gemini-claude-sonnet-4-6-thinking-low");
       expect(result.actualModel).toBe("claude-sonnet-4-6-thinking");
       expect(result.thinkingBudget).toBe(8192);
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("maps gemini-claude-sonnet-4-6-thinking-medium to claude-sonnet-4-6-thinking with medium budget", () => {
+      const result = resolveModelWithTier("gemini-claude-sonnet-4-6-thinking-medium");
+      expect(result.actualModel).toBe("claude-sonnet-4-6-thinking");
+      expect(result.thinkingBudget).toBe(16384);
       expect(result.isThinkingModel).toBe(true);
       expect(result.quotaPreference).toBe("antigravity");
     });
