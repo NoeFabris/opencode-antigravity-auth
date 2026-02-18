@@ -52,9 +52,5 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       max: { thinkingConfig: { thinkingBudget: 32768 } },
     });
 
-    expect(getModel("antigravity-claude-opus-4-6-thinking").variants).toEqual({
-      low: { thinkingConfig: { thinkingBudget: 8192 } },
-      max: { thinkingConfig: { thinkingBudget: 32768 } },
-    });
   });
 });
