@@ -20,7 +20,6 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       "antigravity-claude-sonnet-4-5",
       "antigravity-claude-sonnet-4-5-thinking",
       "antigravity-claude-sonnet-4-6",
-      "antigravity-claude-sonnet-4-6-thinking",
       "antigravity-gemini-3-flash",
       "antigravity-gemini-3-pro",
       "gemini-2.5-flash",
@@ -46,11 +45,6 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
 
   it("defines thinking budget variants for Claude thinking models", () => {
     expect(getModel("antigravity-claude-sonnet-4-5-thinking").variants).toEqual({
-      low: { thinkingConfig: { thinkingBudget: 8192 } },
-      max: { thinkingConfig: { thinkingBudget: 32768 } },
-    });
-
-    expect(getModel("antigravity-claude-sonnet-4-6-thinking").variants).toEqual({
       low: { thinkingConfig: { thinkingBudget: 8192 } },
       max: { thinkingConfig: { thinkingBudget: 32768 } },
     });

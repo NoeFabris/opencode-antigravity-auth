@@ -6,14 +6,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![X (Twitter)](https://img.shields.io/badge/X-@dopesalmon-000000?style=flat&logo=x)](https://x.com/dopesalmon)
 
-Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access models like `gemini-3-pro` and `claude-sonnet-4-6-thinking` with your Google credentials.
+Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access models like `gemini-3-pro` and `claude-sonnet-4-6` with your Google credentials.
 
 ## What You Get
 
 - **Claude Sonnet 4.6, Opus 4.6** (plus 4.5 compatibility) and **Gemini 3 Pro/Flash** via Google OAuth
 - **Multi-account support** — add multiple Google accounts, auto-rotates when rate-limited
 - **Dual quota system** — access both Antigravity and Gemini CLI quotas from one plugin
-- **Thinking models** — extended thinking for Claude and Gemini 3 with configurable budgets
+- **Thinking models** — extended thinking for Claude 4.5/Opus and Gemini 3 with configurable budgets
 - **Google Search grounding** — enable web search for Gemini models (auto or always-on)
 - **Auto-recovery** — handles session errors and tool failures automatically
 - **Plugin compatible** — works alongside other OpenCode plugins (oh-my-opencode, dcp, etc.)
@@ -79,7 +79,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 4. **Use it:**
 
    ```bash
-   opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6-thinking --variant=max
+   opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6
    ```
 
 </details>
@@ -102,7 +102,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 ### Verification
 
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6-thinking --variant=max
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6
 ```
 
 </details>
@@ -122,7 +122,6 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6-thinking --var
 | `antigravity-claude-sonnet-4-5` | — | Claude Sonnet 4.5 |
 | `antigravity-claude-sonnet-4-5-thinking` | low, max | Claude Sonnet 4.5 with extended thinking |
 | `antigravity-claude-sonnet-4-6` | — | Claude Sonnet 4.6 |
-| `antigravity-claude-sonnet-4-6-thinking` | low, max | Claude Sonnet 4.6 with extended thinking |
 | `antigravity-claude-opus-4-5-thinking` | low, max | Claude Opus 4.5 with extended thinking |
 | `antigravity-claude-opus-4-6-thinking` | low, max | Claude Opus 4.6 with extended thinking |
 
@@ -144,7 +143,7 @@ opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6-thinking --var
 
 **Using variants:**
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6-thinking --variant=max
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-5-thinking --variant=max
 ```
 
 For details on variant configuration and thinking levels, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
@@ -199,15 +198,6 @@ Add this to your `~/.config/opencode/opencode.json`:
           "name": "Claude Sonnet 4.6 (Antigravity)",
           "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "antigravity-claude-sonnet-4-6-thinking": {
-          "name": "Claude Sonnet 4.6 Thinking (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
-          }
         },
         "antigravity-claude-opus-4-5-thinking": {
           "name": "Claude Opus 4.5 Thinking (Antigravity)",

@@ -642,7 +642,7 @@ it("removes x-api-key header", () => {
       expect(wrappedBody.request?.generationConfig?.thinkingConfig).toBeUndefined();
     });
 
-    it("preserves thinkingConfig for Claude Sonnet 4.6 thinking variant", () => {
+    it("strips thinkingConfig when Claude Sonnet 4.6 thinking alias is requested", () => {
       const result = prepareAntigravityRequest(
         "https://generativelanguage.googleapis.com/v1beta/models/claude-sonnet-4-6-thinking:generateContent",
         {
@@ -662,7 +662,7 @@ it("removes x-api-key header", () => {
         request?: { generationConfig?: { thinkingConfig?: unknown } };
       };
       expect(wrappedBody.request).toBeDefined();
-      expect(wrappedBody.request?.generationConfig?.thinkingConfig).toBeDefined();
+      expect(wrappedBody.request?.generationConfig?.thinkingConfig).toBeUndefined();
     });
 
     it("identifies Gemini models correctly", () => {

@@ -52,9 +52,11 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-claude-sonnet-4-5-thinking-medium": "claude-sonnet-4-5-thinking",
   "gemini-claude-sonnet-4-5-thinking-high": "claude-sonnet-4-5-thinking",
   "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
-  "gemini-claude-sonnet-4-6-thinking-low": "claude-sonnet-4-6-thinking",
-  "gemini-claude-sonnet-4-6-thinking-medium": "claude-sonnet-4-6-thinking",
-  "gemini-claude-sonnet-4-6-thinking-high": "claude-sonnet-4-6-thinking",
+  // Antigravity exposes Sonnet 4.6 as non-thinking only.
+  "claude-sonnet-4-6-thinking": "claude-sonnet-4-6",
+  "gemini-claude-sonnet-4-6-thinking-low": "claude-sonnet-4-6",
+  "gemini-claude-sonnet-4-6-thinking-medium": "claude-sonnet-4-6",
+  "gemini-claude-sonnet-4-6-thinking-high": "claude-sonnet-4-6",
   "gemini-claude-opus-4-5-thinking-low": "claude-opus-4-5-thinking",
   "gemini-claude-opus-4-5-thinking-medium": "claude-opus-4-5-thinking",
   "gemini-claude-opus-4-5-thinking-high": "claude-opus-4-5-thinking",
@@ -252,6 +254,17 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
       thinkingLevel: tier,
       tier,
       isThinkingModel: true,
+      quotaPreference,
+      explicitQuota,
+    };
+  }
+
+  // Tier-suffixed aliases can resolve to non-thinking models (e.g. Sonnet 4.6).
+  // In that case, ignore tier/budget and keep the result explicitly non-thinking.
+  if (!isThinking) {
+    return {
+      actualModel: resolvedModel,
+      isThinkingModel: false,
       quotaPreference,
       explicitQuota,
     };
