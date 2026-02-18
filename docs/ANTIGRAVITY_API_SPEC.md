@@ -633,5 +633,6 @@ The following Anthropic/Vertex AI features are **NOT supported**:
 
 ## Changelog
 
+- **2026-02-17**: Added Claude Sonnet 4.6 (non-thinking only, pending verification)
 - **2025-12-14**: Added function calling quirks, JSON Schema support matrix, tool name rules
 - **2025-12-13**: Initial specification based on direct API testing

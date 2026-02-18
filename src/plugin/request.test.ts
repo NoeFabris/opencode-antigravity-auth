@@ -640,6 +640,7 @@ it("removes x-api-key header", () => {
       };
       expect(wrappedBody.request).toBeDefined();
       expect(wrappedBody.request?.generationConfig?.thinkingConfig).toBeUndefined();
+      expect(result.effectiveModel).toBe("claude-sonnet-4-6");
     });
 
     it("strips thinkingConfig when Claude Sonnet 4.6 thinking alias is requested", () => {

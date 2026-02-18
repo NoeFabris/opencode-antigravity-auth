@@ -53,6 +53,7 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-claude-sonnet-4-5-thinking-high": "claude-sonnet-4-5-thinking",
   "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
   // Antigravity exposes Sonnet 4.6 as non-thinking only.
+  "gemini-claude-sonnet-4-6-thinking": "claude-sonnet-4-6",
   "claude-sonnet-4-6-thinking": "claude-sonnet-4-6",
   "gemini-claude-sonnet-4-6-thinking-low": "claude-sonnet-4-6",
   "gemini-claude-sonnet-4-6-thinking-medium": "claude-sonnet-4-6",
@@ -390,6 +391,11 @@ export function resolveModelWithVariant(
   if (variantConfig.googleSearch) {
     base.googleSearch = variantConfig.googleSearch;
     base.configSource = "variant";
+  }
+
+  // Do not attach thinking budgets to models that are explicitly non-thinking.
+  if (!base.isThinkingModel) {
+    return base;
   }
 
   if (!variantConfig.thinkingBudget) {

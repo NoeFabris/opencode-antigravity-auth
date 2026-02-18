@@ -114,14 +114,6 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("antigravity-claude-sonnet-4-6-thinking downgrades to non-thinking Sonnet 4.6", () => {
-      const result = resolveModelWithTier("antigravity-claude-sonnet-4-6-thinking");
-      expect(result.actualModel).toBe("claude-sonnet-4-6");
-      expect(result.thinkingBudget).toBeUndefined();
-      expect(result.isThinkingModel).toBe(false);
-      expect(result.quotaPreference).toBe("antigravity");
-    });
-
     it("antigravity-claude-opus-4-5-thinking gets default max budget (32768)", () => {
       const result = resolveModelWithTier("antigravity-claude-opus-4-5-thinking");
       expect(result.actualModel).toBe("claude-opus-4-5-thinking");
@@ -150,9 +142,25 @@ describe("resolveModelWithTier", () => {
   });
 
   describe("Claude Sonnet 4.6 aliases (non-thinking only)", () => {
+    it("antigravity-claude-sonnet-4-6-thinking downgrades to non-thinking Sonnet 4.6", () => {
+      const result = resolveModelWithTier("antigravity-claude-sonnet-4-6-thinking");
+      expect(result.actualModel).toBe("claude-sonnet-4-6");
+      expect(result.thinkingBudget).toBeUndefined();
+      expect(result.isThinkingModel).toBe(false);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
     it("maps gemini-claude-sonnet-4-6 to claude-sonnet-4-6", () => {
       const result = resolveModelWithTier("gemini-claude-sonnet-4-6");
       expect(result.actualModel).toBe("claude-sonnet-4-6");
+      expect(result.isThinkingModel).toBe(false);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("maps gemini-claude-sonnet-4-6-thinking to non-thinking claude-sonnet-4-6", () => {
+      const result = resolveModelWithTier("gemini-claude-sonnet-4-6-thinking");
+      expect(result.actualModel).toBe("claude-sonnet-4-6");
+      expect(result.thinkingBudget).toBeUndefined();
       expect(result.isThinkingModel).toBe(false);
       expect(result.quotaPreference).toBe("antigravity");
     });
@@ -244,6 +252,15 @@ describe("resolveModelWithVariant", () => {
       expect(result.thinkingBudget).toBe(20000);
       expect(result.thinkingLevel).toBeUndefined();
       expect(result.configSource).toBe("variant");
+    });
+
+    it("ignores variant thinkingBudget for non-thinking Sonnet 4.6 alias", () => {
+      const result = resolveModelWithVariant("gemini-claude-sonnet-4-6-thinking", {
+        thinkingBudget: 20000,
+      });
+      expect(result.actualModel).toBe("claude-sonnet-4-6");
+      expect(result.isThinkingModel).toBe(false);
+      expect(result.thinkingBudget).toBeUndefined();
     });
   });
 
