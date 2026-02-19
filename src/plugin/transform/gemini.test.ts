@@ -66,6 +66,10 @@ describe("transform/gemini", () => {
       expect(isGemini3Model("gemini-3-pro")).toBe(true);
     });
 
+    it("returns true for gemini-3.1-pro", () => {
+      expect(isGemini3Model("gemini-3.1-pro")).toBe(true);
+    });
+
     it("returns true for gemini-3-pro-high", () => {
       expect(isGemini3Model("gemini-3-pro-high")).toBe(true);
     });
@@ -365,6 +369,45 @@ describe("transform/gemini", () => {
       };
       normalizeGeminiTools(payload);
       expect((payload.tools as unknown[])[0]).not.toHaveProperty("custom");
+    });
+
+    it("flattens anyOf unions when combined with other fields (Gemini strict schema validation)", () => {
+      const payload: RequestPayload = {
+        contents: [],
+        tools: [
+          {
+            function: {
+              name: "test_tool",
+              description: "A test tool",
+              parameters: {
+                type: "object",
+                properties: {
+                  comments: {
+                    type: "array",
+                    items: { type: "string" },
+                    anyOf: [
+                      { type: "array", items: { type: "string" } },
+                      { type: "null" },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      normalizeGeminiTools(payload);
+
+      const tool = (payload.tools as any[])[0];
+      const schema = tool.function.input_schema as Record<string, unknown>;
+      const props = schema.properties as Record<string, any>;
+      const comments = props.comments as Record<string, any>;
+
+      // The union must be removed; Antigravity rejects anyOf when other fields are present.
+      expect(comments).not.toHaveProperty("anyOf");
+      expect(comments.type).toBe("ARRAY");
+      expect(comments.items.type).toBe("STRING");
     });
   });
 
@@ -1064,6 +1107,46 @@ describe("transform/gemini", () => {
       expect(decls[0]!.name).toBe("read_file");
       expect(decls[0]!.description).toBe("Read a file");
       expect(decls[0]!.parameters).toEqual({ type: "OBJECT", properties: { path: { type: "STRING" } } });
+    });
+
+    it("cleans functionDeclarations parameters schemas for Gemini strict validation (anyOf + other fields)", () => {
+      const payload: RequestPayload = {
+        contents: [],
+        tools: [
+          {
+            functionDeclarations: [
+              {
+                name: "github_create_pull_request_review",
+                description: "Create a review on a pull request",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    comments: {
+                      type: "array",
+                      items: { type: "string" },
+                      anyOf: [
+                        { type: "array", items: { type: "string" } },
+                        { type: "null" },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      };
+
+      wrapToolsAsFunctionDeclarations(payload);
+
+      const tools = payload.tools as Array<Record<string, unknown>>;
+      const decls = tools[0]!.functionDeclarations as Array<Record<string, unknown>>;
+      const params = decls[0]!.parameters as Record<string, any>;
+      const comments = params.properties.comments as Record<string, any>;
+
+      expect(comments).not.toHaveProperty("anyOf");
+      expect(comments.type).toBe("ARRAY");
+      expect(comments.items.type).toBe("STRING");
     });
 
     it("extracts schema from function.input_schema", () => {
