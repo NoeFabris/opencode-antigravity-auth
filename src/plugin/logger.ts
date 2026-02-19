@@ -1,15 +1,15 @@
 /**
  * Structured Logger for Antigravity Plugin
  *
- * Provides TUI-integrated logging that is silent by default.
- * Logs are only visible when:
- * 1. TUI client is available (logs to app log panel)
- * 2. OPENCODE_ANTIGRAVITY_CONSOLE_LOG=1 is set (logs to console)
- *
- * Ported from opencode-google-antigravity-auth/src/plugin/logger.ts
+ * Logging behavior:
+ * - debug disabled → no logs anywhere
+ * - debug enabled → log files only (via debug.ts logWriter)
+ * - debug enabled + debug_tui enabled → log files + TUI log panel
+ * - OPENCODE_ANTIGRAVITY_CONSOLE_LOG=1 → console output (independent of debug flags)
  */
 
 import type { PluginClient } from "./types";
+import { isDebugEnabled, isDebugTuiEnabled } from "./debug";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -65,18 +65,22 @@ export function createLogger(module: string): Logger {
   const service = `antigravity.${module}`;
 
   const log = (level: LogLevel, message: string, extra?: Record<string, unknown>): void => {
-    // Try TUI logging first
-    const app = _client?.app;
-    if (app && typeof app.log === "function") {
-      app
-        .log({
-          body: { service, level, message, extra },
-        })
-        .catch(() => {
-          // Silently ignore logging errors
-        });
-    } else if (isConsoleLogEnabled()) {
-      // Fallback to console if env var is set
+    // TUI logging: only when debug is enabled AND debug_tui is enabled
+    if (isDebugEnabled() && isDebugTuiEnabled()) {
+      const app = _client?.app;
+      if (app && typeof app.log === "function") {
+        app
+          .log({
+            body: { service, level, message, extra },
+          })
+          .catch(() => {
+            // Silently ignore logging errors
+          });
+      }
+    }
+
+    // Console fallback: when env var is set (independent of debug flags)
+    if (isConsoleLogEnabled()) {
       const prefix = `[${service}]`;
       const args = extra ? [prefix, message, extra] : [prefix, message];
       switch (level) {
