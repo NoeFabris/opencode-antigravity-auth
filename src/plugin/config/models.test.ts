@@ -17,6 +17,7 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
     expect(modelNames).toEqual([
       "antigravity-claude-opus-4-6-thinking",
       "antigravity-claude-sonnet-4-6",
+      "antigravity-claude-sonnet-4-6-thinking",
       "antigravity-gemini-3-flash",
       "antigravity-gemini-3-pro",
       "antigravity-gemini-3.1-pro",

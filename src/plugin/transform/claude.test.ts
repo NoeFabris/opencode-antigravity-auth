@@ -60,6 +60,7 @@ describe("isClaudeThinkingModel", () => {
 
   it("returns true for prefixed thinking models", () => {
     expect(isClaudeThinkingModel("antigravity-claude-sonnet-4-5-thinking")).toBe(true);
+    expect(isClaudeThinkingModel("antigravity-claude-sonnet-4-6-thinking")).toBe(true);
     expect(isClaudeThinkingModel("google/claude-opus-4-5-thinking-high")).toBe(true);
   });
 

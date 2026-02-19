@@ -72,6 +72,15 @@ export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
     limit: { context: 200000, output: 64000 },
     modalities: DEFAULT_MODALITIES,
   },
+  "antigravity-claude-sonnet-4-6-thinking": {
+    name: "Claude Sonnet 4.6 Thinking (Antigravity)",
+    limit: { context: 200000, output: 64000 },
+    modalities: DEFAULT_MODALITIES,
+    variants: {
+      low: { thinkingConfig: { thinkingBudget: 8192 } },
+      max: { thinkingConfig: { thinkingBudget: 32768 } },
+    },
+  },
   "antigravity-claude-opus-4-6-thinking": {
     name: "Claude Opus 4.6 Thinking (Antigravity)",
     limit: { context: 200000, output: 64000 },

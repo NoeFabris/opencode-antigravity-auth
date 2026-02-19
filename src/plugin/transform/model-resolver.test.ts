@@ -126,6 +126,14 @@ describe("resolveModelWithTier", () => {
       expect(result.isThinkingModel).toBe(true);
       expect(result.quotaPreference).toBe("antigravity");
     });
+
+    it("antigravity-claude-sonnet-4-6-thinking gets default max budget (32768)", () => {
+      const result = resolveModelWithTier("antigravity-claude-sonnet-4-6-thinking");
+      expect(result.actualModel).toBe("claude-sonnet-4-6-thinking");
+      expect(result.thinkingBudget).toBe(32768);
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
   });
 
   describe("Claude Sonnet 4.6 (non-thinking)", () => {
