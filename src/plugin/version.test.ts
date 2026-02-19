@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 /**
  * Regression tests for the version fallback mechanism.
@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
  * too old, the backend rejects requests for newer models (e.g., Gemini 3.1 Pro)
  * with "not available on this version".
  *
- * These tests verify the fallback is current (1.18.3) and that the
+ * These tests verify the fallback is current and that the
  * network-failure path correctly uses it.
  */
 
@@ -18,16 +18,21 @@ beforeEach(() => {
   vi.resetModules()
 })
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 describe("ANTIGRAVITY_VERSION_FALLBACK", () => {
-  it("defaults to 1.18.3 (current stable)", async () => {
-    const { getAntigravityVersion } = await import("../constants.ts")
-    expect(getAntigravityVersion()).toBe("1.18.3")
+  it("defaults to the exported fallback constant", async () => {
+    const { ANTIGRAVITY_VERSION_FALLBACK, getAntigravityVersion } = await import("../constants.ts")
+    expect(getAntigravityVersion()).toBe(ANTIGRAVITY_VERSION_FALLBACK)
   })
 
   it("is at least 1.18.0 to support Gemini 3.1 Pro", async () => {
     const { getAntigravityVersion } = await import("../constants.ts")
     const [major, minor] = getAntigravityVersion().split(".").map(Number)
-    expect(major! * 100 + minor!).toBeGreaterThanOrEqual(118)
+    expect(major).toBeGreaterThanOrEqual(1)
+    if (major === 1) expect(minor).toBeGreaterThanOrEqual(18)
   })
 })
 
@@ -50,11 +55,11 @@ describe("initAntigravityVersion — network failure path", () => {
   it("falls back to hardcoded version when both fetches throw", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unreachable")))
 
-    const { getAntigravityVersion } = await import("../constants.ts")
+    const { ANTIGRAVITY_VERSION_FALLBACK, getAntigravityVersion } = await import("../constants.ts")
     const { initAntigravityVersion } = await import("./version.ts")
     await initAntigravityVersion()
 
-    expect(getAntigravityVersion()).toBe("1.18.3")
+    expect(getAntigravityVersion()).toBe(ANTIGRAVITY_VERSION_FALLBACK)
   })
 
   it("falls back to hardcoded version when both fetches return non-ok", async () => {
@@ -63,11 +68,11 @@ describe("initAntigravityVersion — network failure path", () => {
       vi.fn().mockResolvedValue({ ok: false, status: 503, text: async () => "" }),
     )
 
-    const { getAntigravityVersion } = await import("../constants.ts")
+    const { ANTIGRAVITY_VERSION_FALLBACK, getAntigravityVersion } = await import("../constants.ts")
     const { initAntigravityVersion } = await import("./version.ts")
     await initAntigravityVersion()
 
-    expect(getAntigravityVersion()).toBe("1.18.3")
+    expect(getAntigravityVersion()).toBe(ANTIGRAVITY_VERSION_FALLBACK)
   })
 
   it("uses API version when auto-updater responds", async () => {
@@ -86,22 +91,22 @@ describe("initAntigravityVersion — network failure path", () => {
   it("fallback version appears in User-Agent header", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timeout")))
 
-    const { getAntigravityHeaders } = await import("../constants.ts")
+    const { ANTIGRAVITY_VERSION_FALLBACK, getAntigravityHeaders } = await import("../constants.ts")
     const { initAntigravityVersion } = await import("./version.ts")
     await initAntigravityVersion()
 
     const headers = getAntigravityHeaders()
-    expect(headers["User-Agent"]).toContain("Antigravity/1.18.3")
+    expect(headers["User-Agent"]).toContain(`Antigravity/${ANTIGRAVITY_VERSION_FALLBACK}`)
   })
 
   it("fallback version appears in randomized antigravity headers", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timeout")))
 
-    const { getRandomizedHeaders } = await import("../constants.ts")
+    const { ANTIGRAVITY_VERSION_FALLBACK, getRandomizedHeaders } = await import("../constants.ts")
     const { initAntigravityVersion } = await import("./version.ts")
     await initAntigravityVersion()
 
     const headers = getRandomizedHeaders("antigravity")
-    expect(headers["User-Agent"]).toContain("1.18.3")
+    expect(headers["User-Agent"]).toContain(ANTIGRAVITY_VERSION_FALLBACK)
   })
 })
