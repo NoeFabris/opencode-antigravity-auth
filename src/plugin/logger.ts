@@ -10,6 +10,10 @@
 
 import type { PluginClient } from "./types";
 import { isDebugTuiEnabled } from "./debug";
+import {
+  isTruthyFlag,
+  writeConsoleLog,
+} from "./logging-utils";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -29,8 +33,7 @@ let _client: PluginClient | null = null;
  * Check if console logging is enabled via environment variable.
  */
 function isConsoleLogEnabled(): boolean {
-  const val = process.env[ENV_CONSOLE_LOG];
-  return val === "1" || val?.toLowerCase() === "true";
+  return isTruthyFlag(process.env[ENV_CONSOLE_LOG]);
 }
 
 /**
@@ -83,20 +86,7 @@ export function createLogger(module: string): Logger {
     if (isConsoleLogEnabled()) {
       const prefix = `[${service}]`;
       const args = extra ? [prefix, message, extra] : [prefix, message];
-      switch (level) {
-        case "debug":
-          console.debug(...args);
-          break;
-        case "info":
-          console.info(...args);
-          break;
-        case "warn":
-          console.warn(...args);
-          break;
-        case "error":
-          console.error(...args);
-          break;
-      }
+      writeConsoleLog(level, ...args);
     }
     // If neither TUI nor console logging is enabled, log is silently discarded
   };
@@ -131,18 +121,5 @@ export function printAntigravityConsole(
   const prefixedMessage = `${ANTIGRAVITY_CONSOLE_PREFIX} ${message}`;
   const args = extra === undefined ? [prefixedMessage] : [prefixedMessage, extra];
 
-  switch (level) {
-    case "debug":
-      console.debug(...args);
-      break;
-    case "info":
-      console.info(...args);
-      break;
-    case "warn":
-      console.warn(...args);
-      break;
-    case "error":
-      console.error(...args);
-      break;
-  }
+  writeConsoleLog(level, ...args);
 }
