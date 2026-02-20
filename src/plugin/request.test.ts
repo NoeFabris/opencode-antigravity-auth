@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
@@ -6,6 +6,8 @@ import {
   isGenerativeLanguageRequest,
   __testExports,
 } from "./request";
+import { SKIP_THOUGHT_SIGNATURE } from "../constants";
+import * as config from "./config";
 import type { SignatureStore, ThoughtBuffer, StreamingCallbacks, StreamingOptions } from "./core/streaming/types";
 
 const {
@@ -52,6 +54,15 @@ function createMockThoughtBuffer(): ThoughtBuffer {
 const defaultCallbacks: StreamingCallbacks = {};
 const defaultOptions: StreamingOptions = {};
 const defaultDebugState = { injected: false };
+
+function withKeepThinking<T>(enabled: boolean, fn: () => T): T {
+  const keepThinkingSpy = vi.spyOn(config, "getKeepThinking").mockReturnValue(enabled);
+  try {
+    return fn();
+  } finally {
+    keepThinkingSpy.mockRestore();
+  }
+}
 
 describe("request.ts", () => {
   describe("getPluginSessionId", () => {
@@ -237,11 +248,11 @@ describe("request.ts", () => {
       expect(result.thoughtSignature).toBe("skip_thought_signature_validator");
     });
 
-    it("preserves existing thoughtSignature", () => {
+    it("replaces untrusted thoughtSignature with sentinel", () => {
       const existingSignature = "a".repeat(MIN_SIGNATURE_LENGTH + 10);
       const part = { thought: true, text: "thinking...", thoughtSignature: existingSignature };
       const result = ensureThoughtSignature(part, "session-key");
-      expect(result.thoughtSignature).toBe(existingSignature);
+      expect(result.thoughtSignature).toBe("skip_thought_signature_validator");
     });
 
     it("does not modify non-thinking parts", () => {
@@ -597,7 +608,7 @@ it("removes x-api-key header", () => {
       expect(headers.get("x-goog-user-project")).toBeNull();
     });
 
-    it("preserves x-goog-user-project header for gemini-cli headerStyle", () => {
+    it("removes x-goog-user-project header for gemini-cli headerStyle", () => {
       const result = prepareAntigravityRequest(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
         { method: "POST", body: JSON.stringify({ contents: [] }), headers: { "x-goog-user-project": "my-project" } },
@@ -607,7 +618,7 @@ it("removes x-api-key header", () => {
         "gemini-cli"
       );
       const headers = result.init.headers as Headers;
-      expect(headers.get("x-goog-user-project")).toBe("my-project");
+      expect(headers.get("x-goog-user-project")).toBeNull();
     });
 
     it("uses exact Code Assist headers for gemini-cli headerStyle", () => {
@@ -700,6 +711,217 @@ it("removes x-api-key header", () => {
         mockProjectId
       );
       expect(result.streaming).toBe(false);
+    });
+
+    it("does not add Claude auto-caching to wrapped request by default", () => {
+      const wrappedBody = {
+        project: "my-project",
+        request: { messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }] }
+      };
+      const result = prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-3-7-sonnet:generateContent",
+        { method: "POST", body: JSON.stringify(wrappedBody) },
+        mockAccessToken,
+        mockProjectId,
+      );
+
+      const wrapped = JSON.parse(result.init.body as string);
+      expect(wrapped.request.cache_control).toBeUndefined();
+    });
+
+    it("does not add Claude auto-caching to unwrapped request by default", () => {
+      const unwrappedBody = {
+        messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }]
+      };
+      const result = prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-3-7-sonnet:generateContent",
+        { method: "POST", body: JSON.stringify(unwrappedBody) },
+        mockAccessToken,
+        mockProjectId,
+      );
+
+      const wrapped = JSON.parse(result.init.body as string);
+      expect(wrapped.request.cache_control).toBeUndefined();
+    });
+
+    it("adds Claude auto-caching when enabled", () => {
+      const unwrappedBody = {
+        messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }]
+      };
+      const result = prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-3-7-sonnet:generateContent",
+        { method: "POST", body: JSON.stringify(unwrappedBody) },
+        mockAccessToken,
+        mockProjectId,
+        undefined,
+        "antigravity",
+        false,
+        { claudePromptAutoCaching: true },
+      );
+
+      const wrapped = JSON.parse(result.init.body as string);
+      expect(wrapped.request.cache_control).toEqual({ type: "ephemeral" });
+    });
+
+    it("strips Claude thinking blocks when keep_thinking is false (unwrapped)", () => {
+      const result = withKeepThinking(false, () => prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-opus-4-6-thinking:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "model",
+                parts: [
+                  {
+                    thought: true,
+                    text: "foreign-thought-unwrapped",
+                    thoughtSignature: "f".repeat(MIN_SIGNATURE_LENGTH + 8),
+                  },
+                  { functionCall: { name: "weather", args: {} } },
+                ],
+              },
+            ],
+          }),
+        },
+        mockAccessToken,
+        mockProjectId,
+      ));
+
+      const wrapped = JSON.parse(result.init.body as string);
+      const parts = wrapped.request.contents[0].parts as Array<Record<string, unknown>>;
+      const thinkingParts = parts.filter((part) =>
+        part.thought === true
+        || part.type === "thinking"
+        || part.type === "redacted_thinking"
+        || part.type === "reasoning",
+      );
+
+      expect(thinkingParts).toHaveLength(0);
+      expect(result.needsSignedThinkingWarmup).toBe(false);
+    });
+
+    it("strips Claude thinking blocks when keep_thinking is false (wrapped)", () => {
+      const result = withKeepThinking(false, () => prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-opus-4-6-thinking:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            project: "my-project",
+            request: {
+              contents: [
+                {
+                  role: "model",
+                  parts: [
+                    {
+                      thought: true,
+                      text: "foreign-thought-wrapped",
+                      thoughtSignature: "w".repeat(MIN_SIGNATURE_LENGTH + 8),
+                    },
+                    { functionCall: { name: "weather", args: {} } },
+                  ],
+                },
+              ],
+            },
+          }),
+        },
+        mockAccessToken,
+        mockProjectId,
+      ));
+
+      const wrapped = JSON.parse(result.init.body as string);
+      const parts = wrapped.request.contents[0].parts as Array<Record<string, unknown>>;
+      const thinkingParts = parts.filter((part) =>
+        part.thought === true
+        || part.type === "thinking"
+        || part.type === "redacted_thinking"
+        || part.type === "reasoning",
+      );
+
+      expect(thinkingParts).toHaveLength(0);
+      expect(result.needsSignedThinkingWarmup).toBe(false);
+    });
+
+    it("does not trust foreign Gemini thoughtSignature when keep_thinking is true", () => {
+      const foreignSignature = "x".repeat(MIN_SIGNATURE_LENGTH + 8);
+      const result = withKeepThinking(true, () => prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-opus-4-6-thinking:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "model",
+                parts: [
+                  {
+                    thought: true,
+                    text: "foreign-thought-keep-true",
+                    thoughtSignature: foreignSignature,
+                  },
+                  { functionCall: { name: "weather", args: {} } },
+                ],
+              },
+            ],
+          }),
+        },
+        mockAccessToken,
+        mockProjectId,
+      ));
+
+      const wrapped = JSON.parse(result.init.body as string);
+      const parts = wrapped.request.contents[0].parts as Array<Record<string, unknown>>;
+      const thinkingBlock = parts.find((part) =>
+        part.thought === true || part.type === "thinking" || part.type === "redacted_thinking",
+      );
+      const signature = typeof thinkingBlock?.signature === "string"
+        ? thinkingBlock.signature
+        : thinkingBlock?.thoughtSignature;
+
+      expect(JSON.stringify(wrapped)).not.toContain(foreignSignature);
+      if (thinkingBlock) {
+        expect(signature).toBe(SKIP_THOUGHT_SIGNATURE);
+      }
+    });
+
+    it("replaces foreign Claude signatures with sentinel when keep_thinking is true", () => {
+      const foreignSignature = "y".repeat(MIN_SIGNATURE_LENGTH + 8);
+      const result = withKeepThinking(true, () => prepareAntigravityRequest(
+        "https://generativelanguage.googleapis.com/v1beta/models/claude-opus-4-6-thinking:generateContent",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            messages: [
+              {
+                role: "assistant",
+                content: [
+                  {
+                    type: "thinking",
+                    thinking: "foreign-message-thinking",
+                    signature: foreignSignature,
+                  },
+                  {
+                    type: "tool_use",
+                    id: "tool-1",
+                    name: "weather",
+                    input: {},
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+        mockAccessToken,
+        mockProjectId,
+      ));
+
+      const wrapped = JSON.parse(result.init.body as string);
+      const content = wrapped.request.messages[0].content as Array<Record<string, unknown>>;
+      const thinkingBlock = content.find((block) => block.type === "thinking" || block.type === "redacted_thinking");
+
+      expect(thinkingBlock).toBeTruthy();
+      expect(thinkingBlock?.signature).toBe(SKIP_THOUGHT_SIGNATURE);
+      expect(JSON.stringify(content)).not.toContain(foreignSignature);
+      expect(result.needsSignedThinkingWarmup).toBe(false);
     });
 
     it("returns requestedModel matching URL model", () => {
@@ -821,10 +1043,10 @@ it("removes x-api-key header", () => {
           undefined,
           "antigravity"
         );
-        expect(result.effectiveModel).toBe("gemini-3-pro-low");
+        expect(result.effectiveModel).toBe("gemini-3-pro-high");
       });
 
-      it("transforms gemini-3.1-pro-preview to gemini-3.1-pro-low for antigravity headerStyle", () => {
+      it("transforms gemini-3.1-pro-preview to gemini-3.1-pro-high for antigravity headerStyle (pro defaults to high)", () => {
         const result = prepareAntigravityRequest(
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
           { method: "POST", body: JSON.stringify({ contents: [] }) },
@@ -833,10 +1055,10 @@ it("removes x-api-key header", () => {
           undefined,
           "antigravity"
         );
-        expect(result.effectiveModel).toBe("gemini-3.1-pro-low");
+        expect(result.effectiveModel).toBe("gemini-3.1-pro-high");
       });
 
-      it("transforms gemini-3.1-pro-preview-customtools to gemini-3.1-pro-low for antigravity headerStyle", () => {
+      it("transforms gemini-3.1-pro-preview-customtools to gemini-3.1-pro-high for antigravity headerStyle", () => {
         const result = prepareAntigravityRequest(
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview-customtools:generateContent",
           { method: "POST", body: JSON.stringify({ contents: [] }) },
@@ -845,7 +1067,7 @@ it("removes x-api-key header", () => {
           undefined,
           "antigravity"
         );
-        expect(result.effectiveModel).toBe("gemini-3.1-pro-low");
+        expect(result.effectiveModel).toBe("gemini-3.1-pro-high");
       });
 
       it("transforms gemini-3-flash to gemini-3-flash-preview for gemini-cli headerStyle", () => {

@@ -644,12 +644,11 @@ Control how the plugin handles rate limits:
 
 For all options, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-**Environment variables:**
-```bash
-OPENCODE_CONFIG_DIR=/path/to/config opencode  # Custom config directory
-OPENCODE_ANTIGRAVITY_DEBUG=1 opencode         # Enable debug logging
-OPENCODE_ANTIGRAVITY_DEBUG=2 opencode         # Verbose logging
-```
+**Environment variable overrides** (take highest priority):
+
+| Variable | Effect |
+|----------|--------|
+| `OPENCODE_CONFIG_DIR` | Custom config directory path |
 
 ---
 

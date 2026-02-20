@@ -16,21 +16,21 @@ const rawSchema = AntigravityConfigSchema.toJSONSchema({
 // This preserves backwards compatibility with the draft-07 schema behavior
 delete rawSchema.required;
 
-const envVarDescriptions: Record<string, string> = {
+const optionDescriptions: Record<string, string> = {
   quiet_mode:
-    "Suppress most toast notifications (rate limit, account switching). Recovery toasts always shown. Env: OPENCODE_ANTIGRAVITY_QUIET=1",
+    "Suppress most toast notifications (rate limit, account switching). Recovery toasts always shown.",
   debug:
-    "Enable debug logging to file. Env: OPENCODE_ANTIGRAVITY_DEBUG=1 (or =2 for verbose)",
+    "Enable debug logging to file.",
   log_dir:
-    "Custom directory for debug logs. Env: OPENCODE_ANTIGRAVITY_LOG_DIR=/path/to/logs",
+    "Custom directory for debug logs.",
   keep_thinking:
-    "Preserve thinking blocks for Claude models using signature caching. May cause signature errors. Env: OPENCODE_ANTIGRAVITY_KEEP_THINKING=1",
+    "Preserve thinking blocks for Claude models using signature caching. May cause signature errors.",
   session_recovery:
-    "Enable automatic session recovery from tool_result_missing errors. Env: OPENCODE_ANTIGRAVITY_SESSION_RECOVERY=1",
+    "Enable automatic session recovery from tool_result_missing errors.",
   auto_resume:
-    "Automatically send resume prompt after successful recovery. Env: OPENCODE_ANTIGRAVITY_AUTO_RESUME=1",
+    "Automatically send resume prompt after successful recovery.",
   resume_text:
-    "Custom text to send when auto-resuming after recovery. Env: OPENCODE_ANTIGRAVITY_RESUME_TEXT=continue",
+    "Custom text to send when auto-resuming after recovery.",
   empty_response_max_attempts:
     "Maximum retry attempts when Antigravity returns an empty response (no candidates).",
   empty_response_retry_delay_ms:
@@ -39,13 +39,15 @@ const envVarDescriptions: Record<string, string> = {
     "Enable tool ID orphan recovery. Matches mismatched tool responses by function name or creates placeholders.",
   claude_tool_hardening:
     "Enable tool hallucination prevention for Claude models. Injects parameter signatures and strict usage rules.",
+  claude_prompt_auto_caching:
+    "Enable Claude prompt auto-caching by adding top-level cache_control when absent.",
   proactive_token_refresh:
     "Enable proactive background token refresh before expiry, ensuring requests never block.",
   proactive_refresh_buffer_seconds:
     "Seconds before token expiry to trigger proactive refresh.",
   proactive_refresh_check_interval_seconds:
     "Interval between proactive refresh checks in seconds.",
-  auto_update: "Enable automatic plugin updates. Env: OPENCODE_ANTIGRAVITY_AUTO_UPDATE=1",
+  auto_update: "Enable automatic plugin updates.",
   quota_fallback:
     "Deprecated: accepted for backward compatibility but ignored at runtime. Gemini fallback between Antigravity and Gemini CLI is always enabled.",
   cli_first:
@@ -80,8 +82,8 @@ function addDescriptions(schema: Record<string, unknown>): void {
   if (!props) return;
 
   for (const [key, prop] of Object.entries(props)) {
-    if (envVarDescriptions[key]) {
-      prop.description = envVarDescriptions[key];
+    if (optionDescriptions[key]) {
+      prop.description = optionDescriptions[key];
     }
 
     if (key === "signature_cache" && prop.properties) {

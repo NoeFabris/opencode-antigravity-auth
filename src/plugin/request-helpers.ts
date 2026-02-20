@@ -842,7 +842,11 @@ export function extractVariantThinkingConfig(
   if (result.thinkingBudget === undefined && !result.thinkingLevel && generationConfig) {
     if (generationConfig.thinkingConfig && typeof generationConfig.thinkingConfig === "object") {
       const tc = generationConfig.thinkingConfig as Record<string, unknown>;
-      if (typeof tc.thinkingBudget === "number") {
+      if (typeof tc.thinkingLevel === "string") {
+        // Gemini 3 native format sent via generationConfig
+        result.thinkingLevel = tc.thinkingLevel;
+        result.includeThoughts = typeof tc.includeThoughts === "boolean" ? tc.includeThoughts : undefined;
+      } else if (typeof tc.thinkingBudget === "number") {
         result.thinkingBudget = tc.thinkingBudget;
       }
     }
@@ -1132,7 +1136,17 @@ function filterContentArray(
     }
 
     if (isToolBlock(item)) {
-      filtered.push(item);
+      if (!isClaudeModel) {
+        filtered.push(item);
+        continue;
+      }
+
+      const sanitizedToolBlock = { ...(item as Record<string, unknown>) };
+      delete (sanitizedToolBlock as any).signature;
+      delete (sanitizedToolBlock as any).thoughtSignature;
+      delete (sanitizedToolBlock as any).thought_signature;
+      delete (sanitizedToolBlock as any).thought;
+      filtered.push(sanitizedToolBlock);
       continue;
     }
 
@@ -1141,6 +1155,17 @@ function filterContentArray(
 
     if (!isThinking && !hasSignature) {
       filtered.push(item);
+      continue;
+    }
+
+    if (isClaudeModel && (isThinking || hasSignature)) {
+      const thinkingText = getThinkingText(item) || "";
+      const sentinelPart = {
+        type: item.type === "redacted_thinking" ? "redacted_thinking" : "thinking",
+        thinking: thinkingText,
+        signature: SKIP_THOUGHT_SIGNATURE,
+      };
+      filtered.push(sentinelPart);
       continue;
     }
 
@@ -2829,4 +2854,3 @@ data: ${JSON.stringify({ type: "message_stop" })}
     },
   });
 }
-

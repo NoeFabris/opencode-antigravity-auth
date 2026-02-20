@@ -96,13 +96,11 @@ Settings for plugin behavior.
 
 ### Debug Logging
 
-```bash
-# Via environment variable (temporary)
-OPENCODE_ANTIGRAVITY_DEBUG=1 opencode   # Basic logging
-OPENCODE_ANTIGRAVITY_DEBUG=2 opencode   # Verbose logging
-
-# Via config (persistent)
-{ "debug": true }
+```json
+{
+  "debug": true,
+  "debug_tui": true
+}
 ```
 
 Logs are written to `~/.config/opencode/antigravity-logs/` (or `log_dir` if set).
@@ -171,21 +169,6 @@ These settings are `false` by default:
 |---------|---------|--------------|
 | `keep_thinking` | `false` | Preserve Claude thinking (may degrade stability) |
 | `auto_resume` | `false` | Auto-continue after recovery |
-
----
-
-## Environment Overrides
-
-All options can be set via environment variables:
-
-```bash
-OPENCODE_ANTIGRAVITY_QUIET=1                              # quiet_mode
-OPENCODE_ANTIGRAVITY_DEBUG=1                              # debug (1=basic, 2=verbose)
-OPENCODE_ANTIGRAVITY_LOG_DIR=/path                        # log_dir
-OPENCODE_ANTIGRAVITY_KEEP_THINKING=1                      # keep_thinking
-OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY=round-robin
-OPENCODE_ANTIGRAVITY_PID_OFFSET_ENABLED=1
-```
 
 ---
 

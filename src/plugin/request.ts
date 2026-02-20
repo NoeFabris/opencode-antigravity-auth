@@ -444,52 +444,104 @@ function isGeminiThinkingPart(part: any): boolean {
 // Reference: LLM-API-Key-Proxy uses this pattern for Gemini 3 tool calls.
 const SENTINEL_SIGNATURE = "skip_thought_signature_validator";
 
+function getThinkingPartText(part: any): string {
+  if (!part || typeof part !== "object") {
+    return "";
+  }
+
+  if (typeof part.text === "string") {
+    return part.text;
+  }
+
+  if (typeof part.thinking === "string") {
+    return part.thinking;
+  }
+
+  return "";
+}
+
+function hasCachedMatchingSignature(part: any, sessionId: string): boolean {
+  if (!part || typeof part !== "object") {
+    return false;
+  }
+
+  const text = getThinkingPartText(part);
+  if (!text) {
+    return false;
+  }
+
+  const expectedSignature = getCachedSignature(sessionId, text);
+  if (!expectedSignature) {
+    return false;
+  }
+
+  if (part.thought === true) {
+    return part.thoughtSignature === expectedSignature;
+  }
+
+  return part.signature === expectedSignature;
+}
+
 function ensureThoughtSignature(part: any, sessionId: string): any {
   if (!part || typeof part !== "object") {
     return part;
   }
 
-  const text = typeof part.text === "string" ? part.text : typeof part.thinking === "string" ? part.thinking : "";
+  if (!sessionId) {
+    return part;
+  }
+
+  const text = getThinkingPartText(part);
   if (!text) {
     return part;
   }
 
   if (part.thought === true) {
-    if (!part.thoughtSignature) {
-      const cached = getCachedSignature(sessionId, text);
-      if (cached) {
-        return { ...part, thoughtSignature: cached };
-      }
-      // Fallback: use sentinel signature to prevent API rejection
-      // This allows Claude to redact the thinking block instead of failing
-      return { ...part, thoughtSignature: SENTINEL_SIGNATURE };
-    }
-    return part;
+    return { ...part, thoughtSignature: SENTINEL_SIGNATURE };
   }
 
-  if ((part.type === "thinking" || part.type === "reasoning") && !part.signature) {
-    const cached = getCachedSignature(sessionId, text);
-    if (cached) {
-      return { ...part, signature: cached };
-    }
-    // Fallback: use sentinel signature to prevent API rejection
+  if (part.type === "thinking" || part.type === "reasoning" || part.type === "redacted_thinking") {
     return { ...part, signature: SENTINEL_SIGNATURE };
   }
 
   return part;
 }
 
-function hasSignedThinkingPart(part: any): boolean {
+function hasSignedThinkingPart(part: any, sessionId?: string): boolean {
   if (!part || typeof part !== "object") {
     return false;
   }
 
   if (part.thought === true) {
-    return typeof part.thoughtSignature === "string" && part.thoughtSignature.length >= MIN_SIGNATURE_LENGTH;
+    if (part.thoughtSignature === SENTINEL_SIGNATURE || part.thoughtSignature === SKIP_THOUGHT_SIGNATURE) {
+      return true;
+    }
+
+    if (typeof part.thoughtSignature !== "string" || part.thoughtSignature.length < MIN_SIGNATURE_LENGTH) {
+      return false;
+    }
+
+    if (!sessionId) {
+      return true;
+    }
+
+    return hasCachedMatchingSignature(part, sessionId);
   }
 
-  if (part.type === "thinking" || part.type === "reasoning") {
-    return typeof part.signature === "string" && part.signature.length >= MIN_SIGNATURE_LENGTH;
+  if (part.type === "thinking" || part.type === "reasoning" || part.type === "redacted_thinking") {
+    if (part.signature === SENTINEL_SIGNATURE || part.signature === SKIP_THOUGHT_SIGNATURE) {
+      return true;
+    }
+
+    if (typeof part.signature !== "string" || part.signature.length < MIN_SIGNATURE_LENGTH) {
+      return false;
+    }
+
+    if (!sessionId) {
+      return true;
+    }
+
+    return hasCachedMatchingSignature(part, sessionId);
   }
 
   return false;
@@ -514,7 +566,7 @@ function ensureThinkingBeforeToolUseInContents(contents: any[], signatureSession
 
     const thinkingParts = parts.filter(isGeminiThinkingPart).map((p) => ensureThoughtSignature(p, signatureSessionKey));
     const otherParts = parts.filter((p) => !isGeminiThinkingPart(p));
-    const hasSignedThinking = thinkingParts.some(hasSignedThinkingPart);
+    const hasSignedThinking = thinkingParts.some((part) => hasSignedThinkingPart(part, signatureSessionKey));
 
     if (hasSignedThinking) {
       return { ...content, parts: [...thinkingParts, ...otherParts] };
@@ -532,7 +584,7 @@ function ensureThinkingBeforeToolUseInContents(contents: any[], signatureSession
     const injected = {
       thought: true,
       text: lastThinking.text,
-      thoughtSignature: lastThinking.signature,
+      thoughtSignature: SENTINEL_SIGNATURE,
     };
 
     return { ...content, parts: [injected, ...otherParts] };
@@ -548,21 +600,16 @@ function ensureMessageThinkingSignature(block: any, sessionId: string): any {
     return block;
   }
 
-  if (typeof block.signature === "string" && block.signature.length >= MIN_SIGNATURE_LENGTH) {
-    return block;
-  }
-
-  const text = typeof block.thinking === "string" ? block.thinking : typeof block.text === "string" ? block.text : "";
+  const text = getThinkingPartText(block);
   if (!text) {
     return block;
   }
 
-  const cached = getCachedSignature(sessionId, text);
-  if (cached) {
-    return { ...block, signature: cached };
+  if (!sessionId) {
+    return block;
   }
 
-  return block;
+  return { ...block, signature: SKIP_THOUGHT_SIGNATURE };
 }
 
 function hasToolUseInContents(contents: any[]): boolean {
@@ -574,12 +621,12 @@ function hasToolUseInContents(contents: any[]): boolean {
   });
 }
 
-function hasSignedThinkingInContents(contents: any[]): boolean {
+function hasSignedThinkingInContents(contents: any[], sessionId?: string): boolean {
   return contents.some((content: any) => {
     if (!content || typeof content !== "object" || !Array.isArray(content.parts)) {
       return false;
     }
-    return (content.parts as any[]).some(hasSignedThinkingPart);
+    return (content.parts as any[]).some((part) => hasSignedThinkingPart(part, sessionId));
   });
 }
 
@@ -594,19 +641,12 @@ function hasToolUseInMessages(messages: any[]): boolean {
   });
 }
 
-function hasSignedThinkingInMessages(messages: any[]): boolean {
+function hasSignedThinkingInMessages(messages: any[], sessionId?: string): boolean {
   return messages.some((message: any) => {
     if (!message || typeof message !== "object" || !Array.isArray(message.content)) {
       return false;
     }
-    return (message.content as any[]).some(
-      (block) =>
-        block &&
-        typeof block === "object" &&
-        (block.type === "thinking" || block.type === "redacted_thinking") &&
-        typeof block.signature === "string" &&
-        block.signature.length >= MIN_SIGNATURE_LENGTH,
-    );
+    return (message.content as any[]).some((block) => hasSignedThinkingPart(block, sessionId));
   });
 }
 
@@ -631,7 +671,7 @@ function ensureThinkingBeforeToolUseInMessages(messages: any[], signatureSession
       .map((b) => ensureMessageThinkingSignature(b, signatureSessionKey));
 
     const otherBlocks = blocks.filter((b) => !(b && typeof b === "object" && (b.type === "thinking" || b.type === "redacted_thinking")));
-    const hasSignedThinking = thinkingBlocks.some((b) => typeof b.signature === "string" && b.signature.length >= MIN_SIGNATURE_LENGTH);
+    const hasSignedThinking = thinkingBlocks.some((block) => hasSignedThinkingPart(block, signatureSessionKey));
 
     if (hasSignedThinking) {
       return { ...message, content: [...thinkingBlocks, ...otherBlocks] };
@@ -655,7 +695,7 @@ function ensureThinkingBeforeToolUseInMessages(messages: any[], signatureSession
     const injected = {
       type: "thinking",
       thinking: lastThinking.text,
-      signature: lastThinking.signature,
+      signature: SKIP_THOUGHT_SIGNATURE,
     };
 
     return { ...message, content: [injected, ...otherBlocks] };
@@ -693,6 +733,8 @@ export function isGenerativeLanguageRequest(input: RequestInfo): input is string
 export interface PrepareRequestOptions {
   /** Enable Claude tool hardening (parameter signatures + system instruction). Default: true */
   claudeToolHardening?: boolean;
+  /** Enable top-level Claude prompt auto-caching (`cache_control`). Default: false */
+  claudePromptAutoCaching?: boolean;
   /** Google Search configuration (global default) */
   googleSearch?: GoogleSearchConfig;
   /** Per-account fingerprint for rate limit mitigation. Falls back to session fingerprint if not provided. */
@@ -745,13 +787,10 @@ export function prepareAntigravityRequest(
 
   headers.set("Authorization", `Bearer ${accessToken}`);
   headers.delete("x-api-key");
-  if (headerStyle === "antigravity") {
-    // Strip x-goog-user-project header to prevent 403 PERMISSION_DENIED errors.
-    // This header is added by OpenCode/AI SDK but causes auth conflicts on ALL endpoints
-    // (Daily, Autopush, Prod) when the user's GCP project doesn't have Cloud Code API enabled.
-    // Error: "Cloud Code Private API has not been used in project {user_project} before or it is disabled"
-    headers.delete("x-goog-user-project");
-  }
+  // Strip x-goog-user-project header to prevent 403 auth/license conflicts.
+  // This header is added by OpenCode/AI SDK and can force project-level checks
+  // that are not required for Antigravity/Gemini CLI OAuth requests.
+  headers.delete("x-goog-user-project");
 
   const match = input.match(/\/models\/([^:]+):(\w+)/);
   if (!match) {
@@ -767,7 +806,7 @@ export function prepareAntigravityRequest(
   const requestedModel = rawModel;
 
   const resolved = resolveModelForHeaderStyle(rawModel, headerStyle);
-  const effectiveModel = resolved.actualModel;
+  let effectiveModel = resolved.actualModel;
 
   const streaming = rawAction === STREAM_ACTION;
   const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
@@ -776,6 +815,8 @@ export function prepareAntigravityRequest(
 
   const isClaude = isClaudeModel(resolved.actualModel);
   const isClaudeThinking = isClaudeThinkingModel(resolved.actualModel);
+  const keepThinkingEnabled = getKeepThinking();
+  const enableClaudePromptAutoCaching = options?.claudePromptAutoCaching ?? false;
 
   // Tier-based thinking configuration from model resolver (can be overridden by variant config)
   let tierThinkingBudget = resolved.thinkingBudget;
@@ -835,11 +876,15 @@ export function prepareAntigravityRequest(
             // Step 1: Strip corrupted/unsigned thinking blocks FIRST
             deepFilterThinkingBlocks(req, signatureSessionKey, getCachedSignature, true);
 
+            if (enableClaudePromptAutoCaching && (req as any).cache_control === undefined) {
+              (req as any).cache_control = { type: "ephemeral" };
+            }
+
             // Step 2: THEN inject signed thinking from cache (after stripping)
-            if (isClaudeThinking && Array.isArray((req as any).contents)) {
+            if (isClaudeThinking && keepThinkingEnabled && Array.isArray((req as any).contents)) {
               (req as any).contents = ensureThinkingBeforeToolUseInContents((req as any).contents, signatureSessionKey);
             }
-            if (isClaudeThinking && Array.isArray((req as any).messages)) {
+            if (isClaudeThinking && keepThinkingEnabled && Array.isArray((req as any).messages)) {
               (req as any).messages = ensureThinkingBeforeToolUseInMessages((req as any).messages, signatureSessionKey);
             }
 
@@ -848,14 +893,14 @@ export function prepareAntigravityRequest(
           }
         }
 
-        if (isClaudeThinking && sessionId) {
+        if (isClaudeThinking && keepThinkingEnabled && sessionId) {
           const hasToolUse = requestObjects.some((req) =>
             (Array.isArray((req as any).contents) && hasToolUseInContents((req as any).contents)) ||
             (Array.isArray((req as any).messages) && hasToolUseInMessages((req as any).messages)),
           );
           const hasSignedThinking = requestObjects.some((req) =>
-            (Array.isArray((req as any).contents) && hasSignedThinkingInContents((req as any).contents)) ||
-            (Array.isArray((req as any).messages) && hasSignedThinkingInMessages((req as any).messages)),
+            (Array.isArray((req as any).contents) && hasSignedThinkingInContents((req as any).contents, signatureSessionKey)) ||
+            (Array.isArray((req as any).messages) && hasSignedThinkingInMessages((req as any).messages, signatureSessionKey)),
           );
           const hasCachedThinking = defaultSignatureStore.has(signatureSessionKey);
           needsSignedThinkingWarmup = hasToolUse && !hasSignedThinking && !hasCachedThinking;
@@ -874,6 +919,8 @@ export function prepareAntigravityRequest(
         );
         const isGemini3 = effectiveModel.toLowerCase().includes("gemini-3");
 
+        log.debug(`[ThinkingResolution] rawModel=${rawModel} resolvedModel=${effectiveModel} resolvedTier=${tierThinkingLevel ?? "none"} variantLevel=${variantConfig?.thinkingLevel ?? "none"} variantBudget=${variantConfig?.thinkingBudget ?? "none"} providerOptions.google=${JSON.stringify((requestPayload.providerOptions as any)?.google ?? null)} generationConfig.thinkingConfig=${JSON.stringify((rawGenerationConfig as any)?.thinkingConfig ?? null)}`);
+
         if (variantConfig?.thinkingLevel && isGemini3) {
           // Gemini 3 native format - use thinkingLevel directly
           tierThinkingLevel = variantConfig.thinkingLevel;
@@ -890,6 +937,13 @@ export function prepareAntigravityRequest(
             tierThinkingBudget = variantConfig.thinkingBudget;
             tierThinkingLevel = undefined;
           }
+        }
+
+        // Sync effectiveModel with variant-overridden thinking tier for Gemini 3 Pro.
+        // Antigravity API uses the model name suffix (e.g. gemini-3.1-pro-high vs -low)
+        // to determine thinking level, so the model name must match tierThinkingLevel.
+        if (isGemini3 && tierThinkingLevel && /gemini-3[^-]*-pro/i.test(effectiveModel)) {
+          effectiveModel = effectiveModel.replace(/-(low|medium|high)$/, `-${tierThinkingLevel}`);
         }
 
         if (isClaude) {
@@ -1277,22 +1331,26 @@ export function prepareAntigravityRequest(
           // Step 1: Strip corrupted/unsigned thinking blocks FIRST
           deepFilterThinkingBlocks(requestPayload, signatureSessionKey, getCachedSignature, true);
 
+          if (enableClaudePromptAutoCaching && requestPayload.cache_control === undefined) {
+            requestPayload.cache_control = { type: "ephemeral" };
+          }
+
           // Step 2: THEN inject signed thinking from cache (after stripping)
-          if (isClaudeThinking && Array.isArray(requestPayload.contents)) {
+          if (isClaudeThinking && keepThinkingEnabled && Array.isArray(requestPayload.contents)) {
             requestPayload.contents = ensureThinkingBeforeToolUseInContents(requestPayload.contents, signatureSessionKey);
           }
-          if (isClaudeThinking && Array.isArray(requestPayload.messages)) {
+          if (isClaudeThinking && keepThinkingEnabled && Array.isArray(requestPayload.messages)) {
             requestPayload.messages = ensureThinkingBeforeToolUseInMessages(requestPayload.messages, signatureSessionKey);
           }
 
           // Step 3: Check if warmup needed (AFTER injection attempt)
-          if (isClaudeThinking) {
+          if (isClaudeThinking && keepThinkingEnabled) {
             const hasToolUse =
               (Array.isArray(requestPayload.contents) && hasToolUseInContents(requestPayload.contents)) ||
               (Array.isArray(requestPayload.messages) && hasToolUseInMessages(requestPayload.messages));
             const hasSignedThinking =
-              (Array.isArray(requestPayload.contents) && hasSignedThinkingInContents(requestPayload.contents)) ||
-              (Array.isArray(requestPayload.messages) && hasSignedThinkingInMessages(requestPayload.messages));
+              (Array.isArray(requestPayload.contents) && hasSignedThinkingInContents(requestPayload.contents, signatureSessionKey)) ||
+              (Array.isArray(requestPayload.messages) && hasSignedThinkingInMessages(requestPayload.messages, signatureSessionKey));
             const hasCachedThinking = defaultSignatureStore.has(signatureSessionKey);
             needsSignedThinkingWarmup = hasToolUse && !hasSignedThinking && !hasCachedThinking;
           }

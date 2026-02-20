@@ -56,8 +56,7 @@ interface RefreshQueueState {
  * Runs in the background and proactively refreshes tokens before they expire.
  * This ensures that user requests never block on token refresh.
  * 
- * All logging is silent by default - uses structured logger that only outputs
- * when OPENCODE_ANTIGRAVITY_CONSOLE_LOG=1 is set or TUI logging is available.
+ * All logging is silent by default - uses structured logger with TUI integration.
  */
 export class ProactiveRefreshQueue {
   private readonly config: ProactiveRefreshConfig;

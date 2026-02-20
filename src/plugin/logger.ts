@@ -5,7 +5,6 @@
  * - debug disabled → no logs anywhere
  * - debug enabled → log files only (via debug.ts logWriter)
  * - debug_tui enabled → log files + TUI log panel
- * - OPENCODE_ANTIGRAVITY_CONSOLE_LOG=1 → console output (independent of debug flags)
  */
 
 import type { PluginClient } from "./types";
@@ -13,7 +12,6 @@ import { isDebugTuiEnabled } from "./debug";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
-const ENV_CONSOLE_LOG = "OPENCODE_ANTIGRAVITY_CONSOLE_LOG";
 const ANTIGRAVITY_CONSOLE_PREFIX = "[Antigravity]";
 
 export interface Logger {
@@ -24,14 +22,6 @@ export interface Logger {
 }
 
 let _client: PluginClient | null = null;
-
-/**
- * Check if console logging is enabled via environment variable.
- */
-function isConsoleLogEnabled(): boolean {
-  const val = process.env[ENV_CONSOLE_LOG];
-  return val === "1" || val?.toLowerCase() === "true";
-}
 
 /**
  * Initialize the logger with the plugin client.
@@ -79,26 +69,7 @@ export function createLogger(module: string): Logger {
       }
     }
 
-    // Console fallback: when env var is set (independent of debug flags)
-    if (isConsoleLogEnabled()) {
-      const prefix = `[${service}]`;
-      const args = extra ? [prefix, message, extra] : [prefix, message];
-      switch (level) {
-        case "debug":
-          console.debug(...args);
-          break;
-        case "info":
-          console.info(...args);
-          break;
-        case "warn":
-          console.warn(...args);
-          break;
-        case "error":
-          console.error(...args);
-          break;
-      }
-    }
-    // If neither TUI nor console logging is enabled, log is silently discarded
+    // If TUI logging is not enabled, log is silently discarded
   };
 
   return {
@@ -111,7 +82,6 @@ export function createLogger(module: string): Logger {
 
 /**
  * Print a message to the console with Antigravity prefix.
- * Only outputs when OPENCODE_ANTIGRAVITY_CONSOLE_LOG=1 is set.
  *
  * Use this for standalone messages that don't belong to a specific module.
  *
@@ -124,10 +94,6 @@ export function printAntigravityConsole(
   message: string,
   extra?: unknown,
 ): void {
-  if (!isConsoleLogEnabled()) {
-    return;
-  }
-
   const prefixedMessage = `${ANTIGRAVITY_CONSOLE_PREFIX} ${message}`;
   const args = extra === undefined ? [prefixedMessage] : [prefixedMessage, extra];
 

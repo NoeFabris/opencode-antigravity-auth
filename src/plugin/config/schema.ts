@@ -6,7 +6,6 @@
  * - User: ~/.config/opencode/antigravity.json (Linux/Mac)
  *         %APPDATA%\opencode\antigravity.json (Windows)
  * 
- * Environment variables always override config file values.
  */
 
 import { z } from "zod";
@@ -72,7 +71,6 @@ export const AntigravityConfigSchema = z.object({
   /** 
    * Suppress most toast notifications (rate limit, account switching, etc.)
    * Recovery toasts are always shown regardless of this setting.
-   * Env override: OPENCODE_ANTIGRAVITY_QUIET=1
    * @default false
    */
   quiet_mode: z.boolean().default(false),
@@ -85,14 +83,12 @@ export const AntigravityConfigSchema = z.object({
    * - `all`: All sessions show toasts including subagents and background tasks.
    * 
    * Debug logging captures all toasts regardless of this setting.
-   * Env override: OPENCODE_ANTIGRAVITY_TOAST_SCOPE=all
    * @default "root_only"
    */
   toast_scope: ToastScopeSchema.default('root_only'),
   
   /**
    * Enable debug logging to file.
-   * Env override: OPENCODE_ANTIGRAVITY_DEBUG=1
    * @default false
    */
   debug: z.boolean().default(false),
@@ -100,14 +96,12 @@ export const AntigravityConfigSchema = z.object({
   /**
    * Show debug logs in the TUI log panel.
    * Requires `debug: true` to have any effect.
-   * Env override: OPENCODE_ANTIGRAVITY_DEBUG_TUI=1
    * @default false
    */
   debug_tui: z.boolean().default(false),
   
   /**
    * Custom directory for debug logs.
-   * Env override: OPENCODE_ANTIGRAVITY_LOG_DIR=/path/to/logs
    * @default OS-specific config dir + "/antigravity-logs"
    */
   log_dir: z.string().optional(),
@@ -122,7 +116,6 @@ export const AntigravityConfigSchema = z.object({
    * When false (default): Thinking blocks are stripped for reliability.
    * When true: Full context preserved, but may encounter signature errors.
    * 
-   * Env override: OPENCODE_ANTIGRAVITY_KEEP_THINKING=1
    * @default false
    */
   keep_thinking: z.boolean().default(false),
@@ -216,6 +209,15 @@ export const AntigravityConfigSchema = z.object({
    * @default true
    */
   claude_tool_hardening: z.boolean().default(true),
+
+  /**
+   * Enable Claude prompt auto-caching.
+   * When enabled, the plugin adds top-level `cache_control: { type: "ephemeral" }`
+   * to Claude requests when no top-level cache control is already present.
+   *
+   * @default false
+   */
+  claude_prompt_auto_caching: z.boolean().default(false),
   
   // =========================================================================
   // Proactive Token Refresh (ported from LLM-API-Key-Proxy)
@@ -282,7 +284,6 @@ export const AntigravityConfigSchema = z.object({
   
   /**
    * Strategy for selecting accounts when making requests.
-   * Env override: OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY
    * @default "hybrid"
    */
   account_selection_strategy: AccountSelectionStrategySchema.default('hybrid'),
@@ -296,7 +297,6 @@ export const AntigravityConfigSchema = z.object({
    * When disabled (default), accounts start from the same index, which preserves
    * Anthropic's prompt cache across restarts (recommended for single-session use).
    * 
-   * Env override: OPENCODE_ANTIGRAVITY_PID_OFFSET_ENABLED=1
    * @default false
    */
   pid_offset_enabled: z.boolean().default(false),
@@ -316,7 +316,6 @@ export const AntigravityConfigSchema = z.object({
      * - `balance`: Switch account immediately on rate limit. Maximum availability.
      * - `performance_first`: Round-robin distribution for maximum throughput.
      * 
-     * Env override: OPENCODE_ANTIGRAVITY_SCHEDULING_MODE
      * @default "cache_first"
      */
     scheduling_mode: SchedulingModeSchema.default('cache_first'),
@@ -452,6 +451,7 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   empty_response_retry_delay_ms: 2000,
   tool_id_recovery: true,
   claude_tool_hardening: true,
+  claude_prompt_auto_caching: false,
   proactive_token_refresh: true,
   proactive_refresh_buffer_seconds: 1800,
   proactive_refresh_check_interval_seconds: 300,

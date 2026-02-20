@@ -8,7 +8,7 @@
     "quiet_mode": {
       "default": false,
       "type": "boolean",
-      "description": "Suppress most toast notifications (rate limit, account switching). Recovery toasts always shown. Env: OPENCODE_ANTIGRAVITY_QUIET=1"
+      "description": "Suppress most toast notifications (rate limit, account switching). Recovery toasts always shown."
     },
     "toast_scope": {
       "default": "root_only",
@@ -22,31 +22,35 @@
     "debug": {
       "default": false,
       "type": "boolean",
-      "description": "Enable debug logging to file. Env: OPENCODE_ANTIGRAVITY_DEBUG=1 (or =2 for verbose)"
+      "description": "Enable debug logging to file."
+    },
+    "debug_tui": {
+      "default": false,
+      "type": "boolean"
     },
     "log_dir": {
       "type": "string",
-      "description": "Custom directory for debug logs. Env: OPENCODE_ANTIGRAVITY_LOG_DIR=/path/to/logs"
+      "description": "Custom directory for debug logs."
     },
     "keep_thinking": {
       "default": false,
       "type": "boolean",
-      "description": "Preserve thinking blocks for Claude models using signature caching. May cause signature errors. Env: OPENCODE_ANTIGRAVITY_KEEP_THINKING=1"
+      "description": "Preserve thinking blocks for Claude models using signature caching. May cause signature errors."
     },
     "session_recovery": {
       "default": true,
       "type": "boolean",
-      "description": "Enable automatic session recovery from tool_result_missing errors. Env: OPENCODE_ANTIGRAVITY_SESSION_RECOVERY=1"
+      "description": "Enable automatic session recovery from tool_result_missing errors."
     },
     "auto_resume": {
       "default": false,
       "type": "boolean",
-      "description": "Automatically send resume prompt after successful recovery. Env: OPENCODE_ANTIGRAVITY_AUTO_RESUME=1"
+      "description": "Automatically send resume prompt after successful recovery."
     },
     "resume_text": {
       "default": "continue",
       "type": "string",
-      "description": "Custom text to send when auto-resuming after recovery. Env: OPENCODE_ANTIGRAVITY_RESUME_TEXT=continue"
+      "description": "Custom text to send when auto-resuming after recovery."
     },
     "signature_cache": {
       "type": "object",
@@ -110,6 +114,11 @@
       "default": true,
       "type": "boolean",
       "description": "Enable tool hallucination prevention for Claude models. Injects parameter signatures and strict usage rules."
+    },
+    "claude_prompt_auto_caching": {
+      "default": false,
+      "type": "boolean",
+      "description": "Enable Claude prompt auto-caching by adding top-level cache_control when absent."
     },
     "proactive_token_refresh": {
       "default": true,
@@ -324,7 +333,7 @@
     "auto_update": {
       "default": true,
       "type": "boolean",
-      "description": "Enable automatic plugin updates. Env: OPENCODE_ANTIGRAVITY_AUTO_UPDATE=1"
+      "description": "Enable automatic plugin updates."
     }
   },
   "additionalProperties": false

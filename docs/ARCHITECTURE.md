@@ -201,13 +201,6 @@ Contains OAuth refresh tokens - treat as sensitive.
 
 ## Configuration
 
-### Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `OPENCODE_ANTIGRAVITY_DEBUG` | `1` or `2` for debug logging |
-| `OPENCODE_ANTIGRAVITY_QUIET` | Suppress toast notifications |
-
 ### Config File
 
 Location: `~/.config/opencode/antigravity.json`
@@ -263,8 +256,11 @@ Location: `~/.config/opencode/antigravity.json`
 
 ### Enable Logging
 
-```bash
-export OPENCODE_ANTIGRAVITY_DEBUG=2  # Verbose
+```json
+{
+  "debug": true,
+  "debug_tui": true
+}
 ```
 
 ### Log Location

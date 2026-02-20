@@ -441,9 +441,11 @@ Use the `antigravity-` prefixed model names shown above.
 ## Debugging
 
 Enable debug logging:
-```bash
-OPENCODE_ANTIGRAVITY_DEBUG=1 opencode   # Basic
-OPENCODE_ANTIGRAVITY_DEBUG=2 opencode   # Verbose (full request/response)
+```json
+{
+  "debug": true,
+  "debug_tui": true
+}
 ```
 
 Logs are in `~/.config/opencode/antigravity-logs/`.

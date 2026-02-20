@@ -176,9 +176,10 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
   const skipAlias = isAntigravity && isGemini3;
 
-  // For Antigravity Gemini 3 Pro models without explicit tier, append default tier (-low)
+  // For Antigravity Gemini 3 Pro models without explicit tier, append default tier
   // Antigravity API: gemini-3-pro requires tier suffix (gemini-3-pro-low/high)
   //                  gemini-3-flash uses bare name + thinkingLevel param
+  // Pro defaults to -low unless an explicit tier is provided
   const isGemini3Pro = isGemini3ProModel(modelWithoutQuota);
   const isGemini3Flash = isGemini3FlashModel(modelWithoutQuota);
   
@@ -217,7 +218,6 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   if (!tier) {
     // Gemini 3 models without explicit tier get a default thinkingLevel
     if (isEffectiveGemini3) {
-      // Both Pro and Flash default to "low" per Google's API docs
       return {
         actualModel: resolvedModel,
         thinkingLevel: "low",

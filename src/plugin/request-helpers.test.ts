@@ -1700,6 +1700,20 @@ describe("extractVariantThinkingConfig", () => {
     expect(result).toEqual({ thinkingBudget: 4096 });
   });
 
+  it("extracts thinkingLevel from generationConfig when providerOptions is undefined", () => {
+    const result = extractVariantThinkingConfig(undefined, {
+      thinkingConfig: { thinkingLevel: "high", includeThoughts: true },
+    });
+    expect(result).toEqual({ thinkingLevel: "high", includeThoughts: true });
+  });
+
+  it("extracts thinkingLevel from generationConfig when providerOptions has no google key", () => {
+    const result = extractVariantThinkingConfig({}, {
+      thinkingConfig: { thinkingLevel: "low", includeThoughts: false },
+    });
+    expect(result).toEqual({ thinkingLevel: "low", includeThoughts: false });
+  });
+
   it("prefers providerOptions over generationConfig", () => {
     const result = extractVariantThinkingConfig(
       { google: { thinkingConfig: { thinkingBudget: 32000 } } },

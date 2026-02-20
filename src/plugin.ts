@@ -1974,6 +1974,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   forceThinkingRecovery,
                   {
                     claudeToolHardening: config.claude_tool_hardening,
+                    claudePromptAutoCaching: config.claude_prompt_auto_caching,
                     fingerprint: account.fingerprint,
                   },
                 );
@@ -2304,10 +2305,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   response.status >= 500
                 );
 
-                if (shouldRetryEndpoint) {
-                  await logResponseBody(debugContext, response, response.status);
-                }
-
                 if (shouldRetryEndpoint && i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length - 1) {
                   lastFailure = {
                     response,
@@ -2342,6 +2339,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 logAntigravityDebugResponse(debugContext, response, {
                   note: response.ok ? "Success" : `Error ${response.status}`,
                 });
+                if (response.ok && !prepared.streaming) {
+                  await logResponseBody(debugContext, response, response.status);
+                }
                 if (!response.ok) {
                   await logResponseBody(debugContext, response, response.status);
                   
