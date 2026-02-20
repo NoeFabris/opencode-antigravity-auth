@@ -21,6 +21,16 @@ describe("isOAuthAuth", () => {
     };
     expect(isOAuthAuth(auth)).toBe(false);
   });
+
+  it("returns false for undefined auth without throwing", () => {
+    expect(() => isOAuthAuth(undefined)).not.toThrow();
+    expect(isOAuthAuth(undefined)).toBe(false);
+  });
+
+  it("returns false for null auth without throwing", () => {
+    expect(() => isOAuthAuth(null)).not.toThrow();
+    expect(isOAuthAuth(null)).toBe(false);
+  });
 });
 
 describe("parseRefreshParts", () => {
