@@ -98,6 +98,13 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
+    it("antigravity-gemini-3-pro gets default -low model", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3-pro");
+      expect(result.actualModel).toBe("gemini-3-pro-low");
+      expect(result.thinkingLevel).toBe("low");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
     it("antigravity-gemini-3-pro-high gets thinkingLevel from tier", () => {
       const result = resolveModelWithTier("antigravity-gemini-3-pro-high");
       expect(result.actualModel).toBe("gemini-3-pro-high");

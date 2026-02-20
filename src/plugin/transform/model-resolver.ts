@@ -137,6 +137,10 @@ function isGemini3FlashModel(model: string): boolean {
   return GEMINI_3_FLASH_REGEX.test(model);
 }
 
+function getDefaultGemini3ProTier(model: string): "low" | "high" {
+  return model.toLowerCase().includes("gemini-3.1-pro") ? "high" : "low";
+}
+
 /**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
@@ -186,7 +190,7 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   let antigravityModel = modelWithoutQuota;
   if (skipAlias) {
     if (isGemini3Pro && !tier && !isImageModel) {
-      const defaultTier = modelWithoutQuota.toLowerCase().includes("gemini-3.1-pro") ? "high" : "low";
+      const defaultTier = getDefaultGemini3ProTier(modelWithoutQuota);
       antigravityModel = `${modelWithoutQuota}-${defaultTier}`;
     } else if (isGemini3Flash && tier) {
       antigravityModel = baseName;
@@ -220,7 +224,7 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
     // Gemini 3 models without explicit tier get a default thinkingLevel.
     // Gemini 3.1 Pro defaults to high, other Gemini 3 variants default to low.
     if (isEffectiveGemini3) {
-      const defaultGemini3Level = resolvedModel.toLowerCase().includes("gemini-3.1-pro") ? "high" : "low";
+      const defaultGemini3Level = getDefaultGemini3ProTier(resolvedModel);
       return {
         actualModel: resolvedModel,
         thinkingLevel: defaultGemini3Level,
@@ -334,7 +338,7 @@ export function resolveModelForHeaderStyle(
     // Don't add tier suffix to image models - they don't support thinking.
     // Gemini 3.1 Pro defaults to high, other Gemini 3 Pro variants default to low.
     if (isGemini3Pro && !hasTierSuffix && !isImageModel) {
-      const defaultTier = transformedModel.toLowerCase().includes("gemini-3.1-pro") ? "high" : "low";
+      const defaultTier = getDefaultGemini3ProTier(transformedModel);
       transformedModel = `${transformedModel}-${defaultTier}`;
     }
     
