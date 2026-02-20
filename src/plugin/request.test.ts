@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
@@ -6,6 +9,8 @@ import {
   isGenerativeLanguageRequest,
   __testExports,
 } from "./request";
+import { DEFAULT_CONFIG, initRuntimeConfig } from "./config";
+import { DEBUG_MESSAGE_PREFIX, initializeDebug } from "./debug";
 import type { SignatureStore, ThoughtBuffer, StreamingCallbacks, StreamingOptions } from "./core/streaming/types";
 
 const {
@@ -52,6 +57,14 @@ function createMockThoughtBuffer(): ThoughtBuffer {
 const defaultCallbacks: StreamingCallbacks = {};
 const defaultOptions: StreamingOptions = {};
 const defaultDebugState = { injected: false };
+
+function createTestDir(prefix: string): string {
+  return mkdtempSync(join(tmpdir(), prefix));
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("request.ts", () => {
   describe("getPluginSessionId", () => {
@@ -911,6 +924,112 @@ it("removes x-api-key header", () => {
   });
 
   describe("transformAntigravityResponse", () => {
+    const createSuccessResponse = () =>
+      new Response(
+        JSON.stringify({
+          response: {
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: "hello" }],
+                },
+              },
+            ],
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+
+    it("does not inject debug thinking when debug=false and debug_tui=true", async () => {
+      const configDir = createTestDir("antigravity-request-config-");
+      const logDir = createTestDir("antigravity-request-logs-");
+      vi.stubEnv("XDG_CONFIG_HOME", configDir);
+
+      initializeDebug({ ...DEFAULT_CONFIG, debug: false, debug_tui: true, log_dir: logDir });
+      initRuntimeConfig({ ...DEFAULT_CONFIG, keep_thinking: false, log_dir: logDir });
+
+      const transformed = await transformAntigravityResponse(
+        createSuccessResponse(),
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ["ThinkingResolution: debug line"],
+      );
+
+      const body = JSON.parse(await transformed.text());
+      expect(body.candidates[0].content.parts).toEqual([{ text: "hello" }]);
+      expect(body.candidates[0].reasoning_content).toBeUndefined();
+    });
+
+    it("does not inject debug thinking when debug=true and debug_tui=false", async () => {
+      const configDir = createTestDir("antigravity-request-config-");
+      const logDir = createTestDir("antigravity-request-logs-");
+      vi.stubEnv("XDG_CONFIG_HOME", configDir);
+
+      initializeDebug({ ...DEFAULT_CONFIG, debug: true, debug_tui: false, log_dir: logDir });
+      initRuntimeConfig({ ...DEFAULT_CONFIG, keep_thinking: false, log_dir: logDir });
+
+      const transformed = await transformAntigravityResponse(
+        createSuccessResponse(),
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ["ThinkingResolution: debug line"],
+      );
+
+      const body = JSON.parse(await transformed.text());
+      expect(body.candidates[0].content.parts).toEqual([{ text: "hello" }]);
+      expect(body.candidates[0].reasoning_content).toBeUndefined();
+    });
+
+    it("injects debug thinking only when debug=true and debug_tui=true", async () => {
+      const configDir = createTestDir("antigravity-request-config-");
+      const logDir = createTestDir("antigravity-request-logs-");
+      vi.stubEnv("XDG_CONFIG_HOME", configDir);
+
+      initializeDebug({ ...DEFAULT_CONFIG, debug: true, debug_tui: true, log_dir: logDir });
+      initRuntimeConfig({ ...DEFAULT_CONFIG, keep_thinking: false, log_dir: logDir });
+
+      const transformed = await transformAntigravityResponse(
+        createSuccessResponse(),
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ["ThinkingResolution: debug line"],
+      );
+
+      const body = JSON.parse(await transformed.text());
+      expect(body.candidates[0].content.parts).toHaveLength(2);
+      expect(body.candidates[0].content.parts[0].type).toBe("reasoning");
+      expect(body.candidates[0].content.parts[0].text).toContain(DEBUG_MESSAGE_PREFIX);
+      expect(body.candidates[0].content.parts[0].text).toContain("ThinkingResolution: debug line");
+      expect(body.candidates[0].reasoning_content).toContain(DEBUG_MESSAGE_PREFIX);
+    });
+
     it("does not misclassify generic INVALID_ARGUMENT as thinking recovery from debug metadata", async () => {
       const response = new Response(
         JSON.stringify({
