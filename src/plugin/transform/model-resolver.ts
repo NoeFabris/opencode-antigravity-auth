@@ -176,7 +176,8 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
   const skipAlias = isAntigravity && isGemini3;
 
-  // For Antigravity Gemini 3 Pro models without explicit tier, append default tier (-low)
+  // For Antigravity Gemini 3 Pro models without explicit tier, append a default tier.
+  // Gemini 3.1 Pro defaults to high, other Gemini 3 Pro variants default to low.
   // Antigravity API: gemini-3-pro requires tier suffix (gemini-3-pro-low/high)
   //                  gemini-3-flash uses bare name + thinkingLevel param
   const isGemini3Pro = isGemini3ProModel(modelWithoutQuota);
@@ -185,7 +186,8 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   let antigravityModel = modelWithoutQuota;
   if (skipAlias) {
     if (isGemini3Pro && !tier && !isImageModel) {
-      antigravityModel = `${modelWithoutQuota}-low`;
+      const defaultTier = modelWithoutQuota.toLowerCase().includes("gemini-3.1-pro") ? "high" : "low";
+      antigravityModel = `${modelWithoutQuota}-${defaultTier}`;
     } else if (isGemini3Flash && tier) {
       antigravityModel = baseName;
     }
@@ -215,12 +217,13 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isClaudeThinking = resolvedModel.toLowerCase().includes("claude") && resolvedModel.toLowerCase().includes("thinking");
 
   if (!tier) {
-    // Gemini 3 models without explicit tier get a default thinkingLevel
+    // Gemini 3 models without explicit tier get a default thinkingLevel.
+    // Gemini 3.1 Pro defaults to high, other Gemini 3 variants default to low.
     if (isEffectiveGemini3) {
-      // Both Pro and Flash default to "low" per Google's API docs
+      const defaultGemini3Level = resolvedModel.toLowerCase().includes("gemini-3.1-pro") ? "high" : "low";
       return {
         actualModel: resolvedModel,
-        thinkingLevel: "low",
+        thinkingLevel: defaultGemini3Level,
         isThinkingModel: true,
         quotaPreference,
         explicitQuota,
@@ -328,9 +331,11 @@ export function resolveModelForHeaderStyle(
     const hasTierSuffix = /-(low|medium|high)$/i.test(transformedModel);
     const isImageModel = IMAGE_GENERATION_MODELS.test(transformedModel);
     
-    // Don't add tier suffix to image models - they don't support thinking
+    // Don't add tier suffix to image models - they don't support thinking.
+    // Gemini 3.1 Pro defaults to high, other Gemini 3 Pro variants default to low.
     if (isGemini3Pro && !hasTierSuffix && !isImageModel) {
-      transformedModel = `${transformedModel}-low`;
+      const defaultTier = transformedModel.toLowerCase().includes("gemini-3.1-pro") ? "high" : "low";
+      transformedModel = `${transformedModel}-${defaultTier}`;
     }
     
     const prefixedModel = `antigravity-${transformedModel}`;

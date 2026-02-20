@@ -35,10 +35,10 @@ describe("resolveModelWithTier", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("gemini-3.1-pro-preview gets default thinkingLevel 'low' with antigravity quota", () => {
+    it("gemini-3.1-pro-preview gets default thinkingLevel 'high' with antigravity quota", () => {
       const result = resolveModelWithTier("gemini-3.1-pro-preview");
       expect(result.actualModel).toBe("gemini-3.1-pro-preview");
-      expect(result.thinkingLevel).toBe("low");
+      expect(result.thinkingLevel).toBe("high");
       expect(result.quotaPreference).toBe("antigravity");
     });
   });
@@ -111,10 +111,10 @@ describe("resolveModelWithTier", () => {
       expect(result.thinkingLevel).toBe("medium");
     });
 
-    it("antigravity-gemini-3.1-pro gets default -low model", () => {
+    it("antigravity-gemini-3.1-pro gets default -high model", () => {
       const result = resolveModelWithTier("antigravity-gemini-3.1-pro");
-      expect(result.actualModel).toBe("gemini-3.1-pro-low");
-      expect(result.thinkingLevel).toBe("low");
+      expect(result.actualModel).toBe("gemini-3.1-pro-high");
+      expect(result.thinkingLevel).toBe("high");
     });
   });
 
@@ -273,15 +273,15 @@ describe("Issue #103: resolveModelForHeaderStyle", () => {
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("transforms gemini-3.1-pro-preview to gemini-3.1-pro-low for antigravity", () => {
+    it("transforms gemini-3.1-pro-preview to gemini-3.1-pro-high for antigravity", () => {
       const result = resolveModelForHeaderStyle("gemini-3.1-pro-preview", "antigravity");
-      expect(result.actualModel).toBe("gemini-3.1-pro-low");
+      expect(result.actualModel).toBe("gemini-3.1-pro-high");
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("transforms gemini-3.1-pro-preview-customtools to gemini-3.1-pro-low for antigravity", () => {
+    it("transforms gemini-3.1-pro-preview-customtools to gemini-3.1-pro-high for antigravity", () => {
       const result = resolveModelForHeaderStyle("gemini-3.1-pro-preview-customtools", "antigravity");
-      expect(result.actualModel).toBe("gemini-3.1-pro-low");
+      expect(result.actualModel).toBe("gemini-3.1-pro-high");
       expect(result.quotaPreference).toBe("antigravity");
     });
   });
