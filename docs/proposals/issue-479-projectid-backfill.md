@@ -15,7 +15,7 @@
   - threshold/duration: 5 consecutive failures -> 30s cooldown
   - state location: existing account cooldown fields (`coolingDownUntil`, `cooldownReason`)
   - reset: successful backfill clears failure/cooldown state for that account only
-- Add required structured warn log fields on backfill failure: account fingerprint/email hash, endpoint, failure class, and next action.
+- Add required structured warn log schema on backfill failure: `{ event, account_fingerprint, email_hash, endpoint, failure_class, cooldown_state, next_action }`.
 - Add manual-ID protection rule: introduce `projectIdSource` (`manual | auto`) semantics so manually provided IDs are authoritative and not overwritten by auto-backfill.
 
 ## Edge Cases
