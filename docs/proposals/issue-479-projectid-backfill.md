@@ -1,30 +1,32 @@
 # Proposal: Auto-resolve and persist missing project IDs
 
 ## Problem
-Some OAuth accounts carry a refresh token but no `projectId`/`managedProjectId` in refresh parts. In the request path, this can cause repeated project-context failures that make the account effectively unusable without manual repair.
+`ensureProjectContext` already attempts managed-project resolution, but the behavior is not fully specified for retry-noise suppression, manual-ID preservation, and verification coverage.
 
 ## Implementation
-- Apply backfill in the existing request-time path (`ensureProjectContext` in `src/plugin/project.ts`) on the first request that detects missing project IDs.
-- Run synchronously in that request path (blocking for that account only) so the current request can immediately benefit from resolved IDs.
-- Trigger only when `refreshToken` exists and both `projectId` + `managedProjectId` are empty.
-- Backfill flow: refresh access token -> call `loadCodeAssist` across configured load endpoints -> extract managed project ID.
-- Persist resolved IDs through existing auth/account persistence (`updateFromAuth` + save-to-disk path in `src/plugin.ts`) so manual file edits are unnecessary.
-- Cooldown/cache policy (explicit):
+- Run in the existing request-time project path (`ensureProjectContext` in `src/plugin/project.ts`), synchronously for the current account/request.
+- Trigger when OAuth `refreshToken` exists and `managedProjectId` is missing (whether `projectId` exists or not).
+- Keep the existing resolution flow (`loadManagedProject` then `onboardManagedProject`) as the backfill mechanism.
+- Persist resolved IDs through existing auth/account persistence (`updateFromAuth` + save path in `src/plugin.ts`).
+
+### Delta vs Current Behavior
+- Add explicit retry-noise suppression contract for project-context failures:
   - scope: per-account
-  - mechanism: reuse existing in-memory failure tracker (`trackAccountFailure`)
   - threshold/duration: 5 consecutive failures -> 30s cooldown
-  - reset: success clears failure state for that same account only; no global reset
-- Failure logging: emit one structured warn log per failed attempt with account fingerprint/email hash, endpoint attempted, failure class, and next action.
+  - state location: existing account cooldown fields (`coolingDownUntil`, `cooldownReason`)
+  - reset: successful backfill clears failure/cooldown state for that account only
+- Add required structured warn log fields on backfill failure: account fingerprint/email hash, endpoint, failure class, and next action.
+- Add manual-ID protection rule: introduce `projectIdSource` (`manual | auto`) semantics so manually provided IDs are authoritative and not overwritten by auto-backfill.
 
 ## Edge Cases
 - `invalid_grant` while refreshing: mark auth invalid and skip backfill until next successful login.
-- Partial `loadCodeAssist` failures: continue endpoint ladder, then return existing fallback behavior if all endpoints fail.
-- Preserve manually configured IDs: treat an account with explicit `projectId` and no managed project as manual input (optionally track `projectIdSource=manual`) and do not overwrite it during backfill.
+- Partial `loadCodeAssist` failures: continue endpoint ladder and fall back safely if all fail.
+- Manual `projectId` without `managedProjectId`: still allow managed-project backfill, but do not overwrite manual source fields.
 
 ## Verify
-- Fixture account with missing IDs is auto-backfilled on first request path through `ensureProjectContext`.
+- Fixture with missing `managedProjectId` backfills on first request path through `ensureProjectContext`.
 - Persisted account record contains resolved IDs after restart.
-- `invalid_grant` fixture is handled without crash, logs one clear failure, and does not enter tight retry loops.
-- Partial `loadCodeAssist` response does not leave partially-written inconsistent project context.
-- Repeated failures trigger per-account 30s cooldown after the 5-failure threshold; successful backfill clears that account's failure state.
-- Accounts with manual/pre-set IDs retain those values after refresh/backfill attempts.
+- `invalid_grant` fixture is handled without crash, with one clear failure log.
+- Partial endpoint failure does not leave inconsistent partial project context.
+- Cooldown behavior matches the explicit contract (5 failures -> 30s per-account cooldown; success clears same-account state).
+- Manual-source IDs remain unchanged after backfill attempts.
