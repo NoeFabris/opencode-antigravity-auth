@@ -37,6 +37,7 @@ Readiness is evaluated per `account x route` pair.
   - `summary`: `{ ready_count, total_count, invalid_count }`
   - `accounts[]`: `{ id, email, route, status, reason_code, cooldown_until, next_action }`
 - Counting rules:
+  - `ready_count` counts rows with `status=ok`
   - `total_count` counts all emitted account-route rows
   - `invalid_count` counts rows with `reason_code=invalid_record`
 
