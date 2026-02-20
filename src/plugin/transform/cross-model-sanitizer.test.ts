@@ -13,6 +13,7 @@ describe("cross-model-sanitizer", () => {
     it("identifies Claude models", () => {
       expect(getModelFamily("claude-opus-4-6-thinking-medium")).toBe("claude");
       expect(getModelFamily("claude-sonnet-4-6")).toBe("claude");
+      expect(getModelFamily("claude-sonnet-4-6-thinking")).toBe("claude");
       expect(getModelFamily("claude-opus-4-6-thinking-low")).toBe("claude");
     });
 
