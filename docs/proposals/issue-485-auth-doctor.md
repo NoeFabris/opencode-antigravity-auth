@@ -14,6 +14,7 @@ Users currently inspect storage and logs manually to understand why accounts are
   - `0`: at least one account-route is request-ready
   - `1`: no account-route is request-ready
   - `2`: command/runtime failure (parse/storage/read errors)
+- `--account` scope rule: when filter is set, exit-code evaluation uses only the filtered account-route rows (other accounts do not satisfy readiness).
 
 ## Request-Ready Definition
 Readiness is evaluated per `account x route` pair.
