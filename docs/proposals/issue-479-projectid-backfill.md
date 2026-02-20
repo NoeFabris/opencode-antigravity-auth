@@ -1,23 +1,30 @@
 # Proposal: Auto-resolve and persist missing project IDs
 
 ## Problem
-Some OAuth accounts carry a refresh token but no `projectId`/`managedProjectId` in `refresh` parts. In the request path, `ensureProjectContext` can fail or fall back in ways that keep the account non-functional, and users end up needing manual recovery.
+Some OAuth accounts carry a refresh token but no `projectId`/`managedProjectId` in refresh parts. In the request path, this can cause repeated project-context failures that make the account effectively unusable without manual repair.
 
 ## Implementation
-- Add backfill in the existing request-time project path (`ensureProjectContext` in `src/plugin/project.ts`), immediately before returning fallback project context.
-- Trigger only for OAuth accounts with `refreshToken` present and missing `projectId` and `managedProjectId`.
+- Apply backfill in the existing request-time path (`ensureProjectContext` in `src/plugin/project.ts`) on the first request that detects missing project IDs.
+- Run synchronously in that request path (blocking for that account only) so the current request can immediately benefit from resolved IDs.
+- Trigger only when `refreshToken` exists and both `projectId` + `managedProjectId` are empty.
 - Backfill flow: refresh access token -> call `loadCodeAssist` across configured load endpoints -> extract managed project ID.
-- Persist resolved IDs through existing auth/account persistence (`updateFromAuth` + save-to-disk path in `src/plugin.ts`) so no manual file edits are required.
-- Cooldown policy: use existing per-account failure tracking (`trackAccountFailure`) with current thresholds (5 consecutive failures, then 30s cooldown) and store cooldown in account state (`coolingDownUntil`, `cooldownReason`).
-- Failure logging: emit one structured warn log per failed backfill attempt with account fingerprint/email hash, endpoint attempted, failure class, and next action.
+- Persist resolved IDs through existing auth/account persistence (`updateFromAuth` + save-to-disk path in `src/plugin.ts`) so manual file edits are unnecessary.
+- Cooldown/cache policy (explicit):
+  - scope: per-account
+  - mechanism: reuse existing in-memory failure tracker (`trackAccountFailure`)
+  - threshold/duration: 5 consecutive failures -> 30s cooldown
+  - reset: success clears failure state for that same account only; no global reset
+- Failure logging: emit one structured warn log per failed attempt with account fingerprint/email hash, endpoint attempted, failure class, and next action.
 
 ## Edge Cases
 - `invalid_grant` while refreshing: mark auth invalid and skip backfill until next successful login.
 - Partial `loadCodeAssist` failures: continue endpoint ladder, then return existing fallback behavior if all endpoints fail.
-- Preserve manually configured IDs: treat a non-empty, pre-existing `projectId`/`managedProjectId` as authoritative and never overwrite it.
+- Preserve manually configured IDs: treat an account with explicit `projectId` and no managed project as manual input (optionally track `projectIdSource=manual`) and do not overwrite it during backfill.
 
 ## Verify
 - Fixture account with missing IDs is auto-backfilled on first request path through `ensureProjectContext`.
 - Persisted account record contains resolved IDs after restart.
-- Repeated backfill failures trigger cooldown at the documented threshold and log endpoint + reason without tight retry loops.
-- Accounts with pre-set IDs retain those values after refresh/backfill attempts.
+- `invalid_grant` fixture is handled without crash, logs one clear failure, and does not enter tight retry loops.
+- Partial `loadCodeAssist` response does not leave partially-written inconsistent project context.
+- Repeated failures trigger per-account 30s cooldown after the 5-failure threshold; successful backfill clears that account's failure state.
+- Accounts with manual/pre-set IDs retain those values after refresh/backfill attempts.
