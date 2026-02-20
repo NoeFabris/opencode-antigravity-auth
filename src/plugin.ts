@@ -1348,23 +1348,27 @@ export const createAntigravityPlugin = (providerId: string) => async (
         return "Error: Not authenticated with Antigravity. Please run `opencode auth login` to authenticate.";
       }
 
-      // Get access token and project ID
-      const parts = parseRefreshParts(auth.refresh);
-      const projectId = parts.managedProjectId || parts.projectId || "unknown";
+      let projectContext: ProjectContextResult
+      try {
+        projectContext = await ensureProjectContext(auth)
+      } catch (error) {
+        return `Error: Failed to resolve project context: ${error instanceof Error ? error.message : String(error)}`
+      }
 
-      // Ensure we have a valid access token
-      let accessToken = auth.access;
-      if (!accessToken || accessTokenExpired(auth)) {
+      const projectId = projectContext.effectiveProjectId
+      let accessToken = projectContext.auth.access || auth.access
+
+      if (!accessToken || accessTokenExpired(projectContext.auth)) {
         try {
-          const refreshed = await refreshAccessToken(auth, client, providerId);
-          accessToken = refreshed?.access;
+          const refreshed = await refreshAccessToken(projectContext.auth, client, providerId)
+          accessToken = refreshed?.access
         } catch (error) {
-          return `Error: Failed to refresh access token: ${error instanceof Error ? error.message : String(error)}`;
+          return `Error: Failed to refresh access token: ${error instanceof Error ? error.message : String(error)}`
         }
       }
 
       if (!accessToken) {
-        return "Error: No valid access token available. Please run `opencode auth login` to re-authenticate.";
+        return "Error: No valid access token available. Please run `opencode auth login` to re-authenticate."
       }
 
       return executeSearch(
