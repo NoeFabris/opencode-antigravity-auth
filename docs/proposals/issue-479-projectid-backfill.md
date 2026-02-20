@@ -7,8 +7,8 @@
 - Run in the existing request-time project path (`ensureProjectContext` in `src/plugin/project.ts`), synchronously for the current account/request.
 - Trigger when OAuth `refreshToken` exists and `managedProjectId` is missing (whether `projectId` exists or not).
 - Keep the existing resolution flow (`loadManagedProject` then `onboardManagedProject`) as the backfill mechanism.
-- Bound synchronous work with one backfill attempt per request path and an explicit timeout (8s). On timeout, classify as `timeout`, log once, and continue normal endpoint/account fallback behavior.
-- Add per-account singleflight guard keyed by refresh token so concurrent requests for the same account share one in-flight backfill attempt instead of duplicating calls.
+- Bound synchronous work with one backfill attempt per request path and an explicit timeout constant (`BACKFILL_TIMEOUT_MS = 8000`). On timeout, classify as `timeout`, log once, and continue normal endpoint/account fallback behavior.
+- Add per-account singleflight guard in `src/plugin/project.ts` by extending the existing project-context pending cache (same keying strategy, refresh-token scoped) so concurrent requests for the same account share one in-flight backfill attempt instead of duplicating calls.
 - Persist resolved IDs through existing auth/account persistence (`updateFromAuth` + save path in `src/plugin.ts`).
 
 ### Delta vs Current Behavior
@@ -29,7 +29,7 @@
 - Store `projectIdSource`, `managedProjectIdSource`, and `backfillBlockedReason` in persisted account metadata (`antigravity-accounts.json`), not the encoded refresh string.
 - Migration/default semantics:
   - existing non-empty `projectId` -> `projectIdSource=manual`
-  - existing non-empty `managedProjectId` -> `managedProjectIdSource=auto`
+  - existing non-empty `managedProjectId` -> `managedProjectIdSource=auto` by default; if future UI/CLI introduces explicit manual managed-project assignment, set `managedProjectIdSource=manual` at write time
   - empty fields remain unset until first successful backfill/login.
 
 ## Edge Cases
