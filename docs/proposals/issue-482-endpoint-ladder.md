@@ -5,7 +5,7 @@ Antigravity already traverses `daily -> autopush -> prod`, but retryability is b
 
 ## Implementation
 ### Configuration
-- Introduce explicit config key `antigravity_endpoint_order` (default: `daily,autopush,prod`).
+- Introduce explicit config key `antigravity_endpoint_order` (defaulting to the existing `ANTIGRAVITY_ENDPOINT_FALLBACKS` order: `daily,autopush,prod`).
 - Validate values against known endpoint aliases; reject empty/invalid lists at startup.
 - Snapshot endpoint order per request so runtime config edits do not mutate in-flight traversal.
 
