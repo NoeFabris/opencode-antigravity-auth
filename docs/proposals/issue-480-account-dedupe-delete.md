@@ -1,32 +1,40 @@
 # Proposal: Enforce per-email uniqueness and robust delete semantics
 
 ## Problem
-The current dedupe path keeps one record per exact email string (`deduplicateAccountsByEmail`), so logical duplicates such as case/whitespace variants can survive and later reappear after partial deletes.
+Current dedupe uses exact email string matching (`deduplicateAccountsByEmail` in `src/plugin/storage.ts`), and account removal is reference/index-based (`removeAccount` in `src/plugin/accounts.ts`). This allows logical duplicates and incomplete delete-by-email outcomes.
 
 ## Implementation
 ### Normalization Contract
 - Define `normalizedEmail` as: `trim(email)` -> Unicode `NFC` normalization -> lowercase.
-- Preserve plus-addressing (`user+tag@example.com` remains distinct) to avoid provider-specific assumptions.
-- Use `normalizedEmail` as the unique key for account dedupe in load/save paths.
+- Preserve plus-addressing (`user+tag@example.com` remains distinct).
+- Apply normalization before dedupe map lookup in `deduplicateAccountsByEmail`.
 
 ### Deterministic Merge Rule
-- Group records by `normalizedEmail`.
-- Pick a primary record by: highest `lastUsed`, then highest `addedAt`, then non-empty `refreshToken`, then stable original index.
-- Merge fields deterministically: keep primary values, fill only missing/empty fields from secondaries.
-- Preserve auth-critical fields (`refreshToken`, `projectId`, `managedProjectId`) unless the primary is missing them.
+- Group by `normalizedEmail`.
+- Primary record selection order:
+  - highest `lastUsed`
+  - then highest `addedAt`
+  - then has non-empty `refreshToken`
+  - then lexicographic `refreshToken` (stable across restarts)
+- Merge policy: keep primary values and fill only missing/empty fields from secondaries.
+- Preserve auth-critical fields (`refreshToken`, `projectId`, `managedProjectId`) unless missing in primary.
 
 ### Delete-All-By-Email Semantics
-- Add delete-by-email behavior that removes all records whose `normalizedEmail` matches the target.
-- Invalidate in-memory selection/cursor state and clear any active references to removed account IDs in the same operation.
-- Use hard-delete semantics for account rows (no tombstone restore path), and ensure persisted storage reflects the full removal before returning success.
+- Add `deleteAllByEmail(normalizedEmail)` behavior to remove all matching rows, not just one reference.
+- Clear active references consistently: `cursor`, `currentAccountIndexByFamily`, and stale in-memory account selections.
+- Hard-delete account rows and persist atomically before returning success.
+
+### Save-Path Contract
+- Run dedupe on every account write path (including normal save and migration/merge saves), not only on startup load.
 
 ## Edge Cases
-- Case-variant legacy rows: normalize and re-key during dedupe migration on load.
-- Stale cache reintroduction: after any merge/delete write, rebuild in-memory account list from the deduped canonical set.
-- Concurrent writes: guard account writes with existing save serialization and re-run dedupe immediately before write commit.
+- Legacy case/whitespace variants are canonicalized on next load/save.
+- Stale cache reintroduction is prevented by rebuilding account selection state from canonicalized storage after merge/delete.
+- Concurrent writes are serialized through existing save sequencing; dedupe executes immediately before commit.
 
 ## Verify
-- Seed fixtures: `User@Example.com` and ` user@example.com ` with different `lastUsed`/`addedAt`/field completeness; confirm one canonical merged record with deterministic winner and retained critical fields.
-- Confirm no lossy merge: every non-empty pre-merge critical field is present in canonical output unless deterministically superseded by higher-priority source.
-- Run concurrent write simulation (two inserts for same logical email) and confirm single canonical record after save.
-- Delete by email and verify all matching rows are gone in memory and persisted storage after restart.
+- Seed fixtures with case/whitespace variants and overlapping fields; confirm one canonical merged row with deterministic winner.
+- Confirm no lossy merge for critical fields.
+- Concurrent insert simulation for same logical email results in one canonical row.
+- Delete by email removes all normalized matches in memory and persisted storage after restart.
+- Re-run save paths and migrations to confirm dedupe is enforced on each write path.
