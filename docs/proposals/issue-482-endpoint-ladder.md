@@ -19,7 +19,7 @@ Antigravity already traverses `daily -> autopush -> prod`, but retryability is b
 
 ### Logging and Exhaustion Contract
 - Emit debug logs for each ladder decision with structured fields: `{ endpoint, attempt, status, retryable, reason, next_endpoint }`.
-- Define deterministic exhaustion response `EndpointsExhaustedError` containing attempted endpoints + status/reason summary + last error payload.
+- Define deterministic exhaustion response `EndpointsExhaustedError` containing per-endpoint attempts with `{ endpoint, status, retry_rule, error_summary }` plus final last-error payload.
 - Return this error to caller without silent swallow when all endpoints fail.
 
 ### Delta vs Current Behavior
