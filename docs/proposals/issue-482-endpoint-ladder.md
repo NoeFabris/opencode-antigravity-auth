@@ -1,7 +1,7 @@
 # Proposal: Endpoint ladder for Antigravity request resilience
 
 ## Problem
-Antigravity already traverses `daily -> autopush -> prod`, but current retryability is broad (`403 || 404 || >=500`) and the behavior is underspecified for logging and exhaustion outcomes. This causes inconsistent fallback decisions and poor operational visibility when endpoints fail.
+Antigravity already traverses `daily -> autopush -> prod`, but retryability is broad (`403 || 404 || >=500`) and behavior is underspecified for logging, exhaustion outputs, and capacity-retry interaction.
 
 ## Implementation
 ### Configuration
@@ -30,13 +30,16 @@ Antigravity already traverses `daily -> autopush -> prod`, but current retryabil
 ## Edge Cases
 - Empty/misconfigured endpoint list: fail fast on config validation and do not start request traversal.
 - In-flight concurrency: request uses immutable endpoint snapshot even if config changes mid-flight.
-- Per-request limits: at most one attempt per endpoint in the ladder (no cyclic endpoint retries).
+- Attempt limits:
+  - endpoint transitions: at most one hop to the next endpoint per failure event
+  - capacity/server-busy retries: allow bounded same-endpoint retries (up to current cap) before hopping
 - All-endpoints failure: emit final exhaustion log and return `EndpointsExhaustedError`.
 
 ## Verify
 - Scenario matrix:
   - daily returns model-missing `404`, autopush succeeds -> single fallback hop, success.
   - daily returns `503`, autopush succeeds -> fallback occurs.
+  - daily returns capacity/server-busy response -> bounded same-endpoint retries occur before endpoint hop.
   - daily returns `500` -> no endpoint fallback.
   - daily returns `401/403` -> no endpoint fallback.
   - all endpoints return retryable failures -> `EndpointsExhaustedError` returned with attempt summary.
