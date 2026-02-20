@@ -15,9 +15,16 @@ Antigravity already traverses `daily -> autopush -> prod`, but retryability is b
   - `404` where payload indicates model not found on that endpoint
   - `502/503/504`
   - transient network failures (timeout, connection reset/refused)
-- `403` is conditionally retryable only after verification-required/auth-specific checks are excluded and the error is classified as endpoint-transient.
+- `403` is conditionally retryable only when all hold:
+  - no verification-required/auth-ineligible signal in parsed error metadata/body
+  - status is `403` from endpoint request path (not auth refresh/project bootstrap path)
+  - classifier emits `endpoint_transient_403` reason
 - Do not endpoint-fallback on `401`, `400`, or `500/501` by default.
 - Keep account-rotation logic for quota/capacity handling separate from endpoint traversal.
+- Delay/backoff policy:
+  - endpoint hop retries (`404 model_missing`, `502/503/504`, `endpoint_transient_403`) are immediate (no extra delay)
+  - network-transient errors allow one short same-endpoint retry (`250ms`) before hopping
+  - capacity/server-busy retries remain same-endpoint with tiered delays (`5s, 10s, 20s, 30s, 60s`)
 
 ### Logging and Exhaustion Contract
 - Emit debug logs for each ladder decision with structured fields: `{ endpoint, attempt, status, retryable, reason, next_endpoint }`.
@@ -27,6 +34,15 @@ Antigravity already traverses `daily -> autopush -> prod`, but retryability is b
   - `last_error`
   - `total_attempts`
 - Return this error to caller without silent swallow when all endpoints fail.
+- `retry_rule` enum values (explicit):
+  - `model_missing_404`
+  - `gateway_502`
+  - `gateway_503`
+  - `gateway_504`
+  - `network_timeout`
+  - `network_connection_reset`
+  - `endpoint_transient_403`
+  - `capacity_same_endpoint_retry`
 
 ### Delta vs Current Behavior
 - Replace broad `shouldRetryEndpoint` predicate with the explicit rules above.
@@ -38,7 +54,7 @@ Antigravity already traverses `daily -> autopush -> prod`, but retryability is b
 - In-flight concurrency: request uses immutable endpoint snapshot even if config changes mid-flight.
 - Attempt limits:
   - endpoint transitions: at most one hop to the next endpoint per failure event
-  - capacity/server-busy retries: allow bounded same-endpoint retries (up to current cap) before hopping
+  - capacity/server-busy retries: allow bounded same-endpoint retries with explicit cap `CAPACITY_RETRY_LIMIT = 5` before hopping
 - Cascading capacity failures across all endpoints: emit exhaustion error with per-endpoint attempt counts and retry-rule attribution.
 
 ## Verify
@@ -46,6 +62,7 @@ Antigravity already traverses `daily -> autopush -> prod`, but retryability is b
   - daily returns model-missing `404`, autopush succeeds -> single fallback hop, success.
   - daily returns `503`, autopush succeeds -> fallback occurs.
   - daily returns capacity/server-busy response -> bounded same-endpoint retries occur before endpoint hop.
+  - daily returns transient endpoint `403` (non-verification) -> endpoint fallback occurs; verification-required `403` still does not fallback.
   - daily returns `403` verification/auth failure -> no endpoint fallback.
   - all endpoints return retryable capacity/gateway/network failures -> `EndpointsExhaustedError` includes per-endpoint retry rules and attempt counts.
 - Assert debug logs include `endpoint`, `status`, `retryable`, `reason`, and `next_endpoint` for each step.
