@@ -146,6 +146,7 @@ export interface ManagedAccount {
   fingerprint?: import("./fingerprint").Fingerprint;
   /** History of previous fingerprints for this account */
   fingerprintHistory?: FingerprintVersion[];
+  proxyUrl?: string;
   /** Cached quota data from last checkAccountsQuota() call */
   cachedQuota?: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
   cachedQuotaUpdatedAt?: number;
@@ -361,6 +362,7 @@ export class AccountManager {
             touchedForQuota: {},
             fingerprint: acc.fingerprint ?? generateFingerprint(),
             fingerprintHistory: acc.fingerprintHistory ?? [],
+            proxyUrl: acc.proxyUrl,
             cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
             cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
             verificationRequired: acc.verificationRequired,
@@ -1008,6 +1010,7 @@ export class AccountManager {
         cooldownReason: a.cooldownReason,
         fingerprint: a.fingerprint,
         fingerprintHistory: a.fingerprintHistory?.length ? a.fingerprintHistory : undefined,
+        proxyUrl: a.proxyUrl,
         cachedQuota: a.cachedQuota && Object.keys(a.cachedQuota).length > 0 ? a.cachedQuota : undefined,
         cachedQuotaUpdatedAt: a.cachedQuotaUpdatedAt,
         verificationRequired: a.verificationRequired,

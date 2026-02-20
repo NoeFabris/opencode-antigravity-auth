@@ -193,6 +193,7 @@ export interface AccountMetadataV3 {
   cooldownReason?: CooldownReason;
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
+  proxyUrl?: string;  // URL like "http://user:pass@host:port" (SOCKS5 not supported)
   fingerprintHistory?: import("./fingerprint").FingerprintVersion[];
   /** Set when Google asks the user to verify this account before requests can continue. */
   verificationRequired?: boolean;
@@ -418,9 +419,10 @@ function mergeAccountStorage(
         accountMap.set(acc.refreshToken, {
           ...existingAcc,
           ...acc,
-          // Preserve manually configured projectId/managedProjectId if not in incoming
+          // Preserve manually configured fields if not in incoming
           projectId: acc.projectId ?? existingAcc.projectId,
           managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
+          proxyUrl: acc.proxyUrl ?? existingAcc.proxyUrl,
           rateLimitResetTimes: {
             ...existingAcc.rateLimitResetTimes,
             ...acc.rateLimitResetTimes,

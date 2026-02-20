@@ -6,6 +6,7 @@ import {
 } from "../constants";
 import { formatRefreshParts, parseRefreshParts } from "./auth";
 import { createLogger } from "./logger";
+import { fetchWithProxy } from "./proxy";
 import type { OAuthAuthDetails, ProjectContextResult } from "./types";
 
 const log = createLogger("project");
@@ -121,6 +122,7 @@ export function invalidateProjectContextCache(refresh?: string): void {
 export async function loadManagedProject(
   accessToken: string,
   projectId?: string,
+  proxyUrl?: string,
 ): Promise<LoadCodeAssistPayload | null> {
   const metadata = buildMetadata(projectId);
   const requestBody: Record<string, unknown> = { metadata };
@@ -139,13 +141,14 @@ export async function loadManagedProject(
 
   for (const baseEndpoint of loadEndpoints) {
     try {
-      const response = await fetch(
+      const response = await fetchWithProxy(
         `${baseEndpoint}/v1internal:loadCodeAssist`,
         {
           method: "POST",
           headers: loadHeaders,
           body: JSON.stringify(requestBody),
         },
+        proxyUrl,
       );
 
       if (!response.ok) {
@@ -170,6 +173,7 @@ export async function onboardManagedProject(
   accessToken: string,
   tierId: string,
   projectId?: string,
+  proxyUrl?: string,
   attempts = 10,
   delayMs = 5000,
 ): Promise<string | undefined> {
@@ -182,7 +186,7 @@ export async function onboardManagedProject(
   for (const baseEndpoint of ANTIGRAVITY_ENDPOINT_FALLBACKS) {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        const response = await fetch(
+        const response = await fetchWithProxy(
           `${baseEndpoint}/v1internal:onboardUser`,
           {
             method: "POST",
@@ -193,6 +197,7 @@ export async function onboardManagedProject(
             },
             body: JSON.stringify(requestBody),
           },
+          proxyUrl,
         );
 
         if (!response.ok) {
@@ -222,7 +227,7 @@ export async function onboardManagedProject(
 /**
  * Resolves an effective project ID for the current auth state, caching results per refresh token.
  */
-export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<ProjectContextResult> {
+export async function ensureProjectContext(auth: OAuthAuthDetails, proxyUrl?: string): Promise<ProjectContextResult> {
   const accessToken = auth.access;
   if (!accessToken) {
     return { auth, effectiveProjectId: "" };
@@ -261,7 +266,7 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
     };
 
     // Try to resolve a managed project from Antigravity if possible.
-    const loadPayload = await loadManagedProject(accessToken, parts.projectId ?? fallbackProjectId);
+    const loadPayload = await loadManagedProject(accessToken, parts.projectId ?? fallbackProjectId, proxyUrl);
     const resolvedManagedProjectId = extractManagedProjectId(loadPayload);
 
     if (resolvedManagedProjectId) {
@@ -277,6 +282,7 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
       accessToken,
       tierId,
       parts.projectId,
+      proxyUrl,
     );
 
     if (provisionedProjectId) {

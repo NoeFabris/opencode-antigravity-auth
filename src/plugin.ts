@@ -31,6 +31,7 @@ import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
 } from "./plugin/request";
+import { fetchWithProxy } from "./plugin/proxy";
 import { resolveModelWithTier } from "./plugin/transform/model-resolver";
 import {
   isEmptyResponseBody,
@@ -441,6 +442,7 @@ async function verifyAccountAccess(
     email?: string;
     projectId?: string;
     managedProjectId?: string;
+    proxyUrl?: string;
   },
   client: PluginClient,
   providerId: string,
@@ -463,7 +465,7 @@ async function verifyAccountAccess(
 
   let refreshedAuth: Awaited<ReturnType<typeof refreshAccessToken>>;
   try {
-    refreshedAuth = await refreshAccessToken(auth, client, providerId);
+    refreshedAuth = await refreshAccessToken(auth, client, providerId, account.proxyUrl);
   } catch (error) {
     if (error instanceof AntigravityTokenRefreshError) {
       return { status: "error", message: error.message };
@@ -505,12 +507,12 @@ async function verifyAccountAccess(
 
   let response: Response;
   try {
-    response = await fetch(`${ANTIGRAVITY_ENDPOINT_PROD}/v1internal:streamGenerateContent?alt=sse`, {
+    response = await fetchWithProxy(`${ANTIGRAVITY_ENDPOINT_PROD}/v1internal:streamGenerateContent?alt=sse`, {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody),
       signal: controller.signal,
-    });
+    }, account.proxyUrl);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       return { status: "error", message: "Verification check timed out." };
@@ -757,6 +759,7 @@ async function persistAccountPool(
   results: Array<Extract<AntigravityTokenExchangeResult, { type: "success" }>>,
   replaceAll: boolean = false,
 ): Promise<void> {
+  const proxyUrl = process.env.ANTIGRAVITY_LOGIN_PROXY;
   if (results.length === 0) {
     return;
   }
@@ -806,6 +809,7 @@ async function persistAccountPool(
         refreshToken: parts.refreshToken,
         projectId: parts.projectId,
         managedProjectId: parts.managedProjectId,
+        proxyUrl,
         addedAt: now,
         lastUsed: now,
         enabled: true,
@@ -827,6 +831,7 @@ async function persistAccountPool(
       refreshToken: parts.refreshToken,
       projectId: parts.projectId ?? existing.projectId,
       managedProjectId: parts.managedProjectId ?? existing.managedProjectId,
+      proxyUrl: proxyUrl !== undefined ? proxyUrl : existing.proxyUrl,
       lastUsed: now,
     };
     
@@ -1352,11 +1357,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
       const parts = parseRefreshParts(auth.refresh);
       const projectId = parts.managedProjectId || parts.projectId || "unknown";
 
+      const account = activeAccountManager
+        ?.getAccounts()
+        .find(a => a.parts.refreshToken === parts.refreshToken);
+
       // Ensure we have a valid access token
       let accessToken = auth.access;
       if (!accessToken || accessTokenExpired(auth)) {
         try {
-          const refreshed = await refreshAccessToken(auth, client, providerId);
+          const refreshed = await refreshAccessToken(auth, client, providerId, account?.proxyUrl);
           accessToken = refreshed?.access;
         } catch (error) {
           return `Error: Failed to refresh access token: ${error instanceof Error ? error.message : String(error)}`;
@@ -1376,6 +1385,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
         accessToken,
         projectId,
         ctx.abort,
+        account?.proxyUrl,
       );
     },
   });
@@ -1705,7 +1715,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             if (accessTokenExpired(authRecord)) {
               try {
-                const refreshed = await refreshAccessToken(authRecord, client, providerId);
+                const refreshed = await refreshAccessToken(authRecord, client, providerId, account.proxyUrl);
                 if (!refreshed) {
                   const { failures, shouldCooldown, cooldownMs } = trackAccountFailure(account.index);
                   getHealthTracker().recordFailure(account.index);
@@ -1779,7 +1789,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             let projectContext: ProjectContextResult;
             try {
-              projectContext = await ensureProjectContext(authRecord);
+               projectContext = await ensureProjectContext(authRecord, account.proxyUrl);
               resetAccountFailureState(account.index);
             } catch (error) {
               const { failures, shouldCooldown, cooldownMs } = trackAccountFailure(account.index);
@@ -1847,7 +1857,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
               try {
                 pushDebug("thinking-warmup: start");
-                const warmupResponse = await fetch(warmupUrl, warmupInit);
+                const warmupResponse = await fetchWithProxy(warmupUrl, warmupInit, account.proxyUrl);
                 const transformed = await transformAntigravityResponse(
                   warmupResponse,
                   true,
@@ -2021,7 +2031,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                const response = await fetch(prepared.request, prepared.init);
+                const response = await fetchWithProxy(resolvedUrl, prepared.init, account.proxyUrl);
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
 
@@ -3096,6 +3106,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         refreshToken: parts.refreshToken,
                         projectId: parts.projectId ?? updatedAccounts[refreshAccountIndex]?.projectId,
                         managedProjectId: parts.managedProjectId ?? updatedAccounts[refreshAccountIndex]?.managedProjectId,
+                        proxyUrl: process.env.ANTIGRAVITY_LOGIN_PROXY !== undefined
+                          ? process.env.ANTIGRAVITY_LOGIN_PROXY
+                          : updatedAccounts[refreshAccountIndex]?.proxyUrl,
                         addedAt: updatedAccounts[refreshAccountIndex]?.addedAt ?? Date.now(),
                         lastUsed: Date.now(),
                       };
