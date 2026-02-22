@@ -34,7 +34,7 @@
         "LICENSE"
     ],
     "scripts": {
-        "build": "tsc -p tsconfig.build.json",
+        "build": "tsc -p tsconfig.build.json && npx tsx scripts/fix-esm-imports.ts",
         "build:schema": "npx tsx script/build-schema.ts",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
@@ -58,8 +58,8 @@
         "zod-to-json-schema": "^3.25.1"
     },
     "dependencies": {
-        "@opencode-ai/plugin": "^0.15.30",
         "@openauthjs/openauth": "^0.4.3",
+        "@opencode-ai/plugin": "^1.2.10",
         "proper-lockfile": "^4.1.2",
         "xdg-basedir": "^5.1.0",
         "zod": "^4.0.0"
