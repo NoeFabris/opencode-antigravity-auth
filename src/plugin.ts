@@ -3120,12 +3120,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 const lockPath = `${getStoragePath()}.lock`;
                 const accountPersistenceWarning =
                   `failed to persist account data (${reason}). ` +
-                  `Check and remove stale lock file if needed: ${lockPath}`;
+                  `Storage appears locked at ${lockPath}. Retry after current operation finishes. ` +
+                  `If the lock persists and ${lockPath} is a file, remove it and retry.`;
                 console.warn(`[opencode-antigravity-auth] ${accountPersistenceWarning}`);
                 try {
                   const compactReason = reason.length > 120 ? `${reason.slice(0, 117)}...` : reason;
                   const toastMessage = /ELOCKED|EEXIST/i.test(reason)
-                    ? `Authenticated, but account was not saved due to storage lock. Remove stale lock file and retry: ${lockPath}`
+                    ? `Authenticated, but account was not saved because storage is locked. Retry in a moment. If the lock persists and ${lockPath} is a file, remove it and retry.`
                     : `Authenticated, but account was not saved: ${compactReason}`;
                   await client.tui.showToast({
                     body: {
@@ -3133,7 +3134,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       variant: "error",
                     },
                   });
-                } catch {
+                } catch (toastError) {
+                  // Toast display is best-effort; auth succeeded even if notification fails.
+                  console.warn("[opencode-antigravity-auth] Failed to show account persistence toast:", toastError);
                 }
               }
 
@@ -3154,9 +3157,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 }
               } catch {
                 // Fall back to accounts.length if we can't read storage
-              }
-              if (currentAccountCount <= 0 && accounts.length > 0) {
-                currentAccountCount = accounts.length;
               }
 
               const addAnother = await promptAddAnotherAccount(currentAccountCount);
@@ -3182,9 +3182,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 actualAccountCount = finalStorage.accounts.length;
               }
             } catch {
-            }
-            if (actualAccountCount <= 0 && accounts.length > 0) {
-              actualAccountCount = accounts.length;
             }
 
             const successMessage = refreshAccountIndex !== undefined
