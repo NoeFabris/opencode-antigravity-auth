@@ -440,7 +440,7 @@ export async function showAuthMenu(
       { label: UI_COPY.mainMenu.addAccount, value: { type: 'add' }, color: 'green' },
       { label: UI_COPY.mainMenu.checkAccounts, value: { type: 'check' }, color: 'green' },
       { label: 'Verify One Account', value: { type: 'verify' }, color: 'cyan' },
-      { label: 'Verify All Accounts', value: { type: 'verify-all' }, color: 'cyan' },
+      { label: verifyLabel, value: { type: 'verify-all' }, color: 'cyan' },
       { label: 'Configure Models', value: { type: 'configure-models' }, color: 'cyan' },
       { label: UI_COPY.mainMenu.settings, value: { type: 'settings' }, color: 'green' },
       { label: '', value: { type: 'cancel' }, separator: true },
