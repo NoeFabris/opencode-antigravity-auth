@@ -10,7 +10,9 @@ import {
 import { updateOpencodeConfig } from "./config/updater";
 import { showSettingsMenu } from "./ui/settings-menu";
 import { runActionPanel } from "./ui/action-panel";
-import { initUiFromConfig } from "./ui/runtime";
+import { select } from "./ui/select";
+import { UI_COPY } from "./ui/copy";
+import { getUiRuntimeOptions, initUiFromConfig } from "./ui/runtime";
 
 export async function promptProjectId(): Promise<string> {
   const rl = createInterface({ input, output });
@@ -62,6 +64,34 @@ export interface LoginMenuResult {
   verifyAll?: boolean;
   deleteAll?: boolean;
   geminiCliAccountIndex?: number;
+}
+
+export type SignInMethod = "browser" | "manual" | "back";
+
+export async function promptSignInMethod(): Promise<SignInMethod> {
+  if (!isTTY()) {
+    return "browser";
+  }
+
+  const ui = getUiRuntimeOptions();
+
+  const items = [
+    { label: UI_COPY.oauth.openBrowser, value: "browser" as SignInMethod, color: "green" as const },
+    { label: UI_COPY.oauth.manualMode, value: "manual" as SignInMethod },
+    { label: UI_COPY.oauth.back, value: "back" as SignInMethod, color: "red" as const },
+  ];
+
+  const result = await select<SignInMethod>(items, {
+    message: UI_COPY.oauth.chooseModeTitle,
+    subtitle: UI_COPY.oauth.chooseModeSubtitle,
+    help: UI_COPY.oauth.chooseModeHelp,
+    clearScreen: true,
+    theme: ui.theme,
+    selectedEmphasis: "minimal",
+    allowEscape: true,
+  });
+
+  return result ?? "back";
 }
 
 async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {

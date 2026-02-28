@@ -13,7 +13,7 @@ import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import { authorizeGeminiCli, exchangeGeminiCli } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import { promptAddAnotherAccount, promptLoginMode, promptProjectId, promptSignInMethod } from "./plugin/cli";
 import { runActionPanel } from "./plugin/ui/action-panel";
 import { ensureProjectContext } from "./plugin/project";
 import {
@@ -2574,7 +2574,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
           if (inputs) {
             const accounts: Array<Extract<AntigravityTokenExchangeResult, { type: "success" }>> = [];
             const noBrowser = inputs.noBrowser === "true" || inputs["no-browser"] === "true";
-            const useManualMode = noBrowser || shouldSkipLocalServer();
+            let useManualMode = noBrowser || shouldSkipLocalServer();
 
             // Check for existing accounts and prompt user for login mode
             let startFresh = true;
@@ -2635,6 +2635,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 
                 menuResult = await promptLoginMode(existingAccounts);
 
+                console.clear();
                 if (menuResult.mode === "check") {
                   await runActionPanel("Check Quotas", "Checking all accounts...", async () => {
                     const results = await checkAccountsQuota(existingStorage.accounts, client, providerId);
@@ -3216,6 +3217,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 console.log("\nStarting fresh - existing accounts will be replaced.\n");
               } else if (!startFresh) {
                 console.log("\nAdding to existing accounts.\n");
+              }
+            }
+
+            // Sign-in method picker (TUI)
+            if (!useManualMode) {
+              const signInMethod = await promptSignInMethod();
+              if (signInMethod === "back") {
+                return {
+                  url: "",
+                  instructions: "Authentication cancelled",
+                  method: "auto",
+                  callback: async () => ({ type: "failed", error: "Authentication cancelled" }),
+                };
+              }
+              if (signInMethod === "manual") {
+                useManualMode = true;
               }
             }
 
