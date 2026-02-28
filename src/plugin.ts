@@ -3122,6 +3122,19 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   `failed to persist account data (${reason}). ` +
                   `Check and remove stale lock file if needed: ${lockPath}`;
                 console.warn(`[opencode-antigravity-auth] ${accountPersistenceWarning}`);
+                try {
+                  const compactReason = reason.length > 120 ? `${reason.slice(0, 117)}...` : reason;
+                  const toastMessage = /ELOCKED|EEXIST/i.test(reason)
+                    ? `Authenticated, but account was not saved due to storage lock. Remove stale lock file and retry: ${lockPath}`
+                    : `Authenticated, but account was not saved: ${compactReason}`;
+                  await client.tui.showToast({
+                    body: {
+                      message: toastMessage,
+                      variant: "error",
+                    },
+                  });
+                } catch {
+                }
               }
 
               if (refreshAccountIndex !== undefined) {
