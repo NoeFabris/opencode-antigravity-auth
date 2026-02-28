@@ -198,6 +198,8 @@ export interface AccountMetadataV3 {
   verificationRequired?: boolean;
   verificationRequiredAt?: number;
   verificationRequiredReason?: string;
+  /** Classification of what verification is needed: "gemini-cli" | "api-enable" | "google-account" | "unknown" */
+  verificationRequiredType?: string;
   verificationUrl?: string;
   /** Cached soft quota data */
   cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;

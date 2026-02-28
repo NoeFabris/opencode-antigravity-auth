@@ -9,6 +9,9 @@ import {
   ANTIGRAVITY_LOAD_ENDPOINTS,
   getAntigravityHeaders,
   GEMINI_CLI_HEADERS,
+  GEMINI_CLI_CLIENT_ID,
+  GEMINI_CLI_CLIENT_SECRET,
+  GEMINI_CLI_SCOPES,
 } from "../constants";
 import { createLogger } from "../plugin/logger";
 import { calculateTokenExpiry } from "../plugin/auth";
@@ -264,6 +267,122 @@ export async function exchangeAntigravity(
       expires: calculateTokenExpiry(startTime, tokenPayload.expires_in),
       email: userInfo.email,
       projectId: effectiveProjectId || "",
+    };
+  } catch (error) {
+    return {
+      type: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ============================================================================
+// GEMINI CLI OAuth Flow
+// ============================================================================
+
+/**
+ * Result returned after constructing a Gemini CLI OAuth authorization URL.
+ */
+export interface GeminiCliAuthorization {
+  url: string;
+  verifier: string;
+}
+
+/**
+ * Build the Gemini CLI OAuth authorization URL.
+ * Uses the Gemini CLI's public client credentials to trigger Gemini Code Assist provisioning.
+ * The login_hint parameter pre-selects the Google account in the consent screen.
+ */
+export async function authorizeGeminiCli(redirectUri: string, loginHint?: string): Promise<GeminiCliAuthorization> {
+  const pkce = (await generatePKCE()) as PkcePair;
+
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", GEMINI_CLI_CLIENT_ID);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", GEMINI_CLI_SCOPES.join(" "));
+  url.searchParams.set("code_challenge", pkce.challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+
+  if (loginHint) {
+    url.searchParams.set("login_hint", loginHint);
+  }
+
+  return {
+    url: url.toString(),
+    verifier: pkce.verifier,
+  };
+}
+
+interface GeminiCliTokenExchangeSuccess {
+  type: "success";
+  email?: string;
+}
+
+interface GeminiCliTokenExchangeFailure {
+  type: "failed";
+  error: string;
+}
+
+export type GeminiCliTokenExchangeResult =
+  | GeminiCliTokenExchangeSuccess
+  | GeminiCliTokenExchangeFailure;
+
+/**
+ * Exchange a Gemini CLI authorization code for tokens.
+ * We don't need to save the tokens — the act of completing the OAuth consent
+ * provisions the Gemini Code Assist API for the account server-side at Google.
+ */
+export async function exchangeGeminiCli(
+  code: string,
+  verifier: string,
+  redirectUri: string,
+): Promise<GeminiCliTokenExchangeResult> {
+  try {
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "Accept": "*/*",
+        "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+      },
+      body: new URLSearchParams({
+        client_id: GEMINI_CLI_CLIENT_ID,
+        client_secret: GEMINI_CLI_CLIENT_SECRET,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      return { type: "failed", error: errorText };
+    }
+
+    const tokenPayload = (await tokenResponse.json()) as AntigravityTokenResponse;
+
+    // Fetch user email to confirm which account was provisioned
+    const userInfoResponse = await fetch(
+      "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
+      {
+        headers: {
+          Authorization: `Bearer ${tokenPayload.access_token}`,
+          "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+        },
+      },
+    );
+
+    const userInfo = userInfoResponse.ok
+      ? ((await userInfoResponse.json()) as AntigravityUserInfo)
+      : {};
+
+    return {
+      type: "success",
+      email: userInfo.email,
     };
   } catch (error) {
     return {

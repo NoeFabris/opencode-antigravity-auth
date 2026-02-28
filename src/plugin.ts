@@ -5,10 +5,12 @@ import {
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_ENDPOINT_PROD,
   ANTIGRAVITY_PROVIDER_ID,
+  ANTIGRAVITY_REDIRECT_URI,
   getAntigravityHeaders,
   type HeaderStyle,
 } from "./constants";
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
+import { authorizeGeminiCli, exchangeGeminiCli } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
 import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
@@ -272,6 +274,7 @@ type VerificationProbeResult = {
   status: "ok" | "blocked" | "error";
   message: string;
   verifyUrl?: string;
+  verificationType?: VerificationType;
 };
 
 function decodeEscapedText(input: string): string {
@@ -315,16 +318,34 @@ function selectBestVerificationUrl(urls: string[]): string | undefined {
   return unique[0];
 }
 
+export type VerificationType = "gemini-cli" | "api-enable" | "google-account" | "unknown";
+
 function extractVerificationErrorDetails(bodyText: string): {
   validationRequired: boolean;
   message?: string;
   verifyUrl?: string;
+  verificationType: VerificationType;
 } {
   const decodedBody = decodeEscapedText(bodyText);
   const lowerBody = decodedBody.toLowerCase();
   let validationRequired = lowerBody.includes("validation_required");
   let message: string | undefined;
   const verificationUrls = new Set<string>();
+
+  // Detect SUBSCRIPTION_REQUIRED / Gemini Code Assist license errors
+  const isSubscriptionRequired =
+    lowerBody.includes("subscription_required") ||
+    lowerBody.includes("lack a gemini code assist license");
+
+  // Detect Cloud Code Private API not enabled errors
+  const isApiEnableRequired =
+    lowerBody.includes("cloud code private api has not been used") ||
+    lowerBody.includes("cloudcode-pa.googleapis.com/overview");
+
+  // Mark as validation required if we detect these specific error types
+  if (isSubscriptionRequired || isApiEnableRequired) {
+    validationRequired = true;
+  }
 
   const collectUrlsFromText = (text: string): void => {
     for (const match of text.matchAll(/https:\/\/accounts\.google\.com\/[^\s"'<>]+/gi)) {
@@ -422,16 +443,27 @@ function extractVerificationErrorDetails(bodyText: string): {
     const fallback = decodedBody
       .split("\n")
       .map((line) => line.trim())
-      .find((line) => line && !line.startsWith("data:") && /(verify|validation|required)/i.test(line));
+      .find((line) => line && !line.startsWith("data:") && /(verify|validation|required|subscription|license)/i.test(line));
     if (fallback) {
       message = fallback;
     }
+  }
+
+  // Classify the verification type
+  let verificationType: VerificationType = "unknown";
+  if (isSubscriptionRequired) {
+    verificationType = "gemini-cli";
+  } else if (isApiEnableRequired) {
+    verificationType = "api-enable";
+  } else if (verificationUrls.size > 0 && [...verificationUrls].some(u => u.includes("accounts.google.com"))) {
+    verificationType = "google-account";
   }
 
   return {
     validationRequired,
     message,
     verifyUrl: selectBestVerificationUrl([...verificationUrls]),
+    verificationType,
   };
 }
 
@@ -537,6 +569,7 @@ async function verifyAccountAccess(
       status: "blocked",
       message: extracted.message ?? "Google requires additional account verification.",
       verifyUrl: extracted.verifyUrl,
+      verificationType: extracted.verificationType,
     };
   }
 
@@ -544,6 +577,7 @@ async function verifyAccountAccess(
   return {
     status: "error",
     message: fallbackMessage,
+    verificationType: extracted.verificationType !== "unknown" ? extracted.verificationType : undefined,
   };
 }
 
@@ -594,6 +628,7 @@ type VerificationStoredAccount = {
   verificationRequired?: boolean;
   verificationRequiredAt?: number;
   verificationRequiredReason?: string;
+  verificationRequiredType?: string;
   verificationUrl?: string;
 };
 
@@ -601,6 +636,7 @@ function markStoredAccountVerificationRequired(
   account: VerificationStoredAccount,
   reason: string,
   verifyUrl?: string,
+  verificationType?: string,
 ): boolean {
   let changed = false;
   const wasVerificationRequired = account.verificationRequired === true;
@@ -624,6 +660,12 @@ function markStoredAccountVerificationRequired(
   const normalizedUrl = verifyUrl?.trim();
   if (normalizedUrl && account.verificationUrl !== normalizedUrl) {
     account.verificationUrl = normalizedUrl;
+    changed = true;
+  }
+
+  const normalizedType = verificationType?.trim();
+  if (normalizedType && account.verificationRequiredType !== normalizedType) {
+    account.verificationRequiredType = normalizedType;
     changed = true;
   }
 
@@ -652,6 +694,10 @@ function clearStoredAccountVerificationRequired(
   }
   if (account.verificationRequiredReason !== undefined) {
     account.verificationRequiredReason = undefined;
+    changed = true;
+  }
+  if (account.verificationRequiredType !== undefined) {
+    account.verificationRequiredType = undefined;
     changed = true;
   }
   if (account.verificationUrl !== undefined) {
@@ -2250,16 +2296,28 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     const verificationReason = extracted.message ?? "Google requires account verification.";
                     const cooldownMs = 10 * 60 * 1000;
 
-                    accountManager.markAccountVerificationRequired(account.index, verificationReason, extracted.verifyUrl);
+                    accountManager.markAccountVerificationRequired(account.index, verificationReason, extracted.verifyUrl, extracted.verificationType);
                     accountManager.markAccountCoolingDown(account, cooldownMs, "validation-required");
                     accountManager.markRateLimited(account, cooldownMs, family, headerStyle, model);
 
                     const label = account.email || `Account ${account.index + 1}`;
                     if (accountManager.shouldShowAccountToast(account.index, 60000)) {
-                      await showToast(
-                        `⚠ ${label} needs verification. Run 'opencode auth login' and use Verify accounts.`,
-                        "warning",
-                      );
+                      let toastMessage: string;
+                      switch (extracted.verificationType) {
+                        case "gemini-cli":
+                          toastMessage = `⚠ ${label} needs Gemini CLI login. Run 'opencode auth login' → Gemini CLI Login.`;
+                          break;
+                        case "api-enable":
+                          toastMessage = `⚠ ${label}: Cloud Code API not enabled. Run 'opencode auth login' → Verify accounts.`;
+                          break;
+                        case "google-account":
+                          toastMessage = `⚠ ${label} needs Google verification. Run 'opencode auth login' → Verify accounts.`;
+                          break;
+                        default:
+                          toastMessage = `⚠ ${label} needs verification. Run 'opencode auth login' and use Verify accounts.`;
+                          break;
+                      }
+                      await showToast(toastMessage, "warning");
                       accountManager.markToastShown(account.index);
                     }
 
@@ -2530,6 +2588,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                   if (acc.verificationRequired) {
                     status = 'verification-required';
+
+                    // Backfill verificationRequiredType for accounts flagged before this field existed
+                    if (!acc.verificationRequiredType && acc.verificationRequiredReason) {
+                      const lowerReason = acc.verificationRequiredReason.toLowerCase();
+                      if (lowerReason.includes("subscription_required") || lowerReason.includes("gemini code assist license")) {
+                        acc.verificationRequiredType = "gemini-cli";
+                      } else if (lowerReason.includes("cloud code private api has not been used") || lowerReason.includes("cloudcode-pa.googleapis.com/overview")) {
+                        acc.verificationRequiredType = "api-enable";
+                      } else if (lowerReason.includes("accounts.google.com")) {
+                        acc.verificationRequiredType = "google-account";
+                      }
+                    }
                   } else {
                     const rateLimits = acc.rateLimitResetTimes;
                     if (rateLimits) {
@@ -2558,6 +2628,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     status,
                     isCurrentAccount: idx === (existingStorage.activeIndex ?? 0),
                     enabled: acc.enabled !== false,
+                    verificationRequiredType: acc.verificationRequiredType,
                   };
                 });
                 
@@ -2708,6 +2779,104 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   continue;
                 }
 
+                if (menuResult.mode === "gemini-cli-login") {
+                  if (existingStorage.accounts.length === 0) {
+                    console.log("\nNo accounts available. Add an account first.\n");
+                    continue;
+                  }
+
+                  // Show account picker
+                  const accountIndex = await promptAccountIndexForVerification(
+                    existingStorage.accounts.map((acc, idx) => ({
+                      email: acc.email,
+                      index: idx,
+                    })),
+                  );
+
+                  if (accountIndex === undefined) {
+                    console.log("\nGemini CLI login cancelled.\n");
+                    continue;
+                  }
+
+                  const targetAccount = existingStorage.accounts[accountIndex];
+                  if (!targetAccount) {
+                    console.log(`\nAccount ${accountIndex + 1} not found.\n`);
+                    continue;
+                  }
+
+                  const accountLabel = targetAccount.email || `Account ${accountIndex + 1}`;
+                  console.log(`\nStarting Gemini CLI login for ${accountLabel}...`);
+                  console.log("This will open your browser to authorize Gemini Code Assist.\n");
+
+                  let oauthListener: OAuthListener | undefined;
+                  try {
+                    oauthListener = await startOAuthListener();
+                    const geminiRedirectUri = ANTIGRAVITY_REDIRECT_URI;
+                    const authorization = await authorizeGeminiCli(geminiRedirectUri, targetAccount.email);
+
+                    const opened = await openBrowser(authorization.url);
+                    if (opened) {
+                      console.log("Opened authorization URL in your browser.");
+                    } else {
+                      console.log("Could not open browser. Please open this URL manually:");
+                      console.log(`\n${authorization.url}\n`);
+                    }
+
+                    console.log("Waiting for authorization...\n");
+                    const callbackUrl = await oauthListener.waitForCallback();
+                    const callbackParams = new URL(callbackUrl, "http://localhost").searchParams;
+                    const code = callbackParams.get("code");
+
+                    if (!code) {
+                      console.log("✗ Authorization failed: no code received.\n");
+                      await promptOAuthCallbackValue("\nPress Enter to return to menu...");
+                      continue;
+                    }
+
+                    const result = await exchangeGeminiCli(code, authorization.verifier, geminiRedirectUri);
+
+                    if (result.type === "success") {
+                      const provisionedEmail = result.email || accountLabel;
+                      console.log(`✓ Gemini CLI access provisioned for ${provisionedEmail}`);
+
+                      // Verify the account actually works now
+                      console.log("Verifying account access...");
+                      const postVerification = await verifyAccountAccess(targetAccount, client, providerId);
+
+                      if (postVerification.status === "ok") {
+                        // Clear any verification flags and re-enable the account
+                        if (targetAccount.verificationRequired) {
+                          const { changed } = clearStoredAccountVerificationRequired(targetAccount, true);
+                          if (changed) {
+                            await saveAccounts(existingStorage);
+                          }
+                          activeAccountManager?.clearAccountVerificationRequired(accountIndex, true);
+                          console.log(`✓ ${provisionedEmail} verified and re-enabled.\n`);
+                        } else if (targetAccount.enabled === false) {
+                          targetAccount.enabled = true;
+                          await saveAccounts(existingStorage);
+                          activeAccountManager?.setAccountEnabled(accountIndex, true);
+                          console.log(`✓ ${provisionedEmail} verified and re-enabled.\n`);
+                        } else {
+                          console.log(`✓ ${provisionedEmail} verified and ready for requests.\n`);
+                        }
+                      } else {
+                        console.log(`⚠ Verification probe still failing: ${postVerification.message}`);
+                        console.log("The API may take a few minutes to propagate. Try verifying again shortly.\n");
+                      }
+                    } else {
+                      console.log(`✗ Gemini CLI login failed: ${result.error}\n`);
+                    }
+                  } catch (error) {
+                    console.log(`✗ Gemini CLI login error: ${error instanceof Error ? error.message : String(error)}\n`);
+                  } finally {
+                    oauthListener?.close();
+                  }
+
+                  await promptOAuthCallbackValue("\nPress Enter to return to menu...");
+                  continue;
+                }
+
                 if (menuResult.mode === "verify" || menuResult.mode === "verify-all") {
                   const verifyAll = menuResult.mode === "verify-all" || menuResult.verifyAll === true;
 
@@ -2750,11 +2919,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                           account,
                           verification.message,
                           verification.verifyUrl,
+                          verification.verificationType,
                         );
                         if (changed) {
                           storageUpdated = true;
                         }
-                        activeAccountManager?.markAccountVerificationRequired(i, verification.message, verification.verifyUrl);
+                        activeAccountManager?.markAccountVerificationRequired(i, verification.message, verification.verifyUrl, verification.verificationType);
 
                         blockedCount += 1;
                         console.log("needs verification");
@@ -2809,10 +2979,74 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   const account = existingStorage.accounts[verifyAccountIndex];
                   if (!account) {
                     console.log(`\nAccount ${verifyAccountIndex + 1} not found.\n`);
+                    await promptOAuthCallbackValue("\nPress Enter to return to menu...");
                     continue;
                   }
 
                   const label = account.email || `Account ${verifyAccountIndex + 1}`;
+
+                  // Smart verify: if account is flagged as needing Gemini CLI login,
+                  // trigger the OAuth flow directly instead of just probing
+                  if (account.verificationRequired && account.verificationRequiredType === "gemini-cli") {
+                    console.log(`\n${label} needs Gemini CLI login. Starting OAuth flow...\n`);
+
+                    let oauthListener: OAuthListener | undefined;
+                    try {
+                      oauthListener = await startOAuthListener();
+                      const geminiRedirectUri = ANTIGRAVITY_REDIRECT_URI;
+                      const authorization = await authorizeGeminiCli(geminiRedirectUri, account.email);
+
+                      const opened = await openBrowser(authorization.url);
+                      if (opened) {
+                        console.log("Opened authorization URL in your browser.");
+                      } else {
+                        console.log("Could not open browser. Please open this URL manually:");
+                        console.log(`\n${authorization.url}\n`);
+                      }
+
+                      console.log("Waiting for authorization...\n");
+                      const callbackUrl = await oauthListener.waitForCallback();
+                      const callbackParams = new URL(callbackUrl, "http://localhost").searchParams;
+                      const code = callbackParams.get("code");
+
+                      if (!code) {
+                        console.log("✗ Authorization failed: no code received.\n");
+                        await promptOAuthCallbackValue("\nPress Enter to return to menu...");
+                        continue;
+                      }
+
+                      const result = await exchangeGeminiCli(code, authorization.verifier, geminiRedirectUri);
+
+                      if (result.type === "success") {
+                        // Verify the account actually works now
+                        console.log("Verifying account access...");
+                        const postVerification = await verifyAccountAccess(account, client, providerId);
+
+                        if (postVerification.status === "ok") {
+                          const { changed } = clearStoredAccountVerificationRequired(account, true);
+                          if (changed) {
+                            await saveAccounts(existingStorage);
+                          }
+                          activeAccountManager?.clearAccountVerificationRequired(verifyAccountIndex, true);
+                          console.log(`✓ ${label} Gemini CLI access provisioned and verified. Account re-enabled.\n`);
+                        } else {
+                          console.log(`✓ Gemini CLI login completed for ${result.email || label}.`);
+                          console.log(`⚠ Verification probe still failing: ${postVerification.message}`);
+                          console.log("The API may take a few minutes to propagate. Try verifying again shortly.\n");
+                        }
+                      } else {
+                        console.log(`✗ Gemini CLI login failed: ${result.error}\n`);
+                      }
+                    } catch (error) {
+                      console.log(`✗ Gemini CLI login error: ${error instanceof Error ? error.message : String(error)}\n`);
+                    } finally {
+                      oauthListener?.close();
+                    }
+
+                    await promptOAuthCallbackValue("\nPress Enter to return to menu...");
+                    continue;
+                  }
+
                   console.log(`\nChecking verification status for ${label}...\n`);
 
                   const verification = await verifyAccountAccess(account, client, providerId);
@@ -2829,6 +3063,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     } else {
                       console.log(`✓ ${label} is ready for requests.\n`);
                     }
+                    await promptOAuthCallbackValue("\nPress Enter to return to menu...");
                     continue;
                   }
 
@@ -2837,6 +3072,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       account,
                       verification.message,
                       verification.verifyUrl,
+                      verification.verificationType,
                     );
                     if (changed) {
                       await saveAccounts(existingStorage);
@@ -2845,6 +3081,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       verifyAccountIndex,
                       verification.message,
                       verification.verifyUrl,
+                      verification.verificationType,
                     );
 
                     const verifyUrl = verification.verifyUrl ?? account.verificationUrl;
@@ -2866,10 +3103,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     } else {
                       console.log("No verification URL was returned. Try re-authenticating this account.\n");
                     }
+                    await promptOAuthCallbackValue("\nPress Enter to return to menu...");
                     continue;
                   }
 
                   console.log(`✗ ${label}: ${verification.message}\n`);
+                  await promptOAuthCallbackValue("\nPress Enter to return to menu...");
                   continue;
                 }
 

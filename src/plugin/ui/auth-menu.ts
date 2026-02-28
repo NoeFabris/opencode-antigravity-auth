@@ -38,6 +38,7 @@ export interface AccountInfo {
   quotaRateLimited?: boolean;
   isCurrentAccount?: boolean;
   enabled?: boolean;
+  verificationRequiredType?: string;
   showStatusBadge?: boolean;
   showCurrentBadge?: boolean;
   showLastUsed?: boolean;
@@ -64,6 +65,7 @@ export type AuthMenuAction =
   | { type: 'check' }
   | { type: 'verify' }
   | { type: 'verify-all' }
+  | { type: 'gemini-cli-login' }
   | { type: 'configure-models' }
   | { type: 'settings' }
   | { type: 'search' }
@@ -401,6 +403,7 @@ function authMenuFocusKey(action: AuthMenuAction): string {
     case 'configure-models':
     case 'search':
     case 'delete-all':
+    case 'gemini-cli-login':
     case 'cancel':
       return `action:${action.type}`;
   }
