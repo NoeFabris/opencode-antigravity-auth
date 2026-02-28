@@ -47,6 +47,7 @@ export interface LoginMenuResult {
   deleteAccountIndex?: number;
   refreshAccountIndex?: number;
   toggleAccountIndex?: number;
+  setCurrentAccountIndex?: number;
   verifyAccountIndex?: number;
   verifyAll?: boolean;
   deleteAll?: boolean;
@@ -133,6 +134,9 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         if (accountAction === "toggle") {
           return { mode: "manage", toggleAccountIndex: action.account.index };
         }
+        if (accountAction === "set-current") {
+          return { mode: "manage", setCurrentAccountIndex: action.account.index };
+        }
         if (accountAction === "verify") {
           return { mode: "verify", verifyAccountIndex: action.account.index };
         }
@@ -141,6 +145,24 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
 
       case "delete-all":
         return { mode: "fresh", deleteAll: true };
+
+      case "set-current-account":
+        return { mode: "manage", setCurrentAccountIndex: action.account.index };
+
+      case "refresh-account":
+        return { mode: "add", refreshAccountIndex: action.account.index };
+
+      case "toggle-account":
+        return { mode: "manage", toggleAccountIndex: action.account.index };
+
+      case "delete-account":
+        return { mode: "add", deleteAccountIndex: action.account.index };
+
+      case "settings":
+        continue;
+
+      case "search":
+        continue;
 
       case "configure-models": {
         const result = await updateOpencodeConfig();
