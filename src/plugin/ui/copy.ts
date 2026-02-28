@@ -6,6 +6,10 @@ export const UI_COPY = {
     addAccount: 'Add New Account',
     checkAccounts: 'Check Quotas',
     bestAccount: 'Best Account',
+    verifyOneAccount: 'Verify One Account',
+    configureModels: 'Configure Models',
+    geminiCliLogin: 'Gemini CLI Login',
+    checkFlagged: 'Check Problem Accounts',
     settings: 'Settings',
     moreChecks: 'Advanced Checks',
     refreshChecks: 'Refresh All Accounts',
@@ -86,7 +90,7 @@ export const UI_COPY = {
 
 export function formatCheckFlaggedLabel(flaggedCount?: number): string {
   if (typeof flaggedCount === 'number' && flaggedCount > 0) {
-    return `${UI_COPY.mainMenu.checkAccounts} (${flaggedCount})`;
+    return `${UI_COPY.mainMenu.checkFlagged} (${flaggedCount})`
   }
-  return UI_COPY.mainMenu.checkAccounts;
+  return UI_COPY.mainMenu.checkFlagged
 }

@@ -38,16 +38,16 @@ describe('copy', () => {
 
   describe('formatCheckFlaggedLabel', () => {
     it('returns base label when called with no args', () => {
-      expect(formatCheckFlaggedLabel()).toBe(UI_COPY.mainMenu.checkAccounts);
+      expect(formatCheckFlaggedLabel()).toBe(UI_COPY.mainMenu.checkFlagged);
     });
 
     it('returns base label when called with 0', () => {
-      expect(formatCheckFlaggedLabel(0)).toBe(UI_COPY.mainMenu.checkAccounts);
+      expect(formatCheckFlaggedLabel(0)).toBe(UI_COPY.mainMenu.checkFlagged);
     });
 
     it('returns base label + count when called with positive number', () => {
       const label = formatCheckFlaggedLabel(3);
-      expect(label).toContain(UI_COPY.mainMenu.checkAccounts);
+      expect(label).toContain(UI_COPY.mainMenu.checkFlagged);
       expect(label).toContain('(3)');
     });
   });
