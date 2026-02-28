@@ -3118,15 +3118,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
               } catch (error) {
                 const reason = error instanceof Error ? error.message : String(error);
                 const lockPath = `${getStoragePath()}.lock`;
+                const isLockError = /ELOCKED|EEXIST/i.test(reason);
+                const lockGuidance = isLockError
+                  ? ` Storage lock at ${lockPath} may be held by another process (lock directory). ` +
+                    `Retry after current operation finishes. If the lock persists and ${lockPath} exists as a file, remove that file and retry.`
+                  : "";
                 const accountPersistenceWarning =
-                  `failed to persist account data (${reason}). ` +
-                  `Storage appears locked at ${lockPath}. Retry after current operation finishes. ` +
-                  `If the lock persists and ${lockPath} is a file, remove it and retry.`;
+                  `failed to persist account data (${reason}).${lockGuidance}`;
                 console.warn(`[opencode-antigravity-auth] ${accountPersistenceWarning}`);
                 try {
                   const compactReason = reason.length > 120 ? `${reason.slice(0, 117)}...` : reason;
-                  const toastMessage = /ELOCKED|EEXIST/i.test(reason)
-                    ? `Authenticated, but account was not saved because storage is locked. Retry in a moment. If the lock persists and ${lockPath} is a file, remove it and retry.`
+                  const toastMessage = isLockError
+                    ? `Authenticated, but account was not saved because storage is locked. Another process may hold a lock directory. Retry in a moment; if ${lockPath} persists as a file, remove the file and retry.`
                     : `Authenticated, but account was not saved: ${compactReason}`;
                   await client.tui.showToast({
                     body: {
