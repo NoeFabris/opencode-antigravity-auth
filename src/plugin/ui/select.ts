@@ -217,27 +217,19 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     const focusStyle = options.focusStyle ?? 'row-invert';
     let didFullClear = false;
 
-    // For clearScreen menus, buffer all output and flush atomically.
-    // First render: clearScreen + moveTo(1,1) for a clean slate.
-    // Re-renders: moveTo(1,1) + overwrite lines + clearBelow.
-    // NEVER use clearScreen on re-renders — on Windows it pushes content
-    // into scrollback instead of erasing, causing title-repeat.
-    const useBuffer = Boolean(options.clearScreen);
-    const buffer: string[] = [];
-
-    if (!useBuffer) {
-      if (previousRenderedLines > 0) {
-        stdout.write(ANSI.up(previousRenderedLines));
-      }
+    // First render with clearScreen: full clear + move to top.
+    // Re-renders: move cursor up to overwrite previous output.
+    // Matches codex-multi-auth approach exactly.
+    if (options.clearScreen && !hasRendered) {
+      stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
+      didFullClear = true;
+    } else if (previousRenderedLines > 0) {
+      stdout.write(ANSI.up(previousRenderedLines));
     }
 
     let linesWritten = 0;
     const writeLine = (line: string) => {
-      if (useBuffer) {
-        buffer.push(ANSI.clearLine + line + '\n');
-      } else {
-        stdout.write(ANSI.clearLine + line + '\n');
-      }
+      stdout.write(ANSI.clearLine + line + '\n');
       linesWritten += 1;
     };
 
@@ -251,6 +243,38 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
       windowStart = cursor - Math.floor(maxVisibleItems / 2);
       windowStart = Math.max(0, Math.min(windowStart, items.length - maxVisibleItems));
       windowEnd = windowStart + maxVisibleItems;
+    }
+
+    // Viewport clamping: ensure total rendered lines never exceed terminal height.
+    // Prevents scroll-induced title-repeat on Windows where up(n) cannot move
+    // the cursor above the visible viewport boundary.
+    const maxOutputLines = Math.max(1, rows - 1);
+    const countWindowLines = (wStart: number, wEnd: number): number => {
+      let count = 1; // header
+      if (subtitleText) count += 1;
+      count += 1; // empty line
+      for (let idx = wStart; idx < wEnd; idx += 1) {
+        const it = items[idx];
+        if (!it) continue;
+        if (it.separator || it.kind === 'heading') { count += 1; continue; }
+        count += 1;
+        if (idx === cursor && it.hint) {
+          count += Math.min(3, it.hint.split('\n').length);
+        } else if (idx !== cursor && it.hint && (options.showHintsForUnselected ?? true)) {
+          count += Math.min(2, it.hint.split('\n').length);
+        }
+      }
+      count += 2; // help + border
+      return count;
+    };
+    while (windowEnd - windowStart > 1 && countWindowLines(windowStart, windowEnd) > maxOutputLines) {
+      if (windowEnd - 1 > cursor) {
+        windowEnd -= 1;
+      } else if (windowStart < cursor) {
+        windowStart += 1;
+      } else {
+        break;
+      }
     }
 
     const visibleItems = items.slice(windowStart, windowEnd);
@@ -339,12 +363,7 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     writeLine(` ${muted}${truncateAnsi(helpText, Math.max(1, columns - 2))}${reset}`);
     writeLine(`${border}+${reset}`);
 
-    if (useBuffer) {
-      // Alt screen has no scrollback — moveTo(1,1) is always absolute.
-      // Every render: reposition to top-left, overwrite, clear leftovers.
-      stdout.write(ANSI.moveTo(1, 1) + buffer.join('') + ANSI.clearBelow);
-      didFullClear = true;
-    } else if (previousRenderedLines > linesWritten) {
+    if (!didFullClear && previousRenderedLines > linesWritten) {
       const extra = previousRenderedLines - linesWritten;
       for (let i = 0; i < extra; i += 1) {
         writeLine('');
@@ -377,9 +396,6 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
           refreshTimer = null;
         }
         stdout.write(ANSI.show);
-        if (options.clearScreen) {
-          stdout.write(ANSI.altScreenOff);
-        }
       } catch {
         // best effort cleanup
       }
@@ -496,9 +512,6 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     stdin.resume();
     drainStdinBuffer();
     inputGuardUntil = Date.now() + 120;
-    if (options.clearScreen) {
-      stdout.write(ANSI.altScreenOn);
-    }
     stdout.write(ANSI.hide);
     notifyCursorChange();
     render();

@@ -73,10 +73,10 @@ export async function runActionPanel<T>(
     pushLog(args)
   }
   console.warn = (...args: unknown[]) => {
-    pushLog(args)
+    pushLog(['!', ...args])
   }
   console.error = (...args: unknown[]) => {
-    pushLog(args)
+    pushLog(['x', ...args])
   }
 
   let running = true
@@ -88,7 +88,7 @@ export async function runActionPanel<T>(
 
   const render = (): void => {
     const rows = process.stdout.rows ?? 24
-    const availableLogRows = Math.max(0, rows - 4)
+    const availableLogRows = Math.max(8, rows - 8);
     const spinner = running
       ? SPINNER_FRAMES[frame % SPINNER_FRAMES.length]
       : failed
