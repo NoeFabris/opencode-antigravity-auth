@@ -3118,7 +3118,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
               } catch (error) {
                 const reason = error instanceof Error ? error.message : String(error);
                 const lockPath = `${getStoragePath()}.lock`;
-                const isLockError = /ELOCKED|EEXIST/i.test(reason);
+                const errorCode = (
+                  typeof error === "object" &&
+                  error !== null &&
+                  "code" in error &&
+                  typeof (error as { code?: unknown }).code === "string"
+                )
+                  ? (error as { code: string }).code
+                  : undefined;
+                const isLockError =
+                  errorCode === "ELOCKED" ||
+                  errorCode === "EEXIST" ||
+                  /ELOCKED|EEXIST/i.test(reason);
                 const lockGuidance = isLockError
                   ? ` Storage lock at ${lockPath} may be held by another process (lock directory). ` +
                     `Retry after current operation finishes. If the lock persists and ${lockPath} exists as a file, remove that file and retry.`
