@@ -106,6 +106,23 @@ describe('action-panel', () => {
       expect(hasAltScreenOff).toBe(true)
     })
 
+    it('cleanup writes clearScreen after altScreenOff (codex-multi-auth pattern)', async () => {
+      mockIsTTY.mockReturnValue(true)
+      const action = vi.fn().mockResolvedValue('ok')
+
+      const promise = runActionPanel('Title', 'Stage', action, { autoReturnMs: 0 })
+      await vi.advanceTimersByTimeAsync(500)
+      await promise
+
+      // The final cleanup write should contain altScreenOff + show + clearScreen + moveTo
+      const allWrites = writeSpy.mock.calls.map(c => String(c[0]))
+      const lastWrite = allWrites[allWrites.length - 1] ?? ''
+      expect(lastWrite).toContain('\x1b[?1049l') // altScreenOff
+      expect(lastWrite).toContain('\x1b[?25h')   // show cursor
+      expect(lastWrite).toContain('\x1b[2J')      // clearScreen
+      expect(lastWrite).toContain('\x1b[1;1H')    // moveTo(1,1)
+    })
+
     it('captures console.log during action', async () => {
       mockIsTTY.mockReturnValue(true)
       const originalLog = console.log
