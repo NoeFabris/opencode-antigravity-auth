@@ -217,16 +217,28 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     const focusStyle = options.focusStyle ?? 'row-invert';
     let didFullClear = false;
 
-    if (options.clearScreen && !hasRendered) {
-      stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
-      didFullClear = true;
-    } else if (previousRenderedLines > 0) {
-      stdout.write(ANSI.up(previousRenderedLines));
+    // For clearScreen menus, buffer all output and flush atomically.
+    // This prevents both flicker (single write) and title-repeat
+    // (full clear included in the same write, so the screen never shows
+    // stale content even when content exceeds terminal height).
+    const useBuffer = Boolean(options.clearScreen);
+    const buffer: string[] = [];
+
+    if (!useBuffer) {
+      if (previousRenderedLines > 0) {
+        stdout.write(ANSI.up(previousRenderedLines));
+      }
     }
 
     let linesWritten = 0;
     const writeLine = (line: string) => {
-      stdout.write(`${ANSI.clearLine}${line}\n`);
+      if (useBuffer) {
+        buffer.push(`${ANSI.clearLine}${line}
+`);
+      } else {
+        stdout.write(`${ANSI.clearLine}${line}
+`);
+      }
       linesWritten += 1;
     };
 
@@ -328,7 +340,11 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     writeLine(` ${muted}${truncateAnsi(helpText, Math.max(1, columns - 2))}${reset}`);
     writeLine(`${border}+${reset}`);
 
-    if (!didFullClear && previousRenderedLines > linesWritten) {
+    if (useBuffer) {
+      // Atomic flush: clearScreen + moveTo + entire frame in one write
+      stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1) + buffer.join(''));
+      didFullClear = true;
+    } else if (previousRenderedLines > linesWritten) {
       const extra = previousRenderedLines - linesWritten;
       for (let i = 0; i < extra; i += 1) {
         writeLine('');
