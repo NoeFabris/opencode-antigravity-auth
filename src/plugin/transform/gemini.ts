@@ -187,38 +187,118 @@ export function buildGemini25ThinkingConfig(
  * Image generation config for Gemini image models.
  * 
  * Supported aspect ratios: "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"
+ * Supported image sizes: "1K" (default), "2K", "4K"
+ *   - "0.5K" (512px) is only supported by gemini-3.1-flash-image
+ *   - Values MUST use uppercase "K" (e.g., "2K" not "2k")
  */
 export interface ImageConfig {
   aspectRatio?: string;
+  imageSize?: string;
 }
 
 /**
- * Valid aspect ratios for image generation.
+ * Valid aspect ratios for image models (shared baseline).
  */
-const VALID_ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+const VALID_ASPECT_RATIOS_BASE = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+
+/**
+ * Valid aspect ratios for flash image models (gemini-3.1-flash-image).
+ * Includes base ratios plus extended ratios (4:1, 8:1).
+ */
+const VALID_ASPECT_RATIOS_FLASH = [...VALID_ASPECT_RATIOS_BASE, "4:1", "8:1"]
+
+/**
+ * Valid image sizes for image models (shared baseline).
+ * Must use uppercase K (e.g., "1K" not "1k").
+ */
+const VALID_IMAGE_SIZES_BASE = ["1K", "2K", "4K"]
+
+/**
+ * Valid image sizes for flash image models.
+ * Includes 0.5K (512px) which is flash-only.
+ */
+const VALID_IMAGE_SIZES_FLASH = ["0.5K", "1K", "2K", "4K"]
+
+/**
+ * Get valid aspect ratios for a given model.
+ */
+export function getValidAspectRatios(model?: string): string[] {
+  if (model && isFlashImageModel(model)) {
+    return VALID_ASPECT_RATIOS_FLASH
+  }
+  return VALID_ASPECT_RATIOS_BASE
+}
+
+/**
+ * Get valid image sizes for a given model.
+ */
+export function getValidImageSizes(model?: string): string[] {
+  if (model && isFlashImageModel(model)) {
+    return VALID_IMAGE_SIZES_FLASH
+  }
+  return VALID_IMAGE_SIZES_BASE
+}
+
+/**
+ * Check if a model is a flash-based image model (supports 0.5K and thinking).
+ */
+export function isFlashImageModel(model: string): boolean {
+  return /flash.*image|image.*flash/i.test(model);
+}
+
+/**
+ * Options for building image generation config.
+ * Prompt flag overrides take priority over environment variables.
+ */
+export interface ImageConfigOverrides {
+  /** Override aspect ratio from prompt flags (e.g., --aspect-ratio=16:9) */
+  aspectRatio?: string
+  /** Override image size from prompt flags (e.g., --resolution=4K) */
+  imageSize?: string
+}
 
 /**
  * Build image generation config for Gemini image models.
  * 
- * Configuration is read from environment variables:
- * - OPENCODE_IMAGE_ASPECT_RATIO: Aspect ratio (e.g., "16:9", "4:3")
+ * Priority order (highest to lowest):
+ * 1. Prompt flag overrides (--resolution, --aspect-ratio)
+ * 2. Environment variables (OPENCODE_IMAGE_ASPECT_RATIO, OPENCODE_IMAGE_SIZE)
+ * 3. Defaults (1:1 aspect ratio, API default 1K image size)
  * 
- * Defaults to 1:1 aspect ratio if not specified.
- * 
- * Note: Resolution setting is not currently supported by the Antigravity API.
+ * @param model - The model name, used to select valid aspect ratios and image sizes
+ * @param overrides - Optional overrides from prompt flag parsing
  */
-export function buildImageGenerationConfig(): ImageConfig {
-  // Read aspect ratio from environment or default to 1:1
-  const aspectRatio = process.env.OPENCODE_IMAGE_ASPECT_RATIO || "1:1";
+export function buildImageGenerationConfig(model?: string, overrides?: ImageConfigOverrides): ImageConfig {
+  const config: ImageConfig = {}
+  const validAspectRatios = getValidAspectRatios(model)
+  const validImageSizes = getValidImageSizes(model)
 
-  if (VALID_ASPECT_RATIOS.includes(aspectRatio)) {
-    return { aspectRatio };
+  // Resolve aspect ratio: overrides > env var > default "1:1"
+  const aspectRatio = overrides?.aspectRatio || process.env.OPENCODE_IMAGE_ASPECT_RATIO || "1:1"
+  if (validAspectRatios.includes(aspectRatio)) {
+    config.aspectRatio = aspectRatio
+  } else {
+    console.warn(`[gemini] Invalid aspect ratio "${aspectRatio}" for model "${model || "unknown"}". Using default "1:1". Valid values: ${validAspectRatios.join(", ")}`)
+    config.aspectRatio = "1:1"
   }
 
-  console.warn(`[gemini] Invalid aspect ratio "${aspectRatio}". Using default "1:1". Valid values: ${VALID_ASPECT_RATIOS.join(", ")}`);
+  // Resolve image size: overrides > env var > not set (API default 1K)
+  const imageSize = overrides?.imageSize || process.env.OPENCODE_IMAGE_SIZE
+  if (imageSize) {
+    // Validate uppercase K requirement
+    if (/^\d+(\.\d+)?k$/i.test(imageSize) && imageSize !== imageSize.replace(/k$/i, "K")) {
+      console.warn(`[gemini] imageSize must use uppercase "K" (e.g., "2K" not "2k"). Got "${imageSize}". Correcting to "${imageSize.toUpperCase()}".`)
+    }
+    const normalized = imageSize.toUpperCase()
 
-  // Default to 1:1 square aspect ratio
-  return { aspectRatio: "1:1" };
+    if (!validImageSizes.includes(normalized)) {
+      console.warn(`[gemini] Invalid imageSize "${imageSize}" for model "${model || "unknown"}". Ignoring. Valid values: ${validImageSizes.join(", ")}`)
+    } else {
+      config.imageSize = normalized
+    }
+  }
+
+  return config
 }
 
 /**

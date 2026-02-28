@@ -54,7 +54,8 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-claude-opus-4-6-thinking-high": "claude-opus-4-6-thinking",
   "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
 
-  // Image generation models - only gemini-3-pro-image is available via Antigravity API
+  // Image generation models - gemini-3.1-flash-image is available via Antigravity API
+  // Note: gemini-3-pro-image was removed by Google from Antigravity
   // Note: gemini-2.5-flash-image (Nano Banana) is NOT supported by Antigravity - only Google AI API
   // Reference: Antigravity-Manager/src-tauri/src/proxy/common/model_mapping.rs
 };
@@ -68,9 +69,17 @@ const GEMINI_3_FLASH_REGEX = /^gemini-3(?:\.\d+)?-flash/i;
 
 /**
  * Image generation models - always route to Antigravity.
- * These models don't support thinking and require imageConfig.
+ * These models require imageConfig.
+ * Note: Flash image models (gemini-3.1-flash-image) DO support thinking (minimal/high).
  */
 const IMAGE_GENERATION_MODELS = /image|imagen/i;
+
+/**
+ * Flash-based image models that support thinking levels (minimal, high).
+ * These use thinkingLevel in addition to imageConfig.
+ * Pro image models have been removed by Google from Antigravity.
+ */
+const FLASH_IMAGE_MODEL = /flash.*image|image.*flash/i;
 
 // Legacy LEGACY_ANTIGRAVITY_GEMINI3 regex removed - all Gemini models now default to antigravity
 
@@ -200,8 +209,28 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 
   const isThinking = isThinkingCapableModel(resolvedModel);
 
-  // Image generation models don't support thinking - return early without thinking config
+  // Image generation models require imageConfig.
+  // Flash image models (gemini-3.1-flash-image) DO support thinking (minimal/high).
+  // Pro image models (gemini-3-pro-image) do NOT support thinking.
   if (isImageModel) {
+    const isFlashImage = FLASH_IMAGE_MODEL.test(modelWithoutQuota);
+
+    // Flash image models support thinking with minimal (default) and high levels
+    // Non-flash image models are no longer supported (gemini-3-pro-image removed by Google)
+    if (isFlashImage) {
+      const flashImageThinkingLevel = tier === "high" ? "high" : "minimal";
+      return {
+        actualModel: resolvedModel,
+        isThinkingModel: true,
+        isImageModel: true,
+        thinkingLevel: flashImageThinkingLevel,
+        ...(tier ? { tier } : {}),
+        quotaPreference,
+        explicitQuota,
+      };
+    }
+
+    // Fallback for any other image model patterns (e.g., imagen)
     return {
       actualModel: resolvedModel,
       isThinkingModel: false,

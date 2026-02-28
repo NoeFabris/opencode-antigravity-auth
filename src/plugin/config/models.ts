@@ -67,6 +67,18 @@ export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
       high: { thinkingLevel: "high" },
     },
   },
+  "antigravity-gemini-3.1-flash-image": {
+    name: "Gemini 3.1 Flash Image (Antigravity)",
+    limit: { context: 131072, output: 32768 },
+    modalities: {
+      input: ["text", "image", "pdf"],
+      output: ["text", "image"],
+    },
+    variants: {
+      minimal: { thinkingLevel: "minimal" },
+      high: { thinkingLevel: "high" },
+    },
+  },
   "antigravity-claude-sonnet-4-6": {
     name: "Claude Sonnet 4.6 (Antigravity)",
     limit: { context: 200000, output: 64000 },

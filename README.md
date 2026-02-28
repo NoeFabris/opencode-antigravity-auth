@@ -122,6 +122,7 @@ opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --varia
 | `antigravity-gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
 | `antigravity-claude-sonnet-4-6` | — | Claude Sonnet 4.6 |
 | `antigravity-claude-opus-4-6-thinking` | low, max | Claude Opus 4.6 with extended thinking |
+| `antigravity-gemini-3.1-flash-image` | minimal, high | Gemini 3.1 Flash image generation |
 
 **Gemini CLI quota** (separate from Antigravity; used when `cli_first` is true or as fallback):
 
@@ -147,6 +148,30 @@ opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --varia
 ```
 
 For details on variant configuration and thinking levels, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
+
+**Image generation:**
+
+Select an image model and include your prompt. Images are saved to `./nanobanana/` in your project directory.
+
+```bash
+opencode run "a realistic animal sitting by a window, soft streetlight, bokeh" --model=google/antigravity-gemini-3.1-flash-image
+```
+
+Use `--resolution` and `--aspect-ratio` flags inline to override defaults:
+
+```bash
+# 4K resolution with 16:9 aspect ratio
+opencode run "mountain landscape --resolution=4K --aspect-ratio=16:9" --model=google/antigravity-gemini-3.1-flash-image
+```
+
+Flags are stripped from the prompt before sending to Gemini. Defaults can also be set via environment variables:
+
+| Flag / Env Var | Values | Default |
+|----------------|--------|---------|
+| `--resolution` / `OPENCODE_IMAGE_SIZE` | `0.5K`\*, `1K`, `2K`, `4K` | `1K` |
+| `--aspect-ratio` / `OPENCODE_IMAGE_ASPECT_RATIO` | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`, `4:1`\*, `8:1`\* | `1:1` |
+
+\* `0.5K` and extended aspect ratios (`4:1`, `8:1`) are only supported by `gemini-3.1-flash-image`.
 
 <details>
 <summary><b>Full models configuration (copy-paste ready)</b></summary>
@@ -201,6 +226,15 @@ Add this to your `~/.config/opencode/opencode.json`:
           "variants": {
             "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
             "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "antigravity-gemini-3.1-flash-image": {
+          "name": "Gemini 3.1 Flash Image (Antigravity)",
+          "limit": { "context": 131072, "output": 32768 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text", "image"] },
+          "variants": {
+            "minimal": { "thinkingLevel": "minimal" },
+            "high": { "thinkingLevel": "high" }
           }
         },
         "gemini-2.5-flash": {

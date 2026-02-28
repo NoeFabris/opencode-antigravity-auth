@@ -2,19 +2,18 @@
  * Image Saving Utility
  * 
  * Handles saving generated images to disk and returning file paths.
+ * Images are saved to ./nanobanana/ relative to the current working directory.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
 /**
  * Default directory for saving generated images.
- * Uses ~/.opencode/generated-images/
+ * Uses ./nanobanana/ relative to the current working directory (process.cwd()).
  */
 function getImageOutputDir(): string {
-  const homeDir = os.homedir();
-  const outputDir = path.join(homeDir, '.opencode', 'generated-images');
+  const outputDir = path.join(process.cwd(), 'nanobanana');
   
   // Create directory if it doesn't exist
   if (!fs.existsSync(outputDir)) {

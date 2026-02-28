@@ -79,7 +79,7 @@ describe("resolveModelWithTier", () => {
     });
 
     it("keeps antigravity for image models when cli_first is true", () => {
-      const result = resolveModelWithTier("gemini-3-pro-image", { cli_first: true });
+      const result = resolveModelWithTier("gemini-3.1-flash-image", { cli_first: true });
       expect(result.quotaPreference).toBe("antigravity");
       expect(result.explicitQuota).toBe(true);
     });
@@ -155,20 +155,38 @@ describe("resolveModelWithTier", () => {
   });
 
   describe("Image models", () => {
-    it("marks antigravity-gemini-3-pro-image as explicit quota", () => {
-      const result = resolveModelWithTier("antigravity-gemini-3-pro-image");
-      expect(result.actualModel).toBe("gemini-3-pro-image");
+    it("marks gemini-3.1-flash-image as thinking-capable image model", () => {
+      const result = resolveModelWithTier("gemini-3.1-flash-image");
+      expect(result.actualModel).toBe("gemini-3.1-flash-image");
       expect(result.isImageModel).toBe(true);
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.thinkingLevel).toBe("minimal");
       expect(result.explicitQuota).toBe(true);
-      expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("marks gemini-3-pro-image as explicit quota", () => {
-      const result = resolveModelWithTier("gemini-3-pro-image");
-      expect(result.actualModel).toBe("gemini-3-pro-image");
+    it("flash-image with -high tier gets high thinkingLevel", () => {
+      const result = resolveModelWithTier("gemini-3.1-flash-image-high");
+      expect(result.actualModel).toBe("gemini-3.1-flash-image");
       expect(result.isImageModel).toBe(true);
-      expect(result.explicitQuota).toBe(true);
-      expect(result.quotaPreference).toBe("antigravity");
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.thinkingLevel).toBe("high");
+      expect(result.tier).toBe("high");
+    });
+
+    it("flash-image with -minimal tier gets minimal thinkingLevel", () => {
+      const result = resolveModelWithTier("gemini-3.1-flash-image-minimal");
+      expect(result.actualModel).toBe("gemini-3.1-flash-image");
+      expect(result.isImageModel).toBe(true);
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.thinkingLevel).toBe("minimal");
+    });
+
+    it("antigravity-gemini-3.1-flash-image defaults to minimal thinking", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3.1-flash-image");
+      expect(result.actualModel).toBe("gemini-3.1-flash-image");
+      expect(result.isImageModel).toBe(true);
+      expect(result.isThinkingModel).toBe(true);
+      expect(result.thinkingLevel).toBe("minimal");
     });
   });
 });

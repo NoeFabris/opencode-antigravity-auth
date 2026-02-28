@@ -1163,18 +1163,18 @@ describe("AccountManager", () => {
       const manager = new AccountManager(undefined, stored);
       const account = manager.getCurrentOrNextForFamily("gemini");
 
-      manager.markRateLimited(account!, 30000, "gemini", "antigravity", "gemini-3-pro-image");
+      manager.markRateLimited(account!, 30000, "gemini", "antigravity", "gemini-3.1-flash-image");
 
       expect(
         manager.getMinWaitTimeForFamily(
           "gemini",
-          "gemini-3-pro-image",
+          "gemini-3.1-flash-image",
           "antigravity",
           true,
         ),
       ).toBe(30000);
 
-      expect(manager.getMinWaitTimeForFamily("gemini", "gemini-3-pro-image")).toBe(0);
+      expect(manager.getMinWaitTimeForFamily("gemini", "gemini-3.1-flash-image")).toBe(0);
     });
 
     describe("parseRateLimitReason", () => {
