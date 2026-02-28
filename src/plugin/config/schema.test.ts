@@ -11,7 +11,12 @@ describe("cli_first config", () => {
   it("documents cli_first in the JSON schema", () => {
     const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
     const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
-      properties?: Record<string, { type?: string; default?: unknown; description?: string }>;
+      properties?: Record<string, {
+        type?: string
+        default?: unknown
+        description?: string
+        minLength?: number
+      }>;
     };
 
     const cliFirst = schema.properties?.cli_first;
@@ -80,6 +85,7 @@ describe("claude_long_context_beta config", () => {
     expect(claudeLongContextBetaHeader).toMatchObject({
       type: "string",
       default: "context-1m-2025-08-07",
+      minLength: 1,
     });
     expect(typeof claudeLongContextBetaHeader?.description).toBe("string");
     expect(claudeLongContextBetaHeader?.description?.length ?? 0).toBeGreaterThan(0);

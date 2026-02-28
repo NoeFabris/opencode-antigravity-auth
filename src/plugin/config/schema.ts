@@ -242,7 +242,7 @@ export const AntigravityConfigSchema = z.object({
    *
    * @default "context-1m-2025-08-07"
    */
-  claude_long_context_beta_header: z.string().min(1).default("context-1m-2025-08-07"),
+  claude_long_context_beta_header: z.string().trim().min(1).default("context-1m-2025-08-07"),
   
   // =========================================================================
   // Proactive Token Refresh (ported from LLM-API-Key-Proxy)

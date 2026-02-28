@@ -51,6 +51,7 @@ import { checkAccountsQuota } from "./plugin/quota";
 import { initDiskSignatureCache } from "./plugin/cache";
 import { createProactiveRefreshQueue, type ProactiveRefreshQueue } from "./plugin/refresh-queue";
 import { initLogger, createLogger } from "./plugin/logger";
+import { scrubTextForLog } from "./plugin/logging-utils";
 import { initHealthTracker, getHealthTracker, initTokenTracker, getTokenTracker } from "./plugin/rotation";
 import { initAntigravityVersion } from "./plugin/version";
 import { executeSearch } from "./plugin/search";
@@ -68,6 +69,7 @@ const MAX_OAUTH_ACCOUNTS = 10;
 const MAX_WARMUP_SESSIONS = 1000;
 const MAX_WARMUP_RETRIES = 2;
 const CAPACITY_BACKOFF_TIERS_MS = [5000, 10000, 20000, 30000, 60000];
+const CLAUDE_LONG_CONTEXT_REJECTION_REASON_MAX_CHARS = 240;
 
 function getCapacityBackoffDelay(consecutiveFailures: number): number {
   const index = Math.min(consecutiveFailures, CAPACITY_BACKOFF_TIERS_MS.length - 1);
@@ -2376,7 +2378,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       );
                     }
 
-                    const reasonPreview = errorBodyText.replace(/\s+/g, " ").slice(0, 240);
+                    const reasonPreview = scrubTextForLog(
+                      errorBodyText,
+                      CLAUDE_LONG_CONTEXT_REJECTION_REASON_MAX_CHARS,
+                    );
                     pushDebug(
                       `claude-long-context-beta rejected status=${response.status} header=${prepared.claudeLongContextBetaHeader ?? "unknown"} reason=${reasonPreview}`,
                     );

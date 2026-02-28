@@ -103,6 +103,16 @@ describe("request.ts", () => {
       expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(true);
     });
 
+    it("returns true for 403 unsupported anthropic-beta long-context errors", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(403, body)).toBe(true);
+    });
+
     it("returns false for unrelated context length errors", () => {
       const body = JSON.stringify({
         error: {

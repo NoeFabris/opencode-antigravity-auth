@@ -5,6 +5,7 @@ import {
   formatAccountLabel,
   formatBodyPreviewForLog,
   formatErrorForLog,
+  scrubTextForLog,
   truncateTextForLog,
   writeConsoleLog,
 } from "./logging-utils"
@@ -66,6 +67,24 @@ describe("format helpers", () => {
     expect(formatBodyPreviewForLog("abcdef", 3)).toBe("abc... (truncated 3 chars)")
     expect(formatBodyPreviewForLog(new URLSearchParams({ q: "value" }), 100)).toBe("q=value")
     expect(formatBodyPreviewForLog(new Uint8Array([1, 2]), 100)).toBe("[Uint8Array payload omitted]")
+  })
+
+  it("scrubs sensitive values from error previews", () => {
+    const raw = "token=abc123 email=user@example.com authorization: Bearer abcdef1234567890abcdef1234567890 card=4242 4242 4242 4242"
+    const scrubbed = scrubTextForLog(raw, 500)
+
+    expect(scrubbed).toContain("token=[redacted]")
+    expect(scrubbed).toContain("email=[redacted-email]")
+    expect(scrubbed).toContain("authorization: [redacted]")
+    expect(scrubbed).toContain("card=[redacted-card]")
+    expect(scrubbed).not.toContain("user@example.com")
+    expect(scrubbed).not.toContain("abcdef1234567890abcdef1234567890")
+  })
+
+  it("normalizes and truncates scrubbed text", () => {
+    const raw = "  a    b    c  "
+    expect(scrubTextForLog(raw, 5)).toBe("a b c")
+    expect(scrubTextForLog("x".repeat(20), 5)).toBe("xxxxx... (truncated 15 chars)")
   })
 })
 
