@@ -111,11 +111,6 @@ describe("resolveModelWithTier", () => {
       expect(result.thinkingLevel).toBe("medium");
     });
 
-    it("antigravity-gemini-3.1-pro uses bare model name (no -low suffix)", () => {
-      const result = resolveModelWithTier("antigravity-gemini-3.1-pro");
-      expect(result.actualModel).toBe("gemini-3.1-pro");
-      expect(result.thinkingLevel).toBe("low");
-    });
   });
 
   describe("Issue #510: Gemini 3.1 Pro uses bare name (no tier suffix)", () => {
