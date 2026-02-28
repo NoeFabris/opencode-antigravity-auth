@@ -70,7 +70,7 @@ describe("format helpers", () => {
   })
 
   it("scrubs sensitive values from error previews", () => {
-    const raw = "token=abc123 email=user@example.com authorization: Bearer abcdef1234567890abcdef1234567890 card=4242 4242 4242 4242"
+    const raw = "token=abc123 email=user@example.com authorization: Bearer abc123 card=4242 4242 4242 4242"
     const scrubbed = scrubTextForLog(raw, 500)
 
     expect(scrubbed).toContain("token=[redacted]")
@@ -78,7 +78,8 @@ describe("format helpers", () => {
     expect(scrubbed).toContain("authorization: [redacted]")
     expect(scrubbed).toContain("card=[redacted-card]")
     expect(scrubbed).not.toContain("user@example.com")
-    expect(scrubbed).not.toContain("abcdef1234567890abcdef1234567890")
+    expect(scrubbed).not.toContain("Bearer")
+    expect(scrubbed).not.toContain("abc123")
   })
 
   it("normalizes and truncates scrubbed text", () => {

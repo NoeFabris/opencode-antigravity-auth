@@ -84,7 +84,10 @@ export function scrubTextForLog(text: string, maxChars: number): string {
 
   const scrubbed = normalized
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
-    .replace(/(\b(?:authorization|api[_-]?key|token|secret|password)\b\s*[:=]\s*)([^\s,;]+)/gi, "$1[redacted]")
+    .replace(
+      /(\b(?:authorization|api[_-]?key|token|secret|password)\b\s*[:=]\s*["']?)(?:(?:bearer|basic)\s+)?[^"\s,;]+/gi,
+      "$1[redacted]",
+    )
     .replace(/\b[a-f0-9]{32,}\b/gi, "[redacted-hex]")
     .replace(/\b(?:\d[ -]*?){13,19}\b/g, "[redacted-card]")
     .replace(/\b[A-Za-z0-9+/=_-]{40,}\b/g, "[redacted-token]")
