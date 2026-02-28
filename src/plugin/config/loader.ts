@@ -8,8 +8,8 @@
  * 3. Project config file
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { AntigravityConfigSchema, DEFAULT_CONFIG, type AntigravityConfig } from "./schema";
 import { createLogger } from "../logger";
@@ -151,6 +151,28 @@ export function configExists(path: string): boolean {
  */
 export function getDefaultLogsDir(): string {
   return join(getConfigDir(), "antigravity-logs");
+}
+
+/**
+ * Save partial config to the user-level antigravity.json.
+ * Merges with existing config, preserving fields not in the update.
+ */
+export function saveUserConfig(update: Partial<AntigravityConfig>): void {
+  const path = getUserConfigPath();
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    let existing: Record<string, unknown> = {};
+    try {
+      const content = readFileSync(path, "utf-8");
+      existing = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      // File doesn't exist or invalid JSON — start fresh
+    }
+    const merged = { ...existing, ...update };
+    writeFileSync(path, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+  } catch (error) {
+    log.warn("Failed to save user config", { path, error: String(error) });
+  }
 }
 
 let runtimeConfig: AntigravityConfig | null = null;

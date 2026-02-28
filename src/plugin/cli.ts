@@ -8,6 +8,9 @@ import {
   type AccountStatus,
 } from "./ui/auth-menu";
 import { updateOpencodeConfig } from "./config/updater";
+import { showSettingsMenu } from "./ui/settings-menu";
+import { runActionPanel } from "./ui/action-panel";
+import { initUiFromConfig } from "./ui/runtime";
 
 export async function promptProjectId(): Promise<string> {
   const rl = createInterface({ input, output });
@@ -40,6 +43,12 @@ export interface ExistingAccountInfo {
   status?: AccountStatus;
   isCurrentAccount?: boolean;
   enabled?: boolean;
+  quota5hLeftPercent?: number;
+  quota7dLeftPercent?: number;
+  quota5hResetAtMs?: number;
+  quota7dResetAtMs?: number;
+  quotaRateLimited?: boolean;
+  quotaSummary?: string;
 }
 
 export interface LoginMenuResult {
@@ -103,6 +112,12 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
     status: acc.status,
     isCurrentAccount: acc.isCurrentAccount,
     enabled: acc.enabled,
+    quota5hLeftPercent: acc.quota5hLeftPercent,
+    quota7dLeftPercent: acc.quota7dLeftPercent,
+    quota5hResetAtMs: acc.quota5hResetAtMs,
+    quota7dResetAtMs: acc.quota7dResetAtMs,
+    quotaRateLimited: acc.quotaRateLimited,
+    quotaSummary: acc.quotaSummary,
   }));
 
   console.log("");
@@ -159,17 +174,31 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         return { mode: "add", deleteAccountIndex: action.account.index };
 
       case "settings":
+        await showSettingsMenu();
         continue;
 
       case "search":
         continue;
 
       case "configure-models": {
-        const result = await updateOpencodeConfig();
-        if (result.success) {
-          console.log(`\n✓ Models configured in ${result.configPath}\n`);
-        } else {
-          console.log(`\n✗ Failed to configure models: ${result.error}\n`);
+        try {
+          const result = await runActionPanel(
+            "Configure Models",
+            "Updating opencode.json...",
+            async () => updateOpencodeConfig(),
+            { autoReturnMs: 3000 },
+          );
+          if (result.success) {
+            console.log(`
+✓ Models configured in ${result.configPath}
+`);
+          } else {
+            console.log(`
+✗ Failed to configure models: ${result.error}
+`);
+          }
+        } catch {
+          // Action panel handles error display
         }
         continue;
       }

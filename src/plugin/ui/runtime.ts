@@ -51,6 +51,21 @@ export function getUiRuntimeOptions(): UiRuntimeOptions {
   return runtimeOptions;
 }
 
+export function initUiFromConfig(config?: {
+  color_profile?: string;
+  glyph_mode?: string;
+  palette?: string;
+  accent?: string;
+}): UiRuntimeOptions {
+  if (!config) return runtimeOptions;
+  return setUiRuntimeOptions({
+    colorProfile: (config.color_profile as UiColorProfile) ?? runtimeOptions.colorProfile,
+    glyphMode: (config.glyph_mode as UiGlyphMode) ?? runtimeOptions.glyphMode,
+    palette: (config.palette as UiPalette) ?? runtimeOptions.palette,
+    accent: (config.accent as UiAccent) ?? runtimeOptions.accent,
+  });
+}
+
 export function resetUiRuntimeOptions(): UiRuntimeOptions {
   runtimeOptions = { ...DEFAULT_OPTIONS };
   return runtimeOptions;

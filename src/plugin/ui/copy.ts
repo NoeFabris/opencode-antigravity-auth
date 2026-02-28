@@ -55,10 +55,19 @@ export const UI_COPY = {
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Customize menu and behavior',
+    subtitle: 'Customize theme and behavior',
     help: '↑↓ Move | Enter Select | Q Back',
     exitTitle: 'Back',
-    placeholder: 'More settings coming soon',
+    colorProfile: 'Color Profile',
+    colorProfileHint: 'Terminal color depth: ansi16, ansi256, or truecolor',
+    glyphMode: 'Glyph Mode',
+    glyphModeHint: 'Character set: ascii, unicode, or auto-detect',
+    palette: 'Color Palette',
+    paletteHint: 'Base color scheme: green or blue',
+    accent: 'Accent Color',
+    accentHint: 'Highlight color: green, cyan, blue, or yellow',
+    saved: 'Settings saved.',
+    unchanged: 'No changes.',
   },
 } as const;
 
