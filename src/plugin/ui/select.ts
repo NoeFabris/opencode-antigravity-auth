@@ -218,9 +218,10 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     let didFullClear = false;
 
     // For clearScreen menus, buffer all output and flush atomically.
-    // This prevents both flicker (single write) and title-repeat
-    // (full clear included in the same write, so the screen never shows
-    // stale content even when content exceeds terminal height).
+    // First render: clearScreen + moveTo(1,1) for a clean slate.
+    // Re-renders: moveTo(1,1) + overwrite lines + clearBelow.
+    // NEVER use clearScreen on re-renders — on Windows it pushes content
+    // into scrollback instead of erasing, causing title-repeat.
     const useBuffer = Boolean(options.clearScreen);
     const buffer: string[] = [];
 
@@ -233,11 +234,9 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     let linesWritten = 0;
     const writeLine = (line: string) => {
       if (useBuffer) {
-        buffer.push(`${ANSI.clearLine}${line}
-`);
+        buffer.push(ANSI.clearLine + line + '\n');
       } else {
-        stdout.write(`${ANSI.clearLine}${line}
-`);
+        stdout.write(ANSI.clearLine + line + '\n');
       }
       linesWritten += 1;
     };
@@ -336,13 +335,19 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
 
     const windowHint = items.length > visibleItems.length ? ` (${windowStart + 1}-${windowEnd}/${items.length})` : '';
     const backLabel = 'Q Back';
-    const helpText = options.help ?? `↑↓ Move | Enter Select | ${backLabel}${windowHint}`;
+    const helpText = options.help ?? `\u2191\u2193 Move | Enter Select | ${backLabel}${windowHint}`;
     writeLine(` ${muted}${truncateAnsi(helpText, Math.max(1, columns - 2))}${reset}`);
     writeLine(`${border}+${reset}`);
 
     if (useBuffer) {
-      // Atomic flush: clearScreen + moveTo + entire frame in one write
-      stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1) + buffer.join(''));
+      // First render: clearScreen + moveTo for a clean slate.
+      // Re-renders: moveTo(1,1) only — NEVER clearScreen again.
+      // clearScreen on Windows pushes content to scrollback, causing title-repeat.
+      // clearBelow erases leftover lines without scrollback side effects.
+      const prefix = hasRendered
+        ? ANSI.moveTo(1, 1)
+        : ANSI.clearScreen + ANSI.moveTo(1, 1);
+      stdout.write(prefix + buffer.join('') + ANSI.clearBelow);
       didFullClear = true;
     } else if (previousRenderedLines > linesWritten) {
       const extra = previousRenderedLines - linesWritten;

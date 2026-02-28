@@ -13,6 +13,7 @@ export const ANSI = {
   down: (n = 1) => `\x1b[${n}B`,
   clearLine: '\x1b[2K',
   clearScreen: '\x1b[2J',
+  clearBelow: '\x1b[J',
   moveTo: (row: number, col: number) => `\x1b[${row};${col}H`,
   
   // Styles
