@@ -2771,12 +2771,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                 if (menuResult.mode === "manage") {
                   if (menuResult.toggleAccountIndex !== undefined) {
-                    const acc = existingStorage.accounts[menuResult.toggleAccountIndex];
+                    const toggleIdx = menuResult.toggleAccountIndex;
+                    const acc = existingStorage.accounts[toggleIdx];
                     if (acc) {
-                      acc.enabled = acc.enabled === false;
-                      await saveAccounts(existingStorage);
-                      activeAccountManager?.setAccountEnabled(menuResult.toggleAccountIndex, acc.enabled);
-                      console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
+                      await runActionPanel("Applying Change", "Updating account...", async () => {
+                        acc.enabled = acc.enabled === false;
+                        await saveAccounts(existingStorage);
+                        activeAccountManager?.setAccountEnabled(toggleIdx, acc.enabled);
+                        console.log(`Account ${acc.email || toggleIdx + 1} ${acc.enabled ? 'enabled' : 'disabled'}.`);
+                      });
                     }
                   }
                   continue;
