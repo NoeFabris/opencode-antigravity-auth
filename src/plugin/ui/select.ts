@@ -340,14 +340,9 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     writeLine(`${border}+${reset}`);
 
     if (useBuffer) {
-      // First render: clearScreen + moveTo for a clean slate.
-      // Re-renders: moveTo(1,1) only — NEVER clearScreen again.
-      // clearScreen on Windows pushes content to scrollback, causing title-repeat.
-      // clearBelow erases leftover lines without scrollback side effects.
-      const prefix = hasRendered
-        ? ANSI.moveTo(1, 1)
-        : ANSI.clearScreen + ANSI.moveTo(1, 1);
-      stdout.write(prefix + buffer.join('') + ANSI.clearBelow);
+      // Alt screen has no scrollback — moveTo(1,1) is always absolute.
+      // Every render: reposition to top-left, overwrite, clear leftovers.
+      stdout.write(ANSI.moveTo(1, 1) + buffer.join('') + ANSI.clearBelow);
       didFullClear = true;
     } else if (previousRenderedLines > linesWritten) {
       const extra = previousRenderedLines - linesWritten;
@@ -382,6 +377,9 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
           refreshTimer = null;
         }
         stdout.write(ANSI.show);
+        if (options.clearScreen) {
+          stdout.write(ANSI.altScreenOff);
+        }
       } catch {
         // best effort cleanup
       }
@@ -498,6 +496,9 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     stdin.resume();
     drainStdinBuffer();
     inputGuardUntil = Date.now() + 120;
+    if (options.clearScreen) {
+      stdout.write(ANSI.altScreenOn);
+    }
     stdout.write(ANSI.hide);
     notifyCursorChange();
     render();
