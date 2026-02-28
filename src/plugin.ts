@@ -39,7 +39,7 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
+import { clearAccounts, getStoragePath, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
@@ -3115,7 +3115,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   const isFirstAccount = accounts.length === 1;
                   await persistAccountPool([result], isFirstAccount && startFresh);
                 }
-              } catch {
+              } catch (error) {
+                const reason = error instanceof Error ? error.message : String(error);
+                const lockPath = `${getStoragePath()}.lock`;
+                const accountPersistenceWarning =
+                  `failed to persist account data (${reason}). ` +
+                  `Check and remove stale lock file if needed: ${lockPath}`;
+                console.warn(`[opencode-antigravity-auth] ${accountPersistenceWarning}`);
               }
 
               if (refreshAccountIndex !== undefined) {
@@ -3130,11 +3136,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
               let currentAccountCount = accounts.length;
               try {
                 const currentStorage = await loadAccounts();
-                if (currentStorage) {
+                if (currentStorage && currentStorage.accounts.length > 0) {
                   currentAccountCount = currentStorage.accounts.length;
                 }
               } catch {
                 // Fall back to accounts.length if we can't read storage
+              }
+              if (currentAccountCount <= 0 && accounts.length > 0) {
+                currentAccountCount = accounts.length;
               }
 
               const addAnother = await promptAddAnotherAccount(currentAccountCount);
@@ -3156,10 +3165,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
             let actualAccountCount = accounts.length;
             try {
               const finalStorage = await loadAccounts();
-              if (finalStorage) {
+              if (finalStorage && finalStorage.accounts.length > 0) {
                 actualAccountCount = finalStorage.accounts.length;
               }
             } catch {
+            }
+            if (actualAccountCount <= 0 && accounts.length > 0) {
+              actualAccountCount = accounts.length;
             }
 
             const successMessage = refreshAccountIndex !== undefined
