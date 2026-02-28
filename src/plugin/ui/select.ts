@@ -217,7 +217,7 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     const focusStyle = options.focusStyle ?? 'row-invert';
     let didFullClear = false;
 
-    if (options.clearScreen) {
+    if (options.clearScreen && !hasRendered) {
       stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
       didFullClear = true;
     } else if (previousRenderedLines > 0) {
