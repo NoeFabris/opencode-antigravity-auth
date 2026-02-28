@@ -399,7 +399,7 @@ async function acquireFileLock(path: string): Promise<() => Promise<void>> {
       throw error;
     }
 
-    return lockfile.lock(path, LOCK_OPTIONS);
+    return await lockfile.lock(path, LOCK_OPTIONS);
   }
 }
 

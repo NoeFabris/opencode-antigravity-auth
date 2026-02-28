@@ -286,6 +286,31 @@ describe("saveAccounts lock recovery", () => {
     expect(lockMock).toHaveBeenCalledTimes(1);
     expect(fs.unlink).not.toHaveBeenCalled();
   });
+
+  it("re-throws original lock error when unlink fails", async () => {
+    const lockError = new Error("lock held") as NodeJS.ErrnoException;
+    lockError.code = "ELOCKED";
+    lockMock.mockRejectedValue(lockError);
+    vi.mocked(fs.lstat).mockResolvedValue({
+      isFile: () => true,
+    } as unknown as import("node:fs").Stats);
+
+    const unlinkError = new Error("permission denied") as NodeJS.ErrnoException;
+    unlinkError.code = "EPERM";
+    vi.mocked(fs.unlink).mockRejectedValue(unlinkError);
+    vi.mocked(fs.readFile).mockRejectedValue({ code: "ENOENT" });
+
+    await expect(
+      saveAccounts({
+        version: 4,
+        accounts: [{ refreshToken: "r1", addedAt: 1, lastUsed: 1 }],
+        activeIndex: 0,
+      }),
+    ).rejects.toThrow("lock held");
+
+    expect(lockMock).toHaveBeenCalledTimes(1);
+    expect(fs.unlink).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Storage Migration", () => {
