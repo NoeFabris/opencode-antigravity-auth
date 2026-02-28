@@ -3145,6 +3145,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 });
                 // Sync in-memory state so deleted account stops being used immediately
                 activeAccountManager?.removeAccountByIndex(menuResult.deleteAccountIndex);
+                console.clear();
                 console.log("\nAccount deleted.\n");
 
                 if (updatedAccounts.length > 0) {
@@ -3193,12 +3194,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
               if (menuResult.refreshAccountIndex !== undefined) {
                 refreshAccountIndex = menuResult.refreshAccountIndex;
                 const refreshEmail = existingStorage.accounts[refreshAccountIndex]?.email;
+                console.clear();
                 console.log(`\nRe-authenticating ${refreshEmail || 'account'}...\n`);
                 startFresh = false;
               }
               
               if (menuResult.deleteAll) {
                 await clearAccounts();
+                console.clear();
                 console.log("\nAll accounts deleted.\n");
                 startFresh = true;
                 try {

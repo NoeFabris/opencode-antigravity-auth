@@ -125,7 +125,7 @@ export async function runActionPanel<T>(
   }
 
   const cleanupScreen = (): void => {
-    process.stdout.write(`${ANSI.show}${ANSI.altScreenOff}`)
+    process.stdout.write(`${ANSI.altScreenOff}${ANSI.show}${ANSI.clearScreen}${ANSI.moveTo(1, 1)}`)
   }
 
   process.stdout.write(`${ANSI.altScreenOn}${ANSI.hide}`)
