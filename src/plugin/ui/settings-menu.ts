@@ -43,6 +43,7 @@ export async function showSettingsMenu(): Promise<'back' | 'changed'> {
       message: UI_COPY.settings.title,
       subtitle: UI_COPY.settings.subtitle,
       help: UI_COPY.settings.help,
+      clearScreen: true,
       theme: ui.theme,
       showHintsForUnselected: true,
     })
@@ -102,6 +103,7 @@ async function handleColorProfile(): Promise<boolean | null> {
     message: UI_COPY.settings.colorProfile,
     subtitle: `Current: ${ui.colorProfile}`,
     help: UI_COPY.settings.help,
+    clearScreen: true,
     theme: ui.theme,
     showHintsForUnselected: true,
   })
@@ -129,6 +131,7 @@ async function handleGlyphMode(): Promise<boolean | null> {
     message: UI_COPY.settings.glyphMode,
     subtitle: `Current: ${ui.glyphMode}`,
     help: UI_COPY.settings.help,
+    clearScreen: true,
     theme: ui.theme,
     showHintsForUnselected: true,
   })
@@ -155,6 +158,7 @@ async function handlePalette(): Promise<boolean | null> {
     message: UI_COPY.settings.palette,
     subtitle: `Current: ${ui.palette}`,
     help: UI_COPY.settings.help,
+    clearScreen: true,
     theme: ui.theme,
     showHintsForUnselected: true,
   })
@@ -183,6 +187,7 @@ async function handleAccent(): Promise<boolean | null> {
     message: UI_COPY.settings.accent,
     subtitle: `Current: ${ui.accent}`,
     help: UI_COPY.settings.help,
+    clearScreen: true,
     theme: ui.theme,
     showHintsForUnselected: true,
   })
