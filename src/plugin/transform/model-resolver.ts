@@ -63,6 +63,7 @@ const TIER_REGEX = /-(minimal|low|medium|high)$/;
 const QUOTA_PREFIX_REGEX = /^antigravity-/i;
 const GEMINI_3_PRO_REGEX = /^gemini-3(?:\.\d+)?-pro/i;
 const GEMINI_3_FLASH_REGEX = /^gemini-3(?:\.\d+)?-flash/i;
+const GEMINI_3_BASE_PRO_REGEX = /^gemini-3-pro/i;
 
 // ANTIGRAVITY_ONLY_MODELS removed - all models now default to antigravity
 
@@ -138,6 +139,15 @@ function isGemini3FlashModel(model: string): boolean {
 }
 
 /**
+ * Checks if model is specifically gemini-3-pro (3.0 only, no minor version).
+ * Only gemini-3-pro supports tier suffixes in model name (gemini-3-pro-low/high).
+ * Models like gemini-3.1-pro use bare name + thinkingLevel parameter instead.
+ */
+function isGemini3BaseProModel(model: string): boolean {
+  return GEMINI_3_BASE_PRO_REGEX.test(model);
+}
+
+/**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
  *
@@ -183,10 +193,17 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isGemini3Pro = isGemini3ProModel(modelWithoutQuota);
   const isGemini3Flash = isGemini3FlashModel(modelWithoutQuota);
   
+  const isBaseProOnly = isGemini3BaseProModel(modelWithoutQuota);
+
   let antigravityModel = modelWithoutQuota;
   if (skipAlias) {
-    if (isGemini3Pro && !tier && !isImageModel) {
+    if (isBaseProOnly && !tier && !isImageModel) {
+      // Only gemini-3-pro (3.0) uses tier suffix in model name
       antigravityModel = `${modelWithoutQuota}-low`;
+    } else if ((isGemini3Pro && !isBaseProOnly) && tier) {
+      // gemini-3.1+-pro with explicit tier: strip tier suffix, use bare name
+      // (thinkingLevel parameter handles the tier)
+      antigravityModel = baseName;
     } else if (isGemini3Flash && tier) {
       antigravityModel = baseName;
     }
@@ -324,12 +341,13 @@ export function resolveModelForHeaderStyle(
       .replace(/-preview$/i, "")
       .replace(/^antigravity-/i, "");
     
-    const isGemini3Pro = isGemini3ProModel(transformedModel);
+    const isBaseProOnly = isGemini3BaseProModel(transformedModel);
     const hasTierSuffix = /-(low|medium|high)$/i.test(transformedModel);
     const isImageModel = IMAGE_GENERATION_MODELS.test(transformedModel);
     
-    // Don't add tier suffix to image models - they don't support thinking
-    if (isGemini3Pro && !hasTierSuffix && !isImageModel) {
+    // Only gemini-3-pro (3.0) uses tier suffix in model name for Antigravity
+    // gemini-3.1+-pro uses bare name + thinkingLevel parameter
+    if (isBaseProOnly && !hasTierSuffix && !isImageModel) {
       transformedModel = `${transformedModel}-low`;
     }
     
@@ -385,11 +403,12 @@ export function resolveModelWithVariant(
 
   if (isGemini3) {
     const level = budgetToGemini3Level(budget);
-    const isAntigravityGemini3Pro = base.quotaPreference === "antigravity" &&
-      isGemini3ProModel(base.actualModel);
+    const isAntigravityGemini3BasePro = base.quotaPreference === "antigravity" &&
+      isGemini3BaseProModel(base.actualModel);
 
     let actualModel = base.actualModel;
-    if (isAntigravityGemini3Pro) {
+    if (isAntigravityGemini3BasePro) {
+      // Only gemini-3-pro (3.0) uses tier suffix in model name
       const baseModel = base.actualModel.replace(/-(low|medium|high)$/, "");
       actualModel = `${baseModel}-${level}`;
     }
