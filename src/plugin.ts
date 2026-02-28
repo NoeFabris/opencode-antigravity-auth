@@ -3185,6 +3185,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 actualAccountCount = finalStorage.accounts.length;
               }
             } catch {
+              // Fall back to accounts.length if we can't read storage
             }
 
             const successMessage = refreshAccountIndex !== undefined
