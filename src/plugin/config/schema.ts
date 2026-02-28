@@ -451,10 +451,10 @@ export const AntigravityConfigSchema = z.object({
     color_profile: z.enum(['ansi16', 'ansi256', 'truecolor']).default('truecolor'),
     /** Glyph rendering mode. @default "ascii" */
     glyph_mode: z.enum(['ascii', 'unicode', 'auto']).default('ascii'),
-    /** Color palette theme. @default "green" */
-    palette: z.enum(['green', 'blue']).default('green'),
-    /** Accent color for highlights and badges. @default "green" */
-    accent: z.enum(['green', 'cyan', 'blue', 'yellow']).default('green'),
+    /** Color palette theme. @default "antigravity" */
+    palette: z.enum(['green', 'blue', 'antigravity']).default('antigravity'),
+    /** Accent color for highlights and badges. @default "cyan" */
+    accent: z.enum(['green', 'cyan', 'blue', 'yellow', 'magenta', 'purple']).default('cyan'),
   }).optional(),
 
 });
@@ -501,8 +501,8 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   ui: {
     color_profile: 'truecolor',
     glyph_mode: 'ascii',
-    palette: 'green',
-    accent: 'green',
+    palette: 'antigravity',
+    accent: 'cyan',
   },
   signature_cache: {
     enabled: true,

@@ -4,8 +4,8 @@
 
 export type UiColorProfile = 'ansi16' | 'ansi256' | 'truecolor';
 export type UiGlyphMode = 'ascii' | 'unicode' | 'auto';
-export type UiPalette = 'green' | 'blue';
-export type UiAccent = 'green' | 'cyan' | 'blue' | 'yellow';
+export type UiPalette = 'green' | 'blue' | 'antigravity';
+export type UiAccent = 'green' | 'cyan' | 'blue' | 'yellow' | 'magenta' | 'purple';
 
 export interface UiGlyphSet {
   selected: string;
@@ -13,6 +13,8 @@ export interface UiGlyphSet {
   bullet: string;
   check: string;
   cross: string;
+  topBorder: string;
+  bottomBorder: string;
 }
 
 export interface UiThemeColors {
@@ -63,6 +65,8 @@ function getGlyphs(mode: Exclude<UiGlyphMode, 'auto'>): UiGlyphSet {
       bullet: '•',
       check: '✓',
       cross: '✗',
+      topBorder: '╭',
+      bottomBorder: '╰',
     };
   }
 
@@ -72,6 +76,8 @@ function getGlyphs(mode: Exclude<UiGlyphMode, 'auto'>): UiGlyphSet {
     bullet: '-',
     check: '+',
     cross: 'x',
+    topBorder: '+',
+    bottomBorder: '+',
   };
 }
 
@@ -85,6 +91,10 @@ function accentColorForProfile(profile: UiColorProfile, accent: UiAccent): strin
           return truecolor(59, 130, 246);
         case 'yellow':
           return truecolor(245, 158, 11);
+        case 'magenta':
+          return truecolor(232, 121, 249);
+        case 'purple':
+          return truecolor(192, 132, 252);
         default:
           return truecolor(74, 222, 128);
       }
@@ -96,6 +106,10 @@ function accentColorForProfile(profile: UiColorProfile, accent: UiAccent): strin
           return ansi256(75);
         case 'yellow':
           return ansi256(214);
+        case 'magenta':
+          return ansi256(207);
+        case 'purple':
+          return ansi256(141);
         default:
           return ansi256(83);
       }
@@ -107,6 +121,10 @@ function accentColorForProfile(profile: UiColorProfile, accent: UiAccent): strin
           return ansi16(94);
         case 'yellow':
           return ansi16(93);
+        case 'magenta':
+          return ansi16(95);
+        case 'purple':
+          return ansi16(95);
         default:
           return ansi16(92);
       }
@@ -116,9 +134,26 @@ function accentColorForProfile(profile: UiColorProfile, accent: UiAccent): strin
 function getColors(profile: UiColorProfile, palette: UiPalette, accent: UiAccent): UiThemeColors {
   const accentColor = accentColorForProfile(profile, accent);
   const isBluePalette = palette === 'blue';
+  const isAntigravity = palette === 'antigravity';
 
   switch (profile) {
     case 'truecolor':
+      if (isAntigravity) {
+        return {
+          reset: '\x1b[0m',
+          dim: '\x1b[2m',
+          muted: truecolor(154, 160, 166),
+          heading: truecolor(232, 234, 237),
+          primary: truecolor(138, 180, 248),
+          accent: accentColor,
+          success: truecolor(129, 201, 149),
+          warning: truecolor(253, 214, 99),
+          danger: truecolor(242, 139, 130),
+          border: truecolor(95, 99, 104),
+          focusBg: truecolorBg(40, 42, 45),
+          focusText: truecolor(138, 180, 248),
+        };
+      }
       return {
         reset: '\x1b[0m',
         dim: '\x1b[2m',
@@ -134,6 +169,22 @@ function getColors(profile: UiColorProfile, palette: UiPalette, accent: UiAccent
         focusText: truecolor(248, 250, 252),
       };
     case 'ansi256':
+      if (isAntigravity) {
+        return {
+          reset: '\x1b[0m',
+          dim: '\x1b[2m',
+          muted: ansi256(247),
+          heading: ansi256(255),
+          primary: ansi256(111),
+          accent: accentColor,
+          success: ansi256(114),
+          warning: ansi256(221),
+          danger: ansi256(210),
+          border: ansi256(240),
+          focusBg: ansi256Bg(236),
+          focusText: ansi256(111),
+        };
+      }
       return {
         reset: '\x1b[0m',
         dim: '\x1b[2m',
@@ -149,6 +200,22 @@ function getColors(profile: UiColorProfile, palette: UiPalette, accent: UiAccent
         focusText: ansi256(231),
       };
     default:
+      if (isAntigravity) {
+        return {
+          reset: '\x1b[0m',
+          dim: '\x1b[2m',
+          muted: ansi16(37),
+          heading: ansi16(97),
+          primary: ansi16(94),
+          accent: accentColor,
+          success: ansi16(92),
+          warning: ansi16(93),
+          danger: ansi16(91),
+          border: ansi16(90),
+          focusBg: '\x1b[100m',
+          focusText: '\x1b[94m',
+        };
+      }
       return {
         reset: '\x1b[0m',
         dim: '\x1b[2m',
@@ -174,8 +241,8 @@ export function createUiTheme(options?: {
 }): UiTheme {
   const profile = options?.profile ?? 'truecolor';
   const glyphMode = options?.glyphMode ?? 'ascii';
-  const palette = options?.palette ?? 'green';
-  const accent = options?.accent ?? 'green';
+  const palette = options?.palette ?? 'antigravity';
+  const accent = options?.accent ?? 'cyan';
   const resolvedGlyphMode = resolveGlyphMode(glyphMode);
 
   return {

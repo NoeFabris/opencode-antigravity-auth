@@ -22,6 +22,7 @@ export const ANSI = {
   cyan: '\x1b[36m',
   green: '\x1b[32m',
   red: '\x1b[31m',
+  magenta: '\x1b[35m',
   yellow: '\x1b[33m',
   bgBlue: '\x1b[44m',
   bgBrightBlue: '\x1b[104m',

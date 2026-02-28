@@ -14,13 +14,13 @@ const DEFAULT_OPTIONS: UiRuntimeOptions = {
   v2Enabled: true,
   colorProfile: 'truecolor',
   glyphMode: 'ascii',
-  palette: 'green',
-  accent: 'green',
+  palette: 'antigravity',
+  accent: 'cyan',
   theme: createUiTheme({
     profile: 'truecolor',
     glyphMode: 'ascii',
-    palette: 'green',
-    accent: 'green',
+    palette: 'antigravity',
+    accent: 'cyan',
   }),
 };
 

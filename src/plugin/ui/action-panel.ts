@@ -16,7 +16,8 @@ export interface MenuReturnOptions {
   pauseOnAnyKey?: boolean
 }
 
-const SPINNER_FRAMES = ['-', '\\', '|', '/']
+const SPINNER_FRAMES_ASCII = ['-', '\\', '|', '/']
+const SPINNER_FRAMES_UNICODE = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const MAX_LOG_LINES = 400
 const DEFAULT_AUTO_RETURN_MS = 2000
 
@@ -89,8 +90,10 @@ export async function runActionPanel<T>(
   const render = (): void => {
     const rows = process.stdout.rows ?? 24
     const availableLogRows = Math.max(8, rows - 8);
+    const isUnicode = ui.glyphMode === 'unicode' || (ui.glyphMode === 'auto' && (process.env.WT_SESSION !== undefined || process.env.TERM_PROGRAM === 'vscode' || process.env.TERM?.toLowerCase().includes('xterm') === true))
+    const frames = isUnicode ? SPINNER_FRAMES_UNICODE : SPINNER_FRAMES_ASCII
     const spinner = running
-      ? SPINNER_FRAMES[frame % SPINNER_FRAMES.length]
+      ? frames[frame % frames.length]
       : failed
         ? UI_COPY.returnFlow.failed
         : UI_COPY.returnFlow.done

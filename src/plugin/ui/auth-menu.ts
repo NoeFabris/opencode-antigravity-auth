@@ -437,15 +437,15 @@ export async function showAuthMenu(
 
     const items: MenuItem<AuthMenuAction>[] = [
       { label: UI_COPY.mainMenu.quickStart, value: { type: 'cancel' }, kind: 'heading' },
-      { label: UI_COPY.mainMenu.addAccount, value: { type: 'add' }, color: 'green' },
-      { label: UI_COPY.mainMenu.checkAccounts, value: { type: 'check' }, color: 'green' },
-      { label: UI_COPY.mainMenu.settings, value: { type: 'settings' }, color: 'green' },
+      { label: UI_COPY.mainMenu.addAccount, value: { type: 'add' }, color: 'cyan' },
+      { label: UI_COPY.mainMenu.checkAccounts, value: { type: 'check' }, color: 'cyan' },
+      { label: UI_COPY.mainMenu.settings, value: { type: 'settings' }, color: 'cyan' },
       { label: '', value: { type: 'cancel' }, separator: true },
       { label: UI_COPY.mainMenu.moreChecks, value: { type: 'cancel' }, kind: 'heading' },
-      { label: UI_COPY.mainMenu.verifyOneAccount, value: { type: 'verify' }, color: 'green' },
+      { label: UI_COPY.mainMenu.verifyOneAccount, value: { type: 'verify' }, color: 'cyan' },
       { label: verifyLabel, value: { type: 'verify-all' }, color: flaggedCount > 0 ? 'red' : 'yellow' },
-      { label: UI_COPY.mainMenu.configureModels, value: { type: 'configure-models' }, color: 'green' },
-      { label: UI_COPY.mainMenu.geminiCliLogin, value: { type: 'gemini-cli-login' }, color: 'green' },
+      { label: UI_COPY.mainMenu.configureModels, value: { type: 'configure-models' }, color: 'cyan' },
+      { label: UI_COPY.mainMenu.geminiCliLogin, value: { type: 'gemini-cli-login' }, color: 'cyan' },
       { label: '', value: { type: 'cancel' }, separator: true },
       { label: UI_COPY.mainMenu.accounts, value: { type: 'cancel' }, kind: 'heading' },
     ];
@@ -609,14 +609,14 @@ export async function showAccountDetails(account: AccountInfo): Promise<AccountA
       {
         label: account.enabled === false ? UI_COPY.accountDetails.enable : UI_COPY.accountDetails.disable,
         value: 'toggle',
-        color: account.enabled === false ? 'green' : 'yellow',
+        color: account.enabled === false ? 'cyan' : 'yellow',
       },
       {
         label: UI_COPY.accountDetails.setCurrent,
         value: 'set-current',
-        color: 'green',
+        color: 'cyan',
       },
-      { label: UI_COPY.accountDetails.refresh, value: 'refresh', color: 'green' },
+      { label: UI_COPY.accountDetails.refresh, value: 'refresh', color: 'cyan' },
       { label: UI_COPY.accountDetails.remove, value: 'delete', color: 'red' },
     ];
     const initialCursor = items.findIndex((item) => item.value === focusAction);

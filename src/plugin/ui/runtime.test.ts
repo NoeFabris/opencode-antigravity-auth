@@ -12,8 +12,8 @@ describe('runtime', () => {
       expect(options.v2Enabled).toBe(true);
       expect(options.colorProfile).toBe('truecolor');
       expect(options.glyphMode).toBe('ascii');
-      expect(options.palette).toBe('green');
-      expect(options.accent).toBe('green');
+      expect(options.palette).toBe('antigravity');
+      expect(options.accent).toBe('cyan');
       expect(options.theme).toBeDefined();
     });
   });

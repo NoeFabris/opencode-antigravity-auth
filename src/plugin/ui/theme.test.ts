@@ -32,6 +32,8 @@ describe('theme', () => {
         bullet: '-',
         check: '+',
         cross: 'x',
+        topBorder: '+',
+        bottomBorder: '+',
       });
     });
 
@@ -43,6 +45,8 @@ describe('theme', () => {
         bullet: '•',
         check: '✓',
         cross: '✗',
+        topBorder: '╭',
+        bottomBorder: '╰',
       });
     });
 

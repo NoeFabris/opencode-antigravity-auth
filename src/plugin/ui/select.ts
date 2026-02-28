@@ -10,7 +10,7 @@ export interface MenuItem<T = string> {
   hideUnavailableSuffix?: boolean;
   separator?: boolean;
   kind?: 'heading';
-  color?: 'red' | 'green' | 'yellow' | 'cyan';
+  color?: 'red' | 'green' | 'yellow' | 'cyan' | 'magenta' | 'purple';
 }
 
 export interface SelectOptions<T = string> {
@@ -88,6 +88,10 @@ function colorCode(color: MenuItem['color']): string {
       return ANSI.yellow;
     case 'cyan':
       return ANSI.cyan;
+    case 'magenta':
+      return ANSI.magenta;
+    case 'purple':
+      return ANSI.magenta; // fallback since ANSI 16 doesn't have a distinct purple
     default:
       return '';
   }
@@ -197,6 +201,9 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
         return theme.colors.warning;
       case 'cyan':
         return theme.colors.accent;
+      case 'magenta':
+      case 'purple':
+        return theme.colors.accent;
       default:
         return theme.colors.heading;
     }
@@ -287,7 +294,10 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     const selectedGlyphColor = theme?.colors.success ?? ANSI.green;
     const selectedChip = selectedLabelStart();
 
-    writeLine(`${border}+${reset} ${heading}${truncateAnsi(options.message, Math.max(1, columns - 4))}${reset}`);
+    const topBorder = theme?.glyphs.topBorder ?? '+';
+    const bottomBorder = theme?.glyphs.bottomBorder ?? '+';
+
+    writeLine(`${border}${topBorder}${reset} ${heading}${truncateAnsi(options.message, Math.max(1, columns - 4))}${reset}`);
     if (subtitleText) {
       writeLine(` ${muted}${truncateAnsi(subtitleText, Math.max(1, columns - 2))}${reset}`);
     }
@@ -361,7 +371,7 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
     const backLabel = 'Q Back';
     const helpText = options.help ?? `\u2191\u2193 Move | Enter Select | ${backLabel}${windowHint}`;
     writeLine(` ${muted}${truncateAnsi(helpText, Math.max(1, columns - 2))}${reset}`);
-    writeLine(`${border}+${reset}`);
+    writeLine(`${border}${bottomBorder}${reset}`);
 
     if (!didFullClear && previousRenderedLines > linesWritten) {
       const extra = previousRenderedLines - linesWritten;

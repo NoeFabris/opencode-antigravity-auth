@@ -150,6 +150,7 @@ async function handleGlyphMode(): Promise<boolean | null> {
 async function handlePalette(): Promise<boolean | null> {
   const ui = getUiRuntimeOptions()
   const options: MenuItem<UiPalette>[] = [
+    { label: 'antigravity', value: 'antigravity', hint: UI_COPY.settings.paletteAntigravityHint ?? 'Deep space theme (Google Blue & Dark Grey)' },
     { label: 'green', value: 'green', hint: UI_COPY.settings.paletteGreenHint },
     { label: 'blue', value: 'blue', hint: UI_COPY.settings.paletteBlueHint },
   ]
@@ -177,8 +178,10 @@ async function handlePalette(): Promise<boolean | null> {
 async function handleAccent(): Promise<boolean | null> {
   const ui = getUiRuntimeOptions()
   const options: MenuItem<UiAccent>[] = [
-    { label: 'green', value: 'green', hint: UI_COPY.settings.accentGreenHint },
     { label: 'cyan', value: 'cyan', hint: UI_COPY.settings.accentCyanHint },
+    { label: 'magenta', value: 'magenta', hint: UI_COPY.settings.accentMagentaHint ?? 'Bright neon magenta' },
+    { label: 'purple', value: 'purple', hint: UI_COPY.settings.accentPurpleHint ?? 'Deep gemini purple' },
+    { label: 'green', value: 'green', hint: UI_COPY.settings.accentGreenHint },
     { label: 'blue', value: 'blue', hint: UI_COPY.settings.accentBlueHint },
     { label: 'yellow', value: 'yellow', hint: UI_COPY.settings.accentYellowHint },
   ]
