@@ -41,6 +41,10 @@ const optionDescriptions: Record<string, string> = {
     "Enable tool hallucination prevention for Claude models. Injects parameter signatures and strict usage rules.",
   claude_prompt_auto_caching:
     "Enable Claude prompt auto-caching by adding top-level cache_control when absent.",
+  claude_long_context_beta:
+    "Enable experimental Claude long-context beta header injection for Claude 4.6 models. If rejected, requests auto-fallback to stable 200k behavior.",
+  claude_long_context_beta_header:
+    "Claude long-context beta header value. Override if provider beta token changes.",
   proactive_token_refresh:
     "Enable proactive background token refresh before expiry, ensuring requests never block.",
   proactive_refresh_buffer_seconds:

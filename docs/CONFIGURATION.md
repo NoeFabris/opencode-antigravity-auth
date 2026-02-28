@@ -35,6 +35,8 @@ Settings that affect how the model thinks and responds.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `keep_thinking` | `false` | Preserve Claude's thinking blocks across turns. **Warning:** enabling may degrade model stability. |
+| `claude_long_context_beta` | `false` | Experimental: attempt Claude 4.6 long-context beta header (provider entitlement required) |
+| `claude_long_context_beta_header` | `"context-1m-2025-08-07"` | Beta header value used when `claude_long_context_beta` is enabled |
 | `session_recovery` | `true` | Auto-recover from tool_result_missing errors |
 | `auto_resume` | `false` | Auto-send resume prompt after recovery |
 | `resume_text` | `"continue"` | Text to send when auto-resuming |
@@ -50,6 +52,24 @@ When `true`, Claude's thinking blocks are preserved in conversation history:
 When `false` (default), thinking is stripped:
 - **Pros:** More stable model behavior, smaller context
 - **Cons:** Model may be less coherent, forgets previous reasoning
+
+### About `claude_long_context_beta`
+
+Claude models on the Antigravity path remain **200k context by default**.
+
+When `claude_long_context_beta` is enabled:
+- Claude 4.6 requests include the configured `anthropic-beta` token (`claude_long_context_beta_header`)
+- If the provider rejects that beta header, the plugin retries once automatically without it
+- The request falls back to the stable 200k path and logs the rejection reason
+
+Example:
+
+```json
+{
+  "claude_long_context_beta": true,
+  "claude_long_context_beta_header": "context-1m-2025-08-07"
+}
+```
 
 ---
 
@@ -168,6 +188,7 @@ These settings are `false` by default:
 | Setting | Default | What it does |
 |---------|---------|--------------|
 | `keep_thinking` | `false` | Preserve Claude thinking (may degrade stability) |
+| `claude_long_context_beta` | `false` | Opt-in experimental Claude 1M beta header attempt |
 | `auto_resume` | `false` | Auto-continue after recovery |
 
 ---

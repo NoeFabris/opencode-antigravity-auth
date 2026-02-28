@@ -30,6 +30,7 @@ import {
 import {
   buildThinkingWarmupBody,
   isGenerativeLanguageRequest,
+  isUnsupportedClaudeLongContextBetaError,
   prepareAntigravityRequest,
   transformAntigravityResponse,
 } from "./plugin/request";
@@ -86,6 +87,8 @@ const log = createLogger("plugin");
 const rateLimitToastCooldowns = new Map<string, number>();
 const RATE_LIMIT_TOAST_COOLDOWN_MS = 5000;
 const MAX_TOAST_COOLDOWN_ENTRIES = 100;
+const CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS = new Set<string>();
+const MAX_CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS = 500;
 
 // Track if "all accounts blocked" toasts were shown to prevent spam in while loop
 let softQuotaToastShown = false;
@@ -114,6 +117,25 @@ function shouldShowRateLimitToast(message: string): boolean {
     return false;
   }
   rateLimitToastCooldowns.set(toastKey, now);
+  return true;
+}
+
+function shouldShowClaudeLongContextFallbackToast(sessionKey: string): boolean {
+  if (CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS.has(sessionKey)) {
+    return false;
+  }
+
+  CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS.add(sessionKey);
+  if (
+    CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS.size >
+    MAX_CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS
+  ) {
+    const first = CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS.values().next().value;
+    if (first) {
+      CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS.delete(first);
+    }
+  }
+
   return true;
 }
 
@@ -1992,6 +2014,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // Track capacity retries per endpoint to prevent infinite loops
             let capacityRetryCount = 0;
             let lastEndpointIndex = -1;
+            let disableClaudeLongContextBetaForRetry = false;
             
             for (let i = 0; i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length; i++) {
               // Reset capacity retry counter when switching to a new endpoint
@@ -2021,6 +2044,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   {
                     claudeToolHardening: config.claude_tool_hardening,
                     claudePromptAutoCaching: config.claude_prompt_auto_caching,
+                    claudeLongContextBetaEnabled: config.claude_long_context_beta,
+                    claudeLongContextBetaHeader: config.claude_long_context_beta_header,
+                    disableClaudeLongContextBetaForRetry,
                     fingerprint: account.fingerprint,
                   },
                 );
@@ -2327,6 +2353,42 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     lastFailure = createFailureContext(response);
                     shouldSwitchAccount = true;
                     break;
+                  }
+                }
+
+                if (
+                  prepared.claudeLongContextBetaApplied
+                  && !disableClaudeLongContextBetaForRetry
+                  && response.status >= 400
+                  && response.status < 500
+                ) {
+                  const errorBodyText = await response.clone().text().catch(() => "");
+                  if (isUnsupportedClaudeLongContextBetaError(response.status, errorBodyText)) {
+                    disableClaudeLongContextBetaForRetry = true;
+
+                    const sessionKey = prepared.sessionId
+                      ?? `${account.index}:${prepared.effectiveModel ?? "claude"}`;
+
+                    if (shouldShowClaudeLongContextFallbackToast(sessionKey)) {
+                      await showToast(
+                        "Claude long-context beta rejected by provider. Falling back to stable 200k path.",
+                        "warning",
+                      );
+                    }
+
+                    const reasonPreview = errorBodyText.replace(/\s+/g, " ").slice(0, 240);
+                    pushDebug(
+                      `claude-long-context-beta rejected status=${response.status} header=${prepared.claudeLongContextBetaHeader ?? "unknown"} reason=${reasonPreview}`,
+                    );
+                    log.debug("claude-long-context-beta-rejected", {
+                      status: response.status,
+                      model: prepared.effectiveModel,
+                      header: prepared.claudeLongContextBetaHeader,
+                      reasonPreview,
+                    });
+
+                    i -= 1;
+                    continue;
                   }
                 }
 

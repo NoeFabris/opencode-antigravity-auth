@@ -46,3 +46,42 @@ describe("claude_prompt_auto_caching config", () => {
     expect(claudePromptAutoCaching?.description?.length ?? 0).toBeGreaterThan(0);
   });
 });
+
+describe("claude_long_context_beta config", () => {
+  it("includes claude_long_context_beta defaults in DEFAULT_CONFIG", () => {
+    expect(DEFAULT_CONFIG).toHaveProperty("claude_long_context_beta", false);
+    expect(DEFAULT_CONFIG).toHaveProperty("claude_long_context_beta_header", "context-1m-2025-08-07");
+  });
+
+  it("documents claude_long_context_beta in the JSON schema", () => {
+    const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
+      properties?: Record<string, { type?: string; default?: unknown; description?: string }>;
+    };
+
+    const claudeLongContextBeta = schema.properties?.claude_long_context_beta;
+    expect(claudeLongContextBeta).toBeDefined();
+    expect(claudeLongContextBeta).toMatchObject({
+      type: "boolean",
+      default: false,
+    });
+    expect(typeof claudeLongContextBeta?.description).toBe("string");
+    expect(claudeLongContextBeta?.description?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("documents claude_long_context_beta_header in the JSON schema", () => {
+    const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
+      properties?: Record<string, { type?: string; default?: unknown; description?: string }>;
+    };
+
+    const claudeLongContextBetaHeader = schema.properties?.claude_long_context_beta_header;
+    expect(claudeLongContextBetaHeader).toBeDefined();
+    expect(claudeLongContextBetaHeader).toMatchObject({
+      type: "string",
+      default: "context-1m-2025-08-07",
+    });
+    expect(typeof claudeLongContextBetaHeader?.description).toBe("string");
+    expect(claudeLongContextBetaHeader?.description?.length ?? 0).toBeGreaterThan(0);
+  });
+});

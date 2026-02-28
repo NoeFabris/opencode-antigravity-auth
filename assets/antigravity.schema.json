@@ -120,6 +120,17 @@
       "type": "boolean",
       "description": "Enable Claude prompt auto-caching by adding top-level cache_control when absent."
     },
+    "claude_long_context_beta": {
+      "default": false,
+      "type": "boolean",
+      "description": "Enable experimental Claude long-context beta header injection for Claude 4.6 models. If rejected, requests auto-fallback to stable 200k behavior."
+    },
+    "claude_long_context_beta_header": {
+      "default": "context-1m-2025-08-07",
+      "type": "string",
+      "minLength": 1,
+      "description": "Claude long-context beta header value. Override if provider beta token changes."
+    },
     "proactive_token_refresh": {
       "default": true,
       "type": "boolean",
