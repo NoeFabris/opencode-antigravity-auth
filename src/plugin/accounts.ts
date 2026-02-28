@@ -462,11 +462,14 @@ export class AccountManager {
 
   updateFromAuth(account: ManagedAccount, auth: OAuthAuthDetails): void {
     const parts = parseRefreshParts(auth.refresh);
-    // Preserve existing projectId/managedProjectId if not in the new parts
+    // Preserve existing (disk-loaded) projectId/managedProjectId over runtime values.
+    // The account's existing values may have been manually configured by the user;
+    // the auth refresh string may contain an auto-detected fallback that should not
+    // overwrite those manual edits.
     account.parts = {
       ...parts,
-      projectId: parts.projectId ?? account.parts.projectId,
-      managedProjectId: parts.managedProjectId ?? account.parts.managedProjectId,
+      projectId: account.parts.projectId ?? parts.projectId,
+      managedProjectId: account.parts.managedProjectId ?? parts.managedProjectId,
     };
     account.access = auth.access;
     account.expires = auth.expires;

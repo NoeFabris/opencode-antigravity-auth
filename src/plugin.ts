@@ -313,14 +313,17 @@ async function persistAccountPool(
     }
 
     // Update existing account (this handles both email match and token match cases)
-    // When email matches but token differs, this effectively replaces the old token
+    // When email matches but token differs, this effectively replaces the old token.
+    // Existing (disk) projectId/managedProjectId take priority over incoming
+    // (OAuth-fetched) values to prevent auto-detected fallbacks from overwriting
+    // manually configured project IDs.
     const oldToken = existing.refreshToken;
     accounts[existingIndex] = {
       ...existing,
       email: result.email ?? existing.email,
       refreshToken: parts.refreshToken,
-      projectId: parts.projectId ?? existing.projectId,
-      managedProjectId: parts.managedProjectId ?? existing.managedProjectId,
+      projectId: existing.projectId ?? parts.projectId,
+      managedProjectId: existing.managedProjectId ?? parts.managedProjectId,
       lastUsed: now,
     };
     
