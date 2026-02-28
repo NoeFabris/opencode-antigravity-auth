@@ -70,9 +70,7 @@ describe('action-panel', () => {
   afterEach(() => {
     vi.useRealTimers()
     writeSpy.mockRestore()
-    if (originalRows !== undefined) {
-      Object.defineProperty(process.stdout, 'rows', { value: originalRows, configurable: true })
-    }
+    Object.defineProperty(process.stdout, 'rows', { value: originalRows, configurable: true })
   })
 
   describe('runActionPanel', () => {

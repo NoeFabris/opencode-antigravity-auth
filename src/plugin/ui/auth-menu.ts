@@ -71,7 +71,7 @@ export type AuthMenuAction =
 
 export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'set-current' | 'verify' | 'cancel';
 
-function sanitizeTerminalText(value: string | undefined): string | undefined {
+export function sanitizeTerminalText(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return value
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
@@ -79,7 +79,7 @@ function sanitizeTerminalText(value: string | undefined): string | undefined {
     .trim();
 }
 
-function formatRelativeTime(timestamp: number | undefined): string {
+export function formatRelativeTime(timestamp: number | undefined): string {
   if (!timestamp) return 'never';
   const days = Math.floor((Date.now() - timestamp) / 86_400_000);
   if (days <= 0) return 'today';
@@ -89,12 +89,12 @@ function formatRelativeTime(timestamp: number | undefined): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
-function formatDate(timestamp: number | undefined): string {
+export function formatDate(timestamp: number | undefined): string {
   if (!timestamp) return 'unknown';
   return new Date(timestamp).toLocaleDateString();
 }
 
-function statusTone(status: AccountStatus | undefined): 'success' | 'warning' | 'danger' | 'muted' {
+export function statusTone(status: AccountStatus | undefined): 'success' | 'warning' | 'danger' | 'muted' {
   switch (status) {
     case 'active':
     case 'ok':
@@ -113,7 +113,7 @@ function statusTone(status: AccountStatus | undefined): 'success' | 'warning' | 
   }
 }
 
-function statusText(status: AccountStatus | undefined): string {
+export function statusText(status: AccountStatus | undefined): string {
   return status ?? 'unknown';
 }
 
@@ -131,56 +131,27 @@ function statusBadge(status: AccountStatus | undefined): string {
     return `${ANSI.inverse}[${label}]${ANSI.reset}`;
   };
 
-  if (ui.v2Enabled) {
-    switch (status) {
-      case 'active':
-        return withTone('active', 'success');
-      case 'ok':
-        return withTone('ok', 'success');
-      case 'rate-limited':
-        return withTone('rate-limited', 'warning');
-      case 'cooldown':
-        return withTone('cooldown', 'warning');
-      case 'flagged':
-        return withTone('flagged', 'danger');
-      case 'disabled':
-        return withTone('disabled', 'danger');
-      case 'error':
-        return withTone('error', 'danger');
-      case 'expired':
-        return withTone('expired', 'danger');
-      case 'verification-required':
-        return withTone('verify', 'warning');
-      default:
-        return withTone('unknown', 'muted');
-    }
-  }
+  const mapping: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'muted' }> = {
+    active: { label: 'active', tone: 'success' },
+    ok: { label: 'ok', tone: 'success' },
+    'rate-limited': { label: 'rate-limited', tone: 'warning' },
+    cooldown: { label: 'cooldown', tone: 'warning' },
+    flagged: { label: 'flagged', tone: 'danger' },
+    disabled: { label: 'disabled', tone: 'danger' },
+    error: { label: 'error', tone: 'danger' },
+    expired: { label: 'expired', tone: 'danger' },
+  };
 
-  switch (status) {
-    case 'active':
-      return withTone('active', 'success');
-    case 'ok':
-      return withTone('ok', 'success');
-    case 'rate-limited':
-      return withTone('rate-limited', 'warning');
-    case 'cooldown':
-      return withTone('cooldown', 'warning');
-    case 'flagged':
-      return withTone('flagged', 'danger');
-    case 'disabled':
-      return withTone('disabled', 'danger');
-    case 'error':
-      return withTone('error', 'danger');
-    case 'expired':
-      return withTone('expired', 'danger');
-    case 'verification-required':
-      return withTone('needs verification', 'warning');
-    default:
-      return withTone('unknown', 'muted');
+  const key = status ?? 'unknown';
+  const entry = mapping[key];
+  if (entry) return withTone(entry.label, entry.tone);
+  if (key === 'verification-required') {
+    return withTone(ui.v2Enabled ? 'verify' : 'needs verification', 'warning');
   }
+  return withTone('unknown', 'muted');
 }
 
-function accountTitle(account: AccountInfo): string {
+export function accountTitle(account: AccountInfo): string {
   const accountNumber = account.quickSwitchNumber ?? account.index + 1;
   const base =
     sanitizeTerminalText(account.email) ||
@@ -222,12 +193,12 @@ function accountRowColor(account: AccountInfo): MenuItem<AuthMenuAction>['color'
   }
 }
 
-function normalizeQuotaPercent(value: number | undefined): number | null {
+export function normalizeQuotaPercent(value: number | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function parseLeftPercentFromSummary(summary: string, windowLabel: '5h' | '7d'): number | null {
+export function parseLeftPercentFromSummary(summary: string, windowLabel: '5h' | '7d'): number | null {
   const segments = summary.split('|');
   for (const segment of segments) {
     const trimmed = segment.trim().toLowerCase();
@@ -240,7 +211,7 @@ function parseLeftPercentFromSummary(summary: string, windowLabel: '5h' | '7d'):
   return null;
 }
 
-function formatDurationCompact(milliseconds: number): string {
+export function formatDurationCompact(milliseconds: number): string {
   const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1_000));
   if (totalSeconds < 60) return `${totalSeconds}s`;
   const totalMinutes = Math.floor(totalSeconds / 60);
@@ -258,7 +229,7 @@ function formatDurationCompact(milliseconds: number): string {
   return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
 
-function formatLimitCooldown(resetAtMs: number | undefined): string | null {
+export function formatLimitCooldown(resetAtMs: number | undefined): string | null {
   if (typeof resetAtMs !== 'number' || !Number.isFinite(resetAtMs)) return null;
   const remaining = resetAtMs - Date.now();
   if (remaining <= 0) return 'reset ready';
@@ -495,9 +466,7 @@ export async function showAuthMenu(
           const label = `${title}${currentBadge}${statusSuffix}`;
           const hint = formatAccountHint(account, ui);
           const hasHint = hint.length > 0;
-          const hintText = ui.v2Enabled
-            ? hasHint ? hint : undefined
-            : hasHint ? hint : undefined;
+          const hintText = hasHint ? hint : undefined;
           return {
             label,
             hint: hintText,

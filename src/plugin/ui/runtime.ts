@@ -26,6 +26,17 @@ const DEFAULT_OPTIONS: UiRuntimeOptions = {
 
 let runtimeOptions: UiRuntimeOptions = { ...DEFAULT_OPTIONS };
 
+function cloneRuntimeOptions(opts: UiRuntimeOptions): UiRuntimeOptions {
+  return {
+    ...opts,
+    theme: {
+      ...opts.theme,
+      glyphs: { ...opts.theme.glyphs },
+      colors: { ...opts.theme.colors },
+    },
+  }
+}
+
 export function setUiRuntimeOptions(
   options: Partial<Omit<UiRuntimeOptions, 'theme'>>,
 ): UiRuntimeOptions {
@@ -44,11 +55,11 @@ export function setUiRuntimeOptions(
     theme: createUiTheme({ profile: colorProfile, glyphMode, palette, accent }),
   };
 
-  return runtimeOptions;
+  return cloneRuntimeOptions(runtimeOptions)
 }
 
 export function getUiRuntimeOptions(): UiRuntimeOptions {
-  return runtimeOptions;
+  return cloneRuntimeOptions(runtimeOptions)
 }
 
 export function initUiFromConfig(config?: {
@@ -68,5 +79,5 @@ export function initUiFromConfig(config?: {
 
 export function resetUiRuntimeOptions(): UiRuntimeOptions {
   runtimeOptions = { ...DEFAULT_OPTIONS };
-  return runtimeOptions;
+  return cloneRuntimeOptions(runtimeOptions)
 }

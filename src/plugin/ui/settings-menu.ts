@@ -63,9 +63,9 @@ export async function showSettingsMenu(): Promise<'back' | 'changed'> {
   return changed ? 'changed' : 'back'
 }
 
-function persistUiConfig(): void {
+function persistUiConfig(): boolean {
   const current = getUiRuntimeOptions()
-  saveUserConfig({
+  return saveUserConfig({
     ui: {
       color_profile: current.colorProfile,
       glyph_mode: current.glyphMode,
@@ -93,9 +93,9 @@ async function handleSettingSelection(action: SettingsMenuAction): Promise<boole
 async function handleColorProfile(): Promise<boolean | null> {
   const ui = getUiRuntimeOptions()
   const options: MenuItem<UiColorProfile>[] = [
-    { label: 'ansi16', value: 'ansi16', hint: 'Basic 16 colors — maximum compatibility' },
-    { label: 'ansi256', value: 'ansi256', hint: 'Extended 256 colors — most terminals' },
-    { label: 'truecolor', value: 'truecolor', hint: 'Full 24-bit color — modern terminals' },
+    { label: 'ansi16', value: 'ansi16', hint: UI_COPY.settings.colorProfileAnsi16Hint },
+    { label: 'ansi256', value: 'ansi256', hint: UI_COPY.settings.colorProfileAnsi256Hint },
+    { label: 'truecolor', value: 'truecolor', hint: UI_COPY.settings.colorProfileTruecolorHint },
   ]
 
   const selection = await select(options, {
@@ -110,16 +110,19 @@ async function handleColorProfile(): Promise<boolean | null> {
   if (selection === ui.colorProfile) return false
 
   setUiRuntimeOptions({ colorProfile: selection })
-  persistUiConfig()
+  const saved = persistUiConfig()
+  if (!saved) {
+    console.log(UI_COPY.settings.saveFailed)
+  }
   return true
 }
 
 async function handleGlyphMode(): Promise<boolean | null> {
   const ui = getUiRuntimeOptions()
   const options: MenuItem<UiGlyphMode>[] = [
-    { label: 'ascii', value: 'ascii', hint: 'ASCII characters only' },
-    { label: 'unicode', value: 'unicode', hint: 'Unicode symbols (◆ • ✓ ✗)' },
-    { label: 'auto', value: 'auto', hint: 'Auto-detect from terminal' },
+    { label: 'ascii', value: 'ascii', hint: UI_COPY.settings.glyphModeAsciiHint },
+    { label: 'unicode', value: 'unicode', hint: UI_COPY.settings.glyphModeUnicodeHint },
+    { label: 'auto', value: 'auto', hint: UI_COPY.settings.glyphModeAutoHint },
   ]
 
   const selection = await select(options, {
@@ -134,15 +137,18 @@ async function handleGlyphMode(): Promise<boolean | null> {
   if (selection === ui.glyphMode) return false
 
   setUiRuntimeOptions({ glyphMode: selection })
-  persistUiConfig()
+  const saved = persistUiConfig()
+  if (!saved) {
+    console.log(UI_COPY.settings.saveFailed)
+  }
   return true
 }
 
 async function handlePalette(): Promise<boolean | null> {
   const ui = getUiRuntimeOptions()
   const options: MenuItem<UiPalette>[] = [
-    { label: 'green', value: 'green', hint: 'Green-tinted color scheme' },
-    { label: 'blue', value: 'blue', hint: 'Blue-tinted color scheme' },
+    { label: 'green', value: 'green', hint: UI_COPY.settings.paletteGreenHint },
+    { label: 'blue', value: 'blue', hint: UI_COPY.settings.paletteBlueHint },
   ]
 
   const selection = await select(options, {
@@ -157,17 +163,20 @@ async function handlePalette(): Promise<boolean | null> {
   if (selection === ui.palette) return false
 
   setUiRuntimeOptions({ palette: selection })
-  persistUiConfig()
+  const saved = persistUiConfig()
+  if (!saved) {
+    console.log(UI_COPY.settings.saveFailed)
+  }
   return true
 }
 
 async function handleAccent(): Promise<boolean | null> {
   const ui = getUiRuntimeOptions()
   const options: MenuItem<UiAccent>[] = [
-    { label: 'green', value: 'green', hint: 'Classic green highlights' },
-    { label: 'cyan', value: 'cyan', hint: 'Cool cyan highlights' },
-    { label: 'blue', value: 'blue', hint: 'Blue highlights' },
-    { label: 'yellow', value: 'yellow', hint: 'Warm yellow highlights' },
+    { label: 'green', value: 'green', hint: UI_COPY.settings.accentGreenHint },
+    { label: 'cyan', value: 'cyan', hint: UI_COPY.settings.accentCyanHint },
+    { label: 'blue', value: 'blue', hint: UI_COPY.settings.accentBlueHint },
+    { label: 'yellow', value: 'yellow', hint: UI_COPY.settings.accentYellowHint },
   ]
 
   const selection = await select(options, {
@@ -182,6 +191,9 @@ async function handleAccent(): Promise<boolean | null> {
   if (selection === ui.accent) return false
 
   setUiRuntimeOptions({ accent: selection })
-  persistUiConfig()
+  const saved = persistUiConfig()
+  if (!saved) {
+    console.log(UI_COPY.settings.saveFailed)
+  }
   return true
 }

@@ -1,106 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import type { AccountStatus, AccountInfo } from './auth-menu';
-
-// Duplicate private helpers for testing
-function sanitizeTerminalText(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  return value
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .trim();
-}
-
-function formatRelativeTime(timestamp: number | undefined): string {
-  if (!timestamp) return 'never';
-  const days = Math.floor((Date.now() - timestamp) / 86_400_000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
-
-function formatDate(timestamp: number | undefined): string {
-  if (!timestamp) return 'unknown';
-  return new Date(timestamp).toLocaleDateString();
-}
-
-function normalizeQuotaPercent(value: number | undefined): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function parseLeftPercentFromSummary(summary: string, windowLabel: '5h' | '7d'): number | null {
-  const segments = summary.split('|');
-  for (const segment of segments) {
-    const trimmed = segment.trim().toLowerCase();
-    if (!trimmed.startsWith(`${windowLabel} `)) continue;
-    const percentToken = trimmed.slice(windowLabel.length).trim().split(/\s+/)[0] ?? '';
-    const parsed = Number.parseInt(percentToken.replace('%', ''), 10);
-    if (!Number.isFinite(parsed)) continue;
-    return Math.max(0, Math.min(100, parsed));
-  }
-  return null;
-}
-
-function formatDurationCompact(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1_000));
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  if (totalMinutes < 60) {
-    const seconds = totalSeconds % 60;
-    return seconds > 0 ? `${totalMinutes}m ${seconds}s` : `${totalMinutes}m`;
-  }
-  const totalHours = Math.floor(totalMinutes / 60);
-  if (totalHours < 24) {
-    const minutes = totalMinutes % 60;
-    return minutes > 0 ? `${totalHours}h ${minutes}m` : `${totalHours}h`;
-  }
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-}
-
-function formatLimitCooldown(resetAtMs: number | undefined): string | null {
-  if (typeof resetAtMs !== 'number' || !Number.isFinite(resetAtMs)) return null;
-  const remaining = resetAtMs - Date.now();
-  if (remaining <= 0) return 'reset ready';
-  return `reset ${formatDurationCompact(remaining)}`;
-}
-
-function statusTone(status: AccountStatus | undefined): 'success' | 'warning' | 'danger' | 'muted' {
-  switch (status) {
-    case 'active':
-    case 'ok':
-      return 'success';
-    case 'rate-limited':
-    case 'cooldown':
-      return 'warning';
-    case 'disabled':
-    case 'error':
-    case 'flagged':
-    case 'expired':
-    case 'verification-required':
-      return 'danger';
-    default:
-      return 'muted';
-  }
-}
-
-function statusText(status: AccountStatus | undefined): string {
-  return status ?? 'unknown';
-}
-
-function accountTitle(account: AccountInfo): string {
-  const accountNumber = account.quickSwitchNumber ?? account.index + 1;
-  const base =
-    sanitizeTerminalText(account.email) ||
-    sanitizeTerminalText(account.accountLabel) ||
-    sanitizeTerminalText(account.accountId) ||
-    `Account ${accountNumber}`;
-  return `${accountNumber}. ${base}`;
-}
-
+import {
+  sanitizeTerminalText,
+  formatRelativeTime,
+  formatDate,
+  normalizeQuotaPercent,
+  parseLeftPercentFromSummary,
+  formatDurationCompact,
+  formatLimitCooldown,
+  statusTone,
+  statusText,
+  accountTitle,
+} from './auth-menu';
 describe('auth-menu', () => {
   describe('sanitizeTerminalText', () => {
     it('strips ANSI codes', () => {

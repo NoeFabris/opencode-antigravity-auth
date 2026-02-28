@@ -99,12 +99,8 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
   }
 }
 
-export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
-  if (!isTTY()) {
-    return promptLoginModeFallback(existingAccounts);
-  }
-
-  const accounts: AccountInfo[] = existingAccounts.map(acc => ({
+function mapToAccountInfo(acc: ExistingAccountInfo): AccountInfo {
+  return {
     email: acc.email,
     index: acc.index,
     addedAt: acc.addedAt,
@@ -118,7 +114,15 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
     quota7dResetAtMs: acc.quota7dResetAtMs,
     quotaRateLimited: acc.quotaRateLimited,
     quotaSummary: acc.quotaSummary,
-  }));
+  };
+}
+
+export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
+  if (!isTTY()) {
+    return promptLoginModeFallback(existingAccounts);
+  }
+
+  const accounts: AccountInfo[] = existingAccounts.map(mapToAccountInfo);
 
   console.log("");
 

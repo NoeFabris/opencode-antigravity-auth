@@ -18,7 +18,7 @@ describe('theme', () => {
 
       expect(truecolor.colors.primary).toContain(';2;');
       expect(ansi256.colors.primary).toContain(';5;');
-      expect(ansi16.colors.primary).toMatch(/^\x1b\[\d+m$/);
+      expect(ansi16.colors.primary).toMatch(new RegExp('^\\x1b\\[\\d+m$'));
 
       expect(truecolor.colors.primary).not.toBe(ansi256.colors.primary);
       expect(ansi256.colors.primary).not.toBe(ansi16.colors.primary);

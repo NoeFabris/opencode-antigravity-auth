@@ -8,7 +8,7 @@
  * 3. Project config file
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { AntigravityConfigSchema, DEFAULT_CONFIG, type AntigravityConfig } from "./schema";
@@ -153,11 +153,38 @@ export function getDefaultLogsDir(): string {
   return join(getConfigDir(), "antigravity-logs");
 }
 
+function deepMergeConfig(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...base };
+  for (const key of Object.keys(override)) {
+    const baseVal = base[key];
+    const overrideVal = override[key];
+    if (
+      baseVal !== null &&
+      overrideVal !== null &&
+      typeof baseVal === "object" &&
+      typeof overrideVal === "object" &&
+      !Array.isArray(baseVal) &&
+      !Array.isArray(overrideVal)
+    ) {
+      result[key] = deepMergeConfig(
+        baseVal as Record<string, unknown>,
+        overrideVal as Record<string, unknown>,
+      );
+    } else {
+      result[key] = overrideVal;
+    }
+  }
+  return result;
+}
+
 /**
  * Save partial config to the user-level antigravity.json.
  * Merges with existing config, preserving fields not in the update.
  */
-export function saveUserConfig(update: Partial<AntigravityConfig>): void {
+export function saveUserConfig(update: Partial<AntigravityConfig>): boolean {
   const path = getUserConfigPath();
   try {
     mkdirSync(dirname(path), { recursive: true });
@@ -168,10 +195,14 @@ export function saveUserConfig(update: Partial<AntigravityConfig>): void {
     } catch {
       // File doesn't exist or invalid JSON — start fresh
     }
-    const merged = { ...existing, ...update };
-    writeFileSync(path, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+    const merged = deepMergeConfig(existing, update as Record<string, unknown>);
+    const tmpPath = `${path}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+    renameSync(tmpPath, path);
+    return true;
   } catch (error) {
     log.warn("Failed to save user config", { path, error: String(error) });
+    return false;
   }
 }
 
