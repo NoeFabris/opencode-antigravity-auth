@@ -506,9 +506,9 @@ export async function showAuthMenu(
       if (normalizedSearch.length > 0) {
         parts.push(`${UI_COPY.mainMenu.searchSubtitlePrefix} ${normalizedSearch}`);
       }
-      const statusText = resolveStatusMessage();
-      if (statusText) {
-        parts.push(statusText);
+      const resolvedStatus = resolveStatusMessage();
+      if (resolvedStatus) {
+        parts.push(resolvedStatus);
       }
       if (parts.length === 0) return undefined;
       return parts.join(' | ');
@@ -558,7 +558,6 @@ export async function showAuthMenu(
         if (!selected || selected.separator || selected.disabled || selected.kind === 'heading') {
           return undefined;
         }
-        if (selected.value.type !== 'select-account') return undefined;
         return undefined;
       },
       onCursorChange: ({ cursor }) => {

@@ -210,8 +210,11 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
 ✗ Failed to configure models: ${result.error}
 `);
           }
-        } catch {
-          // Action panel handles error display
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.log(`
+✗ Failed to configure models: ${message}
+`)
         }
         continue;
       }

@@ -101,14 +101,20 @@ export async function runActionPanel<T>(
         ? UI_COPY.returnFlow.failed
         : UI_COPY.returnFlow.done
     const statusTone = running ? 'accent' : failed ? 'danger' : 'success'
-    const logLines = logs.slice(-availableLogRows)
+    const columns = process.stdout.columns ?? 80
+    const maxWidth = Math.max(1, columns - 2)
+    const logLines = logs.slice(-availableLogRows).map((line) => {
+      const stripped = line.replace(/\x1b\[[0-9;]*m/g, '')
+      if (stripped.length <= maxWidth) return line
+      return line.slice(0, Math.max(1, maxWidth - 3)) + '...'
+    })
     const header = paintUiText(ui, title, 'accent')
     const stageLine = paintUiText(ui, `${stage} ${spinner}`, stageTone)
     const body = logLines.join('\n')
     const statusLine = paintUiText(ui, statusText, statusTone)
 
     const lines = [header, stageLine, '', body, statusLine]
-    process.stdout.write(`${ANSI.clearScreen}${ANSI.moveTo(1, 1)}${lines.filter(Boolean).join('\n')}`)
+    process.stdout.write(`${ANSI.clearScreen}${ANSI.moveTo(1, 1)}${lines.join('\n')}`)
     frame += 1
   }
 
@@ -119,7 +125,7 @@ export async function runActionPanel<T>(
   }
 
   const cleanupScreen = (): void => {
-    process.stdout.write(`${ANSI.show}${ANSI.altScreenOff}${ANSI.clearScreen}`)
+    process.stdout.write(`${ANSI.show}${ANSI.altScreenOff}`)
   }
 
   process.stdout.write(`${ANSI.altScreenOn}${ANSI.hide}`)
