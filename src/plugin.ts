@@ -2452,14 +2452,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = false;
                 }
 
-                // [CRITICAL] Check for AbortError from user vs timeout
+                // [CRITICAL] Check for user interruption FIRST before any error classification
+                if (abortSignal?.aborted) {
+                  // User pressed ESC - stop everything immediately to prevent spin loop and memory leak
+                  pushDebug("user-interrupted: stopping request loop");
+                  throw error;
+                }
+
+                // Check for timeout errors
                 if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
-                  if (abortSignal?.aborted) {
-                    // User pressed ESC - stop everything immediately to prevent spin loop and memory leak
-                    pushDebug("user-interrupted: stopping request loop");
-                    throw error;
-                  }
-                  
                   // This was a request timeout (stuck account)
                   const actualTimeoutSec = Math.round(effectiveTimeoutMs / 1000);
                   pushDebug(`request-timeout: account ${account.index} stuck for ${actualTimeoutSec}s, rotating`);
