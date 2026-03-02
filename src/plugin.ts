@@ -183,9 +183,8 @@ async function triggerAsyncQuotaRefreshForAccount(
     
     const results = await checkAccountsQuota([singleAccount], client, providerId);
     
-    if (results[0]?.status === "ok" && results[0]?.quota?.groups) {
-      accountManager.updateQuotaCache(accountIndex, results[0].quota.groups);
-      accountManager.requestSaveToDisk();
+    if (results[0]?.status === "ok" && results[0]?.quota?.groups && results[0]?.refreshToken) {
+      accountManager.updateQuotaCache(results[0].refreshToken, results[0].quota.groups);
     }
   } catch (err) {
     log.debug(`quota-refresh-failed email=${accountKey}`, { error: String(err) });
@@ -2049,7 +2048,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 }
 
                 // Check if we should proactively refresh all quotas
-                if (accountManager.shouldRefreshAllQuotas()) {
+                if (accountManager.shouldRefreshAllQuotas(family, config.soft_quota_threshold_percent, softQuotaCacheTtlMs, model)) {
                   pushDebug("proactive-quota-refresh: pool is mostly blocked, refreshing all");
                   void triggerAsyncQuotaRefreshForAll(accountManager, client, providerId);
                 }

@@ -57,6 +57,7 @@ export type AccountQuotaStatus = "ok" | "disabled" | "error";
 export interface AccountQuotaResult {
   index: number;
   email?: string;
+  refreshToken?: string;
   status: AccountQuotaStatus;
   error?: string;
   disabled?: boolean;
@@ -369,6 +370,7 @@ export async function checkAccountsQuota(
       results.push({
         index,
         email: account.email,
+        refreshToken: account.refreshToken,
         status: "ok",
         disabled,
         quota: quotaResult,
@@ -385,6 +387,7 @@ export async function checkAccountsQuota(
       results.push({
         index,
         email: account.email,
+        refreshToken: account.refreshToken,
         status: "error",
         disabled,
         error: error instanceof Error ? error.message : String(error),
@@ -419,8 +422,8 @@ export async function triggerAsyncQuotaRefreshForAll(
     const results = await checkAccountsQuota(accountsMetadata, client, providerId);
     
     for (const result of results) {
-      if (result.status === "ok" && result.quota) {
-        accountManager.updateQuotaCache(result.index, result.quota.groups);
+      if (result.status === "ok" && result.quota && result.refreshToken) {
+        accountManager.updateQuotaCache(result.refreshToken, result.quota.groups);
       }
     }
   } catch (error) {

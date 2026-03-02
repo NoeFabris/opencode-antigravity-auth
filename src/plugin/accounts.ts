@@ -1155,8 +1155,11 @@ export class AccountManager {
     return [...account.fingerprintHistory];
   }
 
-  updateQuotaCache(accountIndex: number, quotaGroups: Partial<Record<QuotaGroup, QuotaGroupSummary>>): void {
-    const account = this.accounts[accountIndex];
+  updateQuotaCache(
+    refreshToken: string, 
+    quotaGroups: Partial<Record<QuotaGroup, QuotaGroupSummary>>
+  ): void {
+    const account = this.accounts.find(a => a.parts.refreshToken === refreshToken);
     if (account) {
       account.cachedQuota = quotaGroups;
       account.cachedQuotaUpdatedAt = nowMs();
@@ -1168,7 +1171,12 @@ export class AccountManager {
    * Heuristic to determine if we should refresh all quotas in the pool.
    * Triggers when the pool is mostly blocked or unhealthy.
    */
-  shouldRefreshAllQuotas(): boolean {
+  shouldRefreshAllQuotas(
+    family?: ModelFamily,
+    thresholdPercent: number = 100,
+    cacheTtlMs: number = 10 * 60 * 1000,
+    model?: string | null
+  ): boolean {
     const enabled = this.getEnabledAccounts();
     if (enabled.length === 0) return false;
 
@@ -1177,7 +1185,8 @@ export class AccountManager {
     const blockedCount = enabled.filter(acc => {
       const isRateLimited = Object.values(acc.rateLimitResetTimes).some(t => t !== undefined && t > now);
       const isCoolingDown = acc.coolingDownUntil !== undefined && acc.coolingDownUntil > now;
-      return isRateLimited || isCoolingDown;
+      const isOverSoftQuota = family ? isOverSoftQuotaThreshold(acc, family, thresholdPercent, cacheTtlMs, model) : false;
+      return isRateLimited || isCoolingDown || isOverSoftQuota;
     }).length;
 
     return (blockedCount / enabled.length) >= 0.75;
