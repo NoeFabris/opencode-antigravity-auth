@@ -89,21 +89,60 @@ const log = createLogger("plugin");
 if (typeof (AbortSignal as any).any !== "function") {
   (AbortSignal as any).any = function (signals: AbortSignal[]): AbortSignal {
     const controller = new AbortController();
+    const onAbort = () => {
+      const firstAborted = signals.find(s => s.aborted);
+      controller.abort(firstAborted?.reason);
+      cleanup();
+    };
+    const cleanup = () => {
+      for (const signal of signals) {
+        signal.removeEventListener("abort", onAbort);
+      }
+    };
     for (const signal of signals) {
       if (signal.aborted) {
         controller.abort(signal.reason);
         return controller.signal;
       }
-      signal.addEventListener(
-        "abort",
-        () => {
-          controller.abort(signal.reason);
-        },
-        { once: true }
-      );
+      signal.addEventListener("abort", onAbort, { once: true });
     }
+    controller.signal.addEventListener("abort", cleanup, { once: true });
     return controller.signal;
   };
+}
+
+/**
+ * Simple combinator for multiple AbortSignals for environments where AbortSignal.any is missing.
+ */
+function mergeAbortSignals(...signals: (AbortSignal | undefined)[]): AbortSignal {
+  const activeSignals = signals.filter((s): s is AbortSignal => s !== undefined);
+  if (activeSignals.length === 0) return new AbortController().signal;
+  if (activeSignals.length === 1) return activeSignals[0] as AbortSignal;
+  
+  if (typeof (AbortSignal as any).any === 'function') {
+    return (AbortSignal as any).any(activeSignals);
+  }
+
+  const controller = new AbortController();
+  const onAbort = () => {
+    const firstAborted = activeSignals.find(s => s.aborted);
+    controller.abort(firstAborted?.reason);
+    cleanup();
+  };
+  const cleanup = () => {
+    for (const signal of activeSignals) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  };
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return controller.signal;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+  controller.signal.addEventListener("abort", cleanup, { once: true });
+  return controller.signal;
 }
 
 // Module-level toast debounce to persist across requests (fixes toast spam)
@@ -2063,10 +2102,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   ? Math.min(timeoutMs * 3, 1800000) 
                   : timeoutMs;
                   
-                const timeoutSignal = AbortSignal.timeout(effectiveTimeoutMs);
-                const combinedSignal = abortSignal 
-                  ? (AbortSignal as any).any([abortSignal, timeoutSignal])
-                  : timeoutSignal;
+                // Safely create timeout signal with fallback for older Node.js versions
+                let timeoutSignal: AbortSignal;
+                if (typeof AbortSignal.timeout === 'function') {
+                  timeoutSignal = AbortSignal.timeout(effectiveTimeoutMs);
+                } else {
+                  const controller = new AbortController();
+                  setTimeout(() => controller.abort(new Error('Timeout')), effectiveTimeoutMs);
+                  timeoutSignal = controller.signal;
+                }
+
+                // Safely create combined signal with polyfill/fallback
+                const combinedSignal = mergeAbortSignals(abortSignal, timeoutSignal);
 
                 const response = await fetch(prepared.request, {
                   ...prepared.init,
