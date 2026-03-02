@@ -267,6 +267,15 @@ export const AntigravityConfigSchema = z.object({
    * @default 300 (5 minutes)
    */
   max_rate_limit_wait_seconds: z.number().min(0).max(3600).default(300),
+
+  /**
+   * Maximum time in seconds for a single API request before timing out.
+   * When a request times out, the account is marked unhealthy and the 
+   * plugin automatically rotates to the next available account.
+   * 
+   * @default 180 (3 minutes)
+   */
+  request_timeout_seconds: z.number().min(30).max(1800).default(180),
   
   /**
    * @deprecated Kept only for backward compatibility.
@@ -464,6 +473,7 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   proactive_refresh_buffer_seconds: 1800,
   proactive_refresh_check_interval_seconds: 300,
   max_rate_limit_wait_seconds: 300,
+  request_timeout_seconds: 180,
   quota_fallback: false,
   cli_first: false,
   account_selection_strategy: 'hybrid',

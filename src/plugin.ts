@@ -44,7 +44,7 @@ import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackof
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
 import { createSessionRecoveryHook, getRecoverySuccessToast } from "./plugin/recovery";
-import { checkAccountsQuota } from "./plugin/quota";
+import { checkAccountsQuota, triggerAsyncQuotaRefreshForAll } from "./plugin/quota";
 import { initDiskSignatureCache } from "./plugin/cache";
 import { createProactiveRefreshQueue, type ProactiveRefreshQueue } from "./plugin/refresh-queue";
 import { initLogger, createLogger } from "./plugin/logger";
@@ -90,7 +90,7 @@ let softQuotaToastShown = false;
 let rateLimitToastShown = false;
 
 // Module-level reference to AccountManager for access from auth.login
-let activeAccountManager: import("./plugin/accounts").AccountManager | null = null;
+let activeAccountManager: AccountManager | null = null;
 
 function cleanupToastCooldowns(): void {
   if (rateLimitToastCooldowns.size > MAX_TOAST_COOLDOWN_ENTRIES) {
@@ -2022,7 +2022,23 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                const response = await fetch(prepared.request, prepared.init);
+                // Check if we should proactively refresh all quotas
+                if (accountManager.shouldRefreshAllQuotas()) {
+                  pushDebug("proactive-quota-refresh: pool is mostly blocked, refreshing all");
+                  void triggerAsyncQuotaRefreshForAll(accountManager, client, providerId);
+                }
+
+                // Create a combined signal for timeout and user abort
+                const timeoutMs = (config.request_timeout_seconds ?? 180) * 1000;
+                const timeoutSignal = AbortSignal.timeout(timeoutMs);
+                const combinedSignal = abortSignal 
+                  ? (AbortSignal as any).any([abortSignal, timeoutSignal])
+                  : timeoutSignal;
+
+                const response = await fetch(prepared.request, {
+                  ...prepared.init,
+                  signal: combinedSignal
+                });
                 pushDebug(`status=${response.status} ${response.statusText}`);
 
 
@@ -2401,6 +2417,30 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 if (tokenConsumed) {
                   getTokenTracker().refund(account.index);
                   tokenConsumed = false;
+                }
+
+                // [CRITICAL] Check for AbortError from user vs timeout
+                if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+                  if (abortSignal?.aborted) {
+                    // User pressed ESC - stop everything immediately to prevent spin loop and memory leak
+                    pushDebug("user-interrupted: stopping request loop");
+                    throw error;
+                  }
+                  
+                  // This was a request timeout (stuck account)
+                  const timeoutSec = config.request_timeout_seconds ?? 180;
+                  pushDebug(`request-timeout: account ${account.index} stuck for ${timeoutSec}s, rotating`);
+                  getHealthTracker().recordFailure(account.index);
+                  accountManager.markAccountCoolingDown(account, 60000, "network-error");
+                  
+                  await showToast(
+                    `⏳ Account stuck (${timeoutSec}s). Rotating to next available...`,
+                    "warning"
+                  );
+                  
+                  shouldSwitchAccount = true;
+                  lastError = error;
+                  break;
                 }
 
                 // Handle recoverable thinking errors - retry with forced recovery

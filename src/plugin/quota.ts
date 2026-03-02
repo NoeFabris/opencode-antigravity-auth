@@ -10,8 +10,11 @@ import { refreshAccessToken } from "./token";
 import { getModelFamily } from "./transform/model-resolver";
 import type { PluginClient, OAuthAuthDetails } from "./types";
 import type { AccountMetadataV3 } from "./storage";
+import type { AccountManager } from "./accounts";
 
 const FETCH_TIMEOUT_MS = 10000;
+const POOL_REFRESH_COOLDOWN_MS = 60000; // 1 minute
+let lastPoolRefreshTime = 0;
 
 export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash";
 
@@ -392,4 +395,36 @@ export async function checkAccountsQuota(
 
   logQuotaFetch("complete", accounts.length, `ok=${results.filter(r => r.status === "ok").length} errors=${results.filter(r => r.status === "error").length}`);
   return results;
+}
+
+/**
+ * Proactively refreshes quotas for all accounts in the background.
+ * Updates the account manager with new quota data.
+ */
+export async function triggerAsyncQuotaRefreshForAll(
+  accountManager: AccountManager,
+  client: PluginClient,
+  providerId: string,
+): Promise<void> {
+  const now = Date.now();
+  if (now - lastPoolRefreshTime < POOL_REFRESH_COOLDOWN_MS) {
+    return;
+  }
+  lastPoolRefreshTime = now;
+  
+  try {
+    const accountsMetadata = accountManager.getAccountsForQuotaCheck();
+    if (accountsMetadata.length === 0) return;
+
+    const results = await checkAccountsQuota(accountsMetadata, client, providerId);
+    
+    for (const result of results) {
+      if (result.status === "ok" && result.quota) {
+        accountManager.updateQuotaCache(result.index, result.quota.groups);
+      }
+    }
+  } catch (error) {
+    // Proactive refresh is best-effort - log and ignore
+    console.error("[ProactiveQuota] Failed to refresh all quotas", error);
+  }
 }

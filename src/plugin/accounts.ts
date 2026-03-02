@@ -1160,7 +1160,27 @@ export class AccountManager {
     if (account) {
       account.cachedQuota = quotaGroups;
       account.cachedQuotaUpdatedAt = nowMs();
+      this.requestSaveToDisk();
     }
+  }
+
+  /**
+   * Heuristic to determine if we should refresh all quotas in the pool.
+   * Triggers when the pool is mostly blocked or unhealthy.
+   */
+  shouldRefreshAllQuotas(): boolean {
+    const enabled = this.getEnabledAccounts();
+    if (enabled.length === 0) return false;
+
+    const now = nowMs();
+    // Refresh if more than 75% of enabled accounts are marked as rate-limited or over soft quota
+    const blockedCount = enabled.filter(acc => {
+      const isRateLimited = Object.values(acc.rateLimitResetTimes).some(t => t !== undefined && t > now);
+      const isCoolingDown = acc.coolingDownUntil !== undefined && acc.coolingDownUntil > now;
+      return isRateLimited || isCoolingDown;
+    }).length;
+
+    return (blockedCount / enabled.length) >= 0.75;
   }
 
   isAccountOverSoftQuota(account: ManagedAccount, family: ModelFamily, thresholdPercent: number, cacheTtlMs: number, model?: string | null): boolean {
