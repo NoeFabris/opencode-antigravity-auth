@@ -2468,7 +2468,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   accountManager.markAccountCoolingDown(account, 60000, "network-error");
                   
                   // Persist cooldown immediately so it survives restarts
-                  await accountManager.saveToDisk();
+                  try {
+                    await accountManager.saveToDisk();
+                  } catch (saveError) {
+                    log.error("failed-to-persist-timeout-cooldown", { error: String(saveError) });
+                  }
                   
                   await showToast(
                     `⏳ Account stuck (${actualTimeoutSec}s). Rotating to next available...`,
