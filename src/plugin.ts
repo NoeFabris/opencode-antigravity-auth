@@ -80,6 +80,32 @@ let childSessionParentID: string | undefined = undefined;
 
 const log = createLogger("plugin");
 
+/**
+ * [Node.js Compatibility Polyfill]
+ * AbortSignal.any() was added in Node 20.17.0.
+ * This project supports Node >= 20.0.0, so we provide a polyfill
+ * for older 20.x releases.
+ */
+if (typeof (AbortSignal as any).any !== "function") {
+  (AbortSignal as any).any = function (signals: AbortSignal[]): AbortSignal {
+    const controller = new AbortController();
+    for (const signal of signals) {
+      if (signal.aborted) {
+        controller.abort(signal.reason);
+        return controller.signal;
+      }
+      signal.addEventListener(
+        "abort",
+        () => {
+          controller.abort(signal.reason);
+        },
+        { once: true }
+      );
+    }
+    return controller.signal;
+  };
+}
+
 // Module-level toast debounce to persist across requests (fixes toast spam)
 const rateLimitToastCooldowns = new Map<string, number>();
 const RATE_LIMIT_TOAST_COOLDOWN_MS = 5000;
