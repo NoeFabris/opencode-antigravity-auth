@@ -1988,6 +1988,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 continue;
               }
 
+              let effectiveTimeoutMs = (config.request_timeout_seconds ?? 600) * 1000;
+
               try {
                 const prepared = prepareAntigravityRequest(
                   input,
@@ -2054,8 +2056,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 }
 
                 // Create a combined signal for timeout and user abort
-                const timeoutMs = (config.request_timeout_seconds ?? 180) * 1000;
-                const timeoutSignal = AbortSignal.timeout(timeoutMs);
+                const timeoutMs = (config.request_timeout_seconds ?? 600) * 1000;
+                // For streaming, we allow up to 3x the timeout (max 30 mins) to account for long generations
+                // while still catching truly "stuck" connections.
+                effectiveTimeoutMs = prepared.streaming 
+                  ? Math.min(timeoutMs * 3, 1800000) 
+                  : timeoutMs;
+                  
+                const timeoutSignal = AbortSignal.timeout(effectiveTimeoutMs);
                 const combinedSignal = abortSignal 
                   ? (AbortSignal as any).any([abortSignal, timeoutSignal])
                   : timeoutSignal;
@@ -2453,13 +2461,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   }
                   
                   // This was a request timeout (stuck account)
-                  const timeoutSec = config.request_timeout_seconds ?? 180;
-                  pushDebug(`request-timeout: account ${account.index} stuck for ${timeoutSec}s, rotating`);
+                  const actualTimeoutSec = Math.round(effectiveTimeoutMs / 1000);
+                  pushDebug(`request-timeout: account ${account.index} stuck for ${actualTimeoutSec}s, rotating`);
                   getHealthTracker().recordFailure(account.index);
                   accountManager.markAccountCoolingDown(account, 60000, "network-error");
                   
                   await showToast(
-                    `⏳ Account stuck (${timeoutSec}s). Rotating to next available...`,
+                    `⏳ Account stuck (${actualTimeoutSec}s). Rotating to next available...`,
                     "warning"
                   );
                   
