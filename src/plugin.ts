@@ -2049,8 +2049,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   tokenConsumed = getTokenTracker().consume(account.index);
                 }
 
-                // Check if we should proactively refresh all quotas
-                if (accountManager.shouldRefreshAllQuotas(family, config.soft_quota_threshold_percent, softQuotaCacheTtlMs, model)) {
+                // Check if we should proactively refresh all quotas (only on first endpoint attempt)
+                if (i === 0 && accountManager.shouldRefreshAllQuotas(family, config.soft_quota_threshold_percent, softQuotaCacheTtlMs, model)) {
                   pushDebug("proactive-quota-refresh: pool is mostly blocked, refreshing all");
                   void triggerAsyncQuotaRefreshForAll(accountManager, client, providerId);
                 }
@@ -2466,6 +2466,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   pushDebug(`request-timeout: account ${account.index} stuck for ${actualTimeoutSec}s, rotating`);
                   getHealthTracker().recordFailure(account.index);
                   accountManager.markAccountCoolingDown(account, 60000, "network-error");
+                  
+                  // Persist cooldown immediately so it survives restarts
+                  await accountManager.saveToDisk();
                   
                   await showToast(
                     `⏳ Account stuck (${actualTimeoutSec}s). Rotating to next available...`,

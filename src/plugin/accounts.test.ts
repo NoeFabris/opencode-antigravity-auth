@@ -1868,7 +1868,7 @@ describe("resolveQuotaGroup", () => {
   });
 
   describe("shouldRefreshAllQuotas", () => {
-    it("returns true when more than 75% accounts are rate-limited", () => {
+    it("returns true when 75% or more accounts are rate-limited", () => {
       const stored: AccountStorageV4 = {
         version: 4,
         accounts: [

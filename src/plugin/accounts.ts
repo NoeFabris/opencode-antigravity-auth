@@ -1181,9 +1181,11 @@ export class AccountManager {
     if (enabled.length === 0) return false;
 
     const now = nowMs();
-    // Refresh if more than 75% of enabled accounts are marked as rate-limited or over soft quota
+    // Refresh if 75% or more of enabled accounts are marked as rate-limited or over soft quota
     const blockedCount = enabled.filter(acc => {
-      const isRateLimited = Object.values(acc.rateLimitResetTimes).some(t => t !== undefined && t > now);
+      const isRateLimited = family 
+        ? isRateLimitedForFamily(acc, family, model)
+        : Object.values(acc.rateLimitResetTimes).some(t => t !== undefined && t > now);
       const isCoolingDown = acc.coolingDownUntil !== undefined && acc.coolingDownUntil > now;
       const isOverSoftQuota = family ? isOverSoftQuotaThreshold(acc, family, thresholdPercent, cacheTtlMs, model) : false;
       return isRateLimited || isCoolingDown || isOverSoftQuota;
