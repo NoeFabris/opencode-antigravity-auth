@@ -2379,6 +2379,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     )
                   ) {
                     disableClaudeLongContextBetaForRetry = true;
+                    if (tokenConsumed) {
+                      getTokenTracker().refund(account.index);
+                      tokenConsumed = false;
+                    }
 
                     const sessionKey = prepared.sessionId
                       ?? `${account.index}:${prepared.effectiveModel ?? "claude"}`;

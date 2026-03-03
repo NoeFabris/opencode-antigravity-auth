@@ -110,6 +110,14 @@ describe("format helpers", () => {
     expect(scrubbed).not.toContain("[redacted-card]")
   })
 
+  it("does not scrub plain long numeric identifiers as credit cards", () => {
+    const raw = "trace_id=1748000000000000000"
+    const scrubbed = scrubTextForLog(raw, 500)
+
+    expect(scrubbed).toContain(raw)
+    expect(scrubbed).not.toContain("[redacted-card]")
+  })
+
   it("normalizes and truncates scrubbed text", () => {
     const raw = "  a    b    c  "
     expect(scrubTextForLog(raw, 5)).toBe("a b c")
