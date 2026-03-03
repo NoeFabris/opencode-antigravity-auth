@@ -82,6 +82,17 @@ describe("format helpers", () => {
     expect(scrubbed).not.toContain("abc123")
   })
 
+  it("scrubs quoted credential keys in JSON-like payloads", () => {
+    const raw = '{"authorization":"Bearer abc123","token":"abc123","api_key":"k-123"}'
+    const scrubbed = scrubTextForLog(raw, 500)
+
+    expect(scrubbed).toContain('"authorization":"[redacted]"')
+    expect(scrubbed).toContain('"token":"[redacted]"')
+    expect(scrubbed).toContain('"api_key":"[redacted]"')
+    expect(scrubbed).not.toContain("abc123")
+    expect(scrubbed).not.toContain("k-123")
+  })
+
   it("scrubs standalone base64-like tokens with trailing padding", () => {
     const token = "QWxhZGRpbjpvcGVuIHNlc2FtZQ+/=QWxhZGRpbjpvcGVuIHNlc2FtZQ+/="
     const raw = `debug=${token}`
@@ -89,6 +100,14 @@ describe("format helpers", () => {
 
     expect(scrubbed).toContain("[redacted-token]")
     expect(scrubbed).not.toContain(token)
+  })
+
+  it("does not scrub punctuation-separated digits as credit cards", () => {
+    const raw = "id=4!2!4!2!4!2!4!2!4!2!4!2!4!2!4!2"
+    const scrubbed = scrubTextForLog(raw, 500)
+
+    expect(scrubbed).toContain(raw)
+    expect(scrubbed).not.toContain("[redacted-card]")
   })
 
   it("normalizes and truncates scrubbed text", () => {

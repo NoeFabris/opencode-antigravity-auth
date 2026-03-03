@@ -747,7 +747,7 @@ function appendAnthropicBetaHeader(headers: Headers, value: string): void {
 
 function isClaudeModelEligibleForLongContextBeta(model: string): boolean {
   const lower = model.toLowerCase();
-  return lower === "claude-sonnet-4-6" || lower.startsWith("claude-opus-4-6-thinking");
+  return lower.startsWith("claude-sonnet-4-6") || lower.startsWith("claude-opus-4-6-thinking");
 }
 
 /**
@@ -807,7 +807,12 @@ export function isUnsupportedClaudeLongContextBetaError(
     return true;
   }
 
-  return mentionsAnthropicBeta && hasRejectionSignal && lower.includes("context");
+  return (
+    mentionsAnthropicBeta
+    && hasRejectionSignal
+    && !mentionsInterleavedThinking
+    && (mentionsLongContextToken || mentionsExpectedHeader)
+  );
 }
 
 /**

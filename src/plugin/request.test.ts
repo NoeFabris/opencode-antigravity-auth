@@ -133,6 +133,16 @@ describe("request.ts", () => {
       expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(false);
     });
 
+    it("returns false for anthropic-beta errors with generic context wording", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: anthropic-beta header count exceeds limit. Request context was valid.",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(false);
+    });
+
     it("returns false for unrelated context length errors", () => {
       const body = JSON.stringify({
         error: {
@@ -764,6 +774,27 @@ it("removes x-api-key header", () => {
         expect(anthropicBeta).toContain("context-1m-2025-08-07");
         expect(result.claudeLongContextBetaApplied).toBe(true);
         expect(result.claudeLongContextBetaHeader).toBe("context-1m-2025-08-07");
+      });
+
+      it("adds long-context beta header for versioned Claude Sonnet 4.6 model when enabled", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/claude-sonnet-4-6-20250514:generateContent",
+          { method: "POST", body: JSON.stringify({ contents: [] }) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+          false,
+          {
+            claudeLongContextBetaEnabled: true,
+            claudeLongContextBetaHeader: "context-1m-2025-08-07",
+          },
+        );
+
+        const headers = result.init.headers as Headers;
+        const anthropicBeta = headers.get("anthropic-beta");
+        expect(anthropicBeta).toContain("context-1m-2025-08-07");
+        expect(result.claudeLongContextBetaApplied).toBe(true);
       });
 
       it("does not add long-context beta header for non-Claude models", () => {

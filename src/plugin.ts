@@ -133,7 +133,7 @@ function shouldShowClaudeLongContextFallbackToast(sessionKey: string): boolean {
     MAX_CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS
   ) {
     const first = CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS.values().next().value;
-    if (first) {
+    if (first !== undefined) {
       CLAUDE_LONG_CONTEXT_FALLBACK_TOAST_SESSIONS.delete(first);
     }
   }
