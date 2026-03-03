@@ -143,6 +143,18 @@ describe("request.ts", () => {
       expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(false);
     });
 
+    it("returns false for anthropic-beta errors with generic context wording when expectedHeader is provided", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: anthropic-beta header count exceeds limit. Request context was valid.",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(false);
+    });
+
     it("returns false for unrelated context length errors", () => {
       const body = JSON.stringify({
         error: {

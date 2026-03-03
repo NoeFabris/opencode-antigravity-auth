@@ -777,12 +777,13 @@ export function isUnsupportedClaudeLongContextBetaError(
   const mentionsLongContextToken = lower.includes("context-1m");
   const mentionsAnthropicBeta = lower.includes("anthropic-beta") || lower.includes("anthropic beta");
   const mentionsInterleavedThinking = lower.includes("interleaved-thinking");
-  const mentionsUnsupported =
+  const mentionsUnsupportedKeyword =
     lower.includes("unsupported")
     || lower.includes("not supported")
     || lower.includes("unknown")
-    || lower.includes("invalid")
     || lower.includes("unrecognized");
+  const mentionsInvalidKeyword = lower.includes("invalid");
+  const mentionsUnsupported = mentionsUnsupportedKeyword || mentionsInvalidKeyword;
   const mentionsInvalidArgument = lower.includes("invalid_argument");
   const mentionsHeaderValueIssue =
     lower.includes("invalid header")
@@ -801,8 +802,12 @@ export function isUnsupportedClaudeLongContextBetaError(
   if (
     normalizedExpectedHeader.startsWith("context-1m")
     && mentionsAnthropicBeta
-    && hasRejectionSignal
     && !mentionsInterleavedThinking
+    && (
+      mentionsLongContextToken
+      || mentionsUnsupportedKeyword
+      || mentionsHeaderValueIssue
+    )
   ) {
     return true;
   }

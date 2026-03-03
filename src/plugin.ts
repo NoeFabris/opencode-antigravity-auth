@@ -1561,6 +1561,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
           let lastFailure: FailureContext | null = null;
           let lastError: Error | null = null;
+          // Intentional request scope: once context-1m beta is rejected, keep it disabled
+          // across account rotation for this request to guarantee one stable fallback path.
           let disableClaudeLongContextBetaForRetry = false;
           const abortSignal = init?.signal ?? undefined;
 
