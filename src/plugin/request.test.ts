@@ -132,6 +132,30 @@ describe("request.ts", () => {
 
       expect(isUnsupportedClaudeLongContextBetaError(500, body)).toBe(false);
     });
+
+    it("returns true for generic anthropic-beta rejection when expected context header was applied", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(true);
+    });
+
+    it("returns false for interleaved-thinking beta rejection when expected header is context-1m", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header interleaved-thinking-2025-05-14",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(false);
+    });
   });
 
   describe("buildSignatureSessionKey", () => {

@@ -760,6 +760,7 @@ export function isGenerativeLanguageRequest(input: RequestInfo): input is string
 export function isUnsupportedClaudeLongContextBetaError(
   status: number,
   bodyText: string | undefined,
+  expectedHeader?: string,
 ): boolean {
   if (status !== 400 && status !== 403) {
     return false;
@@ -770,8 +771,12 @@ export function isUnsupportedClaudeLongContextBetaError(
   }
 
   const lower = bodyText.toLowerCase();
+  const normalizedExpectedHeader = expectedHeader?.trim().toLowerCase() ?? "";
+  const mentionsExpectedHeader = normalizedExpectedHeader.length > 0 && lower.includes(normalizedExpectedHeader);
+
   const mentionsLongContextToken = lower.includes("context-1m");
   const mentionsAnthropicBeta = lower.includes("anthropic-beta") || lower.includes("anthropic beta");
+  const mentionsInterleavedThinking = lower.includes("interleaved-thinking");
   const mentionsBeta = lower.includes("beta");
   const mentionsUnsupported =
     lower.includes("unsupported")
@@ -779,12 +784,31 @@ export function isUnsupportedClaudeLongContextBetaError(
     || lower.includes("unknown")
     || lower.includes("invalid")
     || lower.includes("unrecognized");
+  const mentionsInvalidArgument = lower.includes("invalid_argument");
+  const mentionsHeaderValueIssue =
+    lower.includes("invalid header")
+    || lower.includes("header value")
+    || lower.includes("malformed");
+  const hasRejectionSignal = mentionsUnsupported || mentionsInvalidArgument || mentionsHeaderValueIssue;
 
-  if (mentionsLongContextToken && (mentionsAnthropicBeta || mentionsBeta || mentionsUnsupported)) {
+  if (mentionsExpectedHeader && hasRejectionSignal) {
     return true;
   }
 
-  return mentionsAnthropicBeta && mentionsBeta && mentionsUnsupported && lower.includes("context");
+  if (mentionsLongContextToken && (mentionsAnthropicBeta || mentionsBeta || hasRejectionSignal)) {
+    return true;
+  }
+
+  if (
+    normalizedExpectedHeader.startsWith("context-1m")
+    && mentionsAnthropicBeta
+    && hasRejectionSignal
+    && !mentionsInterleavedThinking
+  ) {
+    return true;
+  }
+
+  return mentionsAnthropicBeta && mentionsBeta && hasRejectionSignal && lower.includes("context");
 }
 
 /**

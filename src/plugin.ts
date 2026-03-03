@@ -2365,7 +2365,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   && response.status < 500
                 ) {
                   const errorBodyText = await response.clone().text().catch(() => "");
-                  if (isUnsupportedClaudeLongContextBetaError(response.status, errorBodyText)) {
+                  if (
+                    isUnsupportedClaudeLongContextBetaError(
+                      response.status,
+                      errorBodyText,
+                      prepared.claudeLongContextBetaHeader,
+                    )
+                  ) {
                     disableClaudeLongContextBetaForRetry = true;
 
                     const sessionKey = prepared.sessionId
