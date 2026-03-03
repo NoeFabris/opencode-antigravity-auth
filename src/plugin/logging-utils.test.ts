@@ -82,6 +82,15 @@ describe("format helpers", () => {
     expect(scrubbed).not.toContain("abc123")
   })
 
+  it("scrubs standalone base64-like tokens with trailing padding", () => {
+    const token = "QWxhZGRpbjpvcGVuIHNlc2FtZQ+/=QWxhZGRpbjpvcGVuIHNlc2FtZQ+/="
+    const raw = `debug=${token}`
+    const scrubbed = scrubTextForLog(raw, 500)
+
+    expect(scrubbed).toContain("[redacted-token]")
+    expect(scrubbed).not.toContain(token)
+  })
+
   it("normalizes and truncates scrubbed text", () => {
     const raw = "  a    b    c  "
     expect(scrubTextForLog(raw, 5)).toBe("a b c")

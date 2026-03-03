@@ -113,6 +113,26 @@ describe("request.ts", () => {
       expect(isUnsupportedClaudeLongContextBetaError(403, body)).toBe(true);
     });
 
+    it("returns true for 422 unsupported anthropic-beta long-context errors", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(422, body)).toBe(true);
+    });
+
+    it("returns false when message only mentions context-1m beta without rejection signal", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "Request included anthropic-beta context-1m-2025-08-07 during beta rollout",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(false);
+    });
+
     it("returns false for unrelated context length errors", () => {
       const body = JSON.stringify({
         error: {

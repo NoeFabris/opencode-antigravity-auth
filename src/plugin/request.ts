@@ -762,7 +762,7 @@ export function isUnsupportedClaudeLongContextBetaError(
   bodyText: string | undefined,
   expectedHeader?: string,
 ): boolean {
-  if (status !== 400 && status !== 403) {
+  if (status !== 400 && status !== 403 && status !== 422) {
     return false;
   }
 
@@ -777,7 +777,6 @@ export function isUnsupportedClaudeLongContextBetaError(
   const mentionsLongContextToken = lower.includes("context-1m");
   const mentionsAnthropicBeta = lower.includes("anthropic-beta") || lower.includes("anthropic beta");
   const mentionsInterleavedThinking = lower.includes("interleaved-thinking");
-  const mentionsBeta = lower.includes("beta");
   const mentionsUnsupported =
     lower.includes("unsupported")
     || lower.includes("not supported")
@@ -795,7 +794,7 @@ export function isUnsupportedClaudeLongContextBetaError(
     return true;
   }
 
-  if (mentionsLongContextToken && (mentionsAnthropicBeta || mentionsBeta || hasRejectionSignal)) {
+  if (mentionsLongContextToken && mentionsAnthropicBeta && hasRejectionSignal) {
     return true;
   }
 
@@ -808,7 +807,7 @@ export function isUnsupportedClaudeLongContextBetaError(
     return true;
   }
 
-  return mentionsAnthropicBeta && mentionsBeta && hasRejectionSignal && lower.includes("context");
+  return mentionsAnthropicBeta && hasRejectionSignal && lower.includes("context");
 }
 
 /**

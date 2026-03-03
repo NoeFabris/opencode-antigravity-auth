@@ -90,7 +90,7 @@ export function scrubTextForLog(text: string, maxChars: number): string {
     )
     .replace(/\b[a-f0-9]{32,}\b/gi, "[redacted-hex]")
     .replace(/\b(?:\d[ -]*?){13,19}\b/g, "[redacted-card]")
-    .replace(/\b[A-Za-z0-9+/=_-]{40,}\b/g, "[redacted-token]")
+    .replace(/(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{40,}(?![A-Za-z0-9+/=_-])/g, "[redacted-token]")
 
   return truncateTextForLog(scrubbed, maxChars)
 }

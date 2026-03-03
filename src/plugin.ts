@@ -1561,6 +1561,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
           let lastFailure: FailureContext | null = null;
           let lastError: Error | null = null;
+          let disableClaudeLongContextBetaForRetry = false;
           const abortSignal = init?.signal ?? undefined;
 
           // Helper to check if request was aborted
@@ -2016,7 +2017,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
             // Track capacity retries per endpoint to prevent infinite loops
             let capacityRetryCount = 0;
             let lastEndpointIndex = -1;
-            let disableClaudeLongContextBetaForRetry = false;
             
             for (let i = 0; i < ANTIGRAVITY_ENDPOINT_FALLBACKS.length; i++) {
               // Reset capacity retry counter when switching to a new endpoint
@@ -2358,11 +2358,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   }
                 }
 
+                const canBeClaudeLongContextRejection =
+                  response.status === 400
+                  || response.status === 403
+                  || response.status === 422;
+
                 if (
                   prepared.claudeLongContextBetaApplied
                   && !disableClaudeLongContextBetaForRetry
-                  && response.status >= 400
-                  && response.status < 500
+                  && canBeClaudeLongContextRejection
                 ) {
                   const errorBodyText = await response.clone().text().catch(() => "");
                   if (
