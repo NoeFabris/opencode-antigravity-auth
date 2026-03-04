@@ -102,6 +102,16 @@ describe("format helpers", () => {
     expect(scrubbed).not.toContain(token)
   })
 
+  it("scrubs long token values without redacting long key names", () => {
+    const key = "K".repeat(44)
+    const token = "T".repeat(44)
+    const raw = `${key}=${token}`
+    const scrubbed = scrubTextForLog(raw, 500)
+
+    expect(scrubbed).toContain(`${key}=[redacted-token]`)
+    expect(scrubbed).not.toContain(token)
+  })
+
   it("does not scrub punctuation-separated digits as credit cards", () => {
     const raw = "id=4!2!4!2!4!2!4!2!4!2!4!2!4!2!4!2"
     const scrubbed = scrubTextForLog(raw, 500)

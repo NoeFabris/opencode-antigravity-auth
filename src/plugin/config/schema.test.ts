@@ -61,7 +61,12 @@ describe("claude_long_context_beta config", () => {
   it("documents claude_long_context_beta in the JSON schema", () => {
     const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
     const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
-      properties?: Record<string, { type?: string; default?: unknown; description?: string }>;
+      properties?: Record<string, {
+        type?: string
+        default?: unknown
+        description?: string
+        minLength?: number
+      }>;
     };
 
     const claudeLongContextBeta = schema.properties?.claude_long_context_beta;
@@ -77,7 +82,12 @@ describe("claude_long_context_beta config", () => {
   it("documents claude_long_context_beta_header in the JSON schema", () => {
     const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
     const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
-      properties?: Record<string, { type?: string; default?: unknown; description?: string }>;
+      properties?: Record<string, {
+        type?: string
+        default?: unknown
+        description?: string
+        minLength?: number
+      }>;
     };
 
     const claudeLongContextBetaHeader = schema.properties?.claude_long_context_beta_header;

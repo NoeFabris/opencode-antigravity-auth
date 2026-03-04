@@ -155,6 +155,16 @@ describe("request.ts", () => {
       ).toBe(false);
     });
 
+    it("returns false for quota or rate-limit messages even when context-1m is mentioned", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "RESOURCE_EXHAUSTED: rate limit quota exceeded for anthropic-beta context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(403, body)).toBe(false);
+    });
+
     it("returns false for unrelated context length errors", () => {
       const body = JSON.stringify({
         error: {
@@ -807,6 +817,36 @@ it("removes x-api-key header", () => {
         const anthropicBeta = headers.get("anthropic-beta");
         expect(anthropicBeta).toContain("context-1m-2025-08-07");
         expect(result.claudeLongContextBetaApplied).toBe(true);
+      });
+
+      it("treats versioned Claude Sonnet 4.6 as non-thinking and strips thinkingConfig", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/claude-sonnet-4-6-20250514:generateContent",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              contents: [],
+              generationConfig: {
+                thinkingConfig: {
+                  includeThoughts: true,
+                  thinkingBudget: 8192,
+                },
+              },
+            }),
+          },
+          mockAccessToken,
+          mockProjectId,
+        );
+
+        const parsed = JSON.parse(result.init.body as string) as {
+          request?: {
+            generationConfig?: {
+              thinkingConfig?: unknown
+            }
+          }
+        };
+
+        expect(parsed.request?.generationConfig?.thinkingConfig).toBeUndefined();
       });
 
       it("does not add long-context beta header for non-Claude models", () => {

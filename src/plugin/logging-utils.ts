@@ -93,7 +93,8 @@ export function scrubTextForLog(text: string, maxChars: number): string {
       /\b(?:\d{4}[- ]\d{4}[- ]\d{4}[- ]\d{4}|\d{4}[- ]\d{6}[- ]\d{5}|\d{4}[- ]\d{3}[- ]\d{3}[- ]\d{3})\b/g,
       "[redacted-card]",
     )
-    .replace(/(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{40,}(?![A-Za-z0-9+/=_-])/g, "[redacted-token]")
+    .replace(/(?<==)[A-Za-z0-9+/_-][A-Za-z0-9+/_=-]{39,}(?![A-Za-z0-9+/_=-])/g, "[redacted-token]")
+    .replace(/(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{40,}(?![A-Za-z0-9+/_=-])/g, "[redacted-token]")
 
   return truncateTextForLog(scrubbed, maxChars)
 }

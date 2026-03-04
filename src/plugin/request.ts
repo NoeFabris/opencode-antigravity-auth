@@ -783,19 +783,33 @@ export function isUnsupportedClaudeLongContextBetaError(
     || lower.includes("unknown")
     || lower.includes("unrecognized");
   const mentionsInvalidKeyword = lower.includes("invalid");
-  const mentionsUnsupported = mentionsUnsupportedKeyword || mentionsInvalidKeyword;
-  const mentionsInvalidArgument = lower.includes("invalid_argument");
   const mentionsHeaderValueIssue =
     lower.includes("invalid header")
     || lower.includes("header value")
     || lower.includes("malformed");
-  const hasRejectionSignal = mentionsUnsupported || mentionsInvalidArgument || mentionsHeaderValueIssue;
+  const mentionsQuotaOrRateLimit =
+    lower.includes("quota")
+    || lower.includes("rate limit")
+    || lower.includes("resource_exhausted")
+    || lower.includes("too many requests");
+  const hasHeaderRejectionSignal =
+    mentionsUnsupportedKeyword
+    || mentionsHeaderValueIssue
+    || (
+      mentionsInvalidKeyword
+      && mentionsAnthropicBeta
+      && (lower.includes("header") || mentionsLongContextToken)
+    );
 
-  if (mentionsExpectedHeader && hasRejectionSignal) {
+  if (mentionsQuotaOrRateLimit || !hasHeaderRejectionSignal) {
+    return false;
+  }
+
+  if (mentionsExpectedHeader) {
     return true;
   }
 
-  if (mentionsLongContextToken && mentionsAnthropicBeta && hasRejectionSignal) {
+  if (mentionsLongContextToken && mentionsAnthropicBeta) {
     return true;
   }
 
@@ -812,12 +826,7 @@ export function isUnsupportedClaudeLongContextBetaError(
     return true;
   }
 
-  return (
-    mentionsAnthropicBeta
-    && hasRejectionSignal
-    && !mentionsInterleavedThinking
-    && (mentionsLongContextToken || mentionsExpectedHeader)
-  );
+  return false;
 }
 
 /**
@@ -1070,7 +1079,10 @@ export function prepareAntigravityRequest(
         // Claude Sonnet 4.6 is non-thinking only.
         // Ignore any client-provided thinkingConfig for this model.
         const lowerEffective = effectiveModel.toLowerCase();
-        const isClaudeSonnetNonThinking = lowerEffective === "claude-sonnet-4-6";
+        const isClaudeSonnetNonThinking = lowerEffective.startsWith("claude-sonnet-4-6");
+        if (isClaudeSonnetNonThinking && rawGenerationConfig) {
+          delete rawGenerationConfig.thinkingConfig;
+        }
         const effectiveUserThinkingConfig = (isClaudeSonnetNonThinking || isImageModel) ? undefined : userThinkingConfig;
 
         // For image models, add imageConfig instead of thinkingConfig
