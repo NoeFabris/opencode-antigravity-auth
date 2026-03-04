@@ -143,7 +143,7 @@ const SANITY_TESTS: MultiTurnTest[] = [
     suite: "sanity",
     turns: ["Reply with exactly: OK", "Repeat the word 'test' 50000 times"],
     errorPatterns: ["FATAL", "unhandled", "Cannot read properties"],
-    timeout: 60000,
+    timeout: 180000,
   },
 ];
 

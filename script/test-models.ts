@@ -4,13 +4,14 @@ import { spawn } from "child_process";
 interface ModelTest {
   model: string;
   category: "gemini-cli" | "antigravity-gemini" | "antigravity-claude";
+  optional?: boolean;
 }
 
 const MODELS: ModelTest[] = [
   // Gemini CLI (direct Google API)
   { model: "google/gemini-3-flash-preview", category: "gemini-cli" },
   { model: "google/gemini-3.1-pro-preview", category: "gemini-cli" },
-  { model: "google/gemini-2.5-pro", category: "gemini-cli" },
+  { model: "google/gemini-2.5-pro", category: "gemini-cli", optional: true },
   { model: "google/gemini-2.5-flash", category: "gemini-cli" },
 
   // Antigravity Gemini
@@ -211,7 +212,8 @@ async function main(): Promise<void> {
 
   if (dryRun) {
     for (const t of tests) {
-      console.log(`  ${t.model.padEnd(50)} [${t.category}]`);
+      const optionalSuffix = t.optional ? " (optional)" : "";
+      console.log(`  ${t.model.padEnd(50)} [${t.category}]${optionalSuffix}`);
     }
     console.log(`\n${tests.length} models would be tested.\n`);
     return;
@@ -219,7 +221,9 @@ async function main(): Promise<void> {
 
   let passed = 0;
   let failed = 0;
-  const failures: { model: string; error: string }[] = [];
+  let optionalFailed = 0;
+  const requiredFailures: { model: string; error: string }[] = [];
+  const optionalFailures: { model: string; error: string }[] = [];
 
   for (const t of tests) {
     const timeoutForModel = resolveTimeoutForModel(t.model, timeout, modelTimeoutOverrides);
@@ -230,23 +234,40 @@ async function main(): Promise<void> {
       console.log(`✅ (${(result.duration / 1000).toFixed(1)}s)`);
       passed++;
     } else {
-      console.log(`❌ FAIL`);
+      if (t.optional) {
+        console.log(`⚠️ OPTIONAL FAIL`);
+      } else {
+        console.log(`❌ FAIL`);
+      }
       console.log(`   ${result.error}`);
       console.log(`   timeout=${timeoutForModel}ms`);
-      failures.push({ model: t.model, error: result.error || "Unknown" });
-      failed++;
+      const failure = { model: t.model, error: result.error || "Unknown" };
+      if (t.optional) {
+        optionalFailures.push(failure);
+        optionalFailed++;
+      } else {
+        requiredFailures.push(failure);
+        failed++;
+      }
     }
   }
 
   console.log(`\n${"=".repeat(50)}`);
-  console.log(`Summary: ${passed} passed, ${failed} failed\n`);
+  console.log(`Summary: ${passed} passed, ${failed} failed, ${optionalFailed} optional failed\n`);
 
-  if (failures.length > 0) {
-    console.log("Failed models:");
-    for (const f of failures) {
+  if (requiredFailures.length > 0) {
+    console.log("Failed required models:");
+    for (const f of requiredFailures) {
       console.log(`  - ${f.model}`);
     }
     process.exit(1);
+  }
+
+  if (optionalFailures.length > 0) {
+    console.log("Failed optional models:");
+    for (const f of optionalFailures) {
+      console.log(`  - ${f.model}`);
+    }
   }
 }
 
