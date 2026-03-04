@@ -85,8 +85,13 @@ function summarizeDiagnostic(text: string): string {
 }
 
 function resolveTimeoutForModel(model: string, defaultTimeout: number, modelTimeoutOverrides: Map<string, number>): number {
+  const exact = modelTimeoutOverrides.get(model);
+  if (exact !== undefined) {
+    return exact;
+  }
+
   for (const [pattern, timeout] of modelTimeoutOverrides) {
-    if (model === pattern || model.endsWith(pattern)) {
+    if (model.endsWith(pattern)) {
       return timeout;
     }
   }

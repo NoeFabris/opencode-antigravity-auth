@@ -185,7 +185,7 @@ describe("request.ts", () => {
       expect(isUnsupportedClaudeLongContextBetaError(500, body)).toBe(false);
     });
 
-    it("returns true for generic anthropic-beta rejection when expected context header was applied", () => {
+    it("returns false for generic anthropic-beta rejection that does not mention context-1m", () => {
       const body = JSON.stringify({
         error: {
           message: "INVALID_ARGUMENT: unsupported anthropic-beta header",
@@ -194,13 +194,25 @@ describe("request.ts", () => {
 
       expect(
         isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it("returns false for interleaved-thinking beta rejection when expected header is context-1m", () => {
       const body = JSON.stringify({
         error: {
           message: "INVALID_ARGUMENT: unsupported anthropic-beta header interleaved-thinking-2025-05-14",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(false);
+    });
+
+    it("returns false when unsupported anthropic-beta rejection only references unrelated beta header", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "UNKNOWN: unsupported anthropic-beta header foo-beta-2025-01-01",
         },
       });
 

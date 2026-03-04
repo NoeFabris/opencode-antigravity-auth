@@ -816,12 +816,9 @@ export function isUnsupportedClaudeLongContextBetaError(
   if (
     normalizedExpectedHeader.startsWith("context-1m")
     && mentionsAnthropicBeta
+    && mentionsLongContextToken
     && !mentionsInterleavedThinking
-    && (
-      mentionsLongContextToken
-      || mentionsUnsupportedKeyword
-      || mentionsHeaderValueIssue
-    )
+    && (mentionsUnsupportedKeyword || mentionsHeaderValueIssue)
   ) {
     return true;
   }
