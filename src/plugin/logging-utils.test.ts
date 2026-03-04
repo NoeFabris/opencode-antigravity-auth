@@ -93,6 +93,15 @@ describe("format helpers", () => {
     expect(scrubbed).not.toContain("k-123")
   })
 
+  it("scrubs multi-word credential values without leaking trailing words", () => {
+    const raw = '{"secret":"multi word value","email":"user@example.com"}'
+    const scrubbed = scrubTextForLog(raw, 500)
+
+    expect(scrubbed).toContain('"secret":"[redacted]"')
+    expect(scrubbed).not.toContain("multi word value")
+    expect(scrubbed).toContain('"email":"[redacted-email]"')
+  })
+
   it("scrubs standalone base64-like tokens with trailing padding", () => {
     const token = "QWxhZGRpbjpvcGVuIHNlc2FtZQ+/=QWxhZGRpbjpvcGVuIHNlc2FtZQ+/="
     const raw = `debug=${token}`

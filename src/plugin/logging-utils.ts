@@ -85,7 +85,7 @@ export function scrubTextForLog(text: string, maxChars: number): string {
   const scrubbed = normalized
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
     .replace(
-      /((?:["']?(?:authorization|api[_-]?key|token|secret|password)["']?)\s*[:=]\s*["']?)(?:(?:bearer|basic)\s+)?[^"'\s,;]+/gi,
+      /((?:["']?(?:authorization|api[_-]?key|token|secret|password)["']?)\s*[:=]\s*["']?)(?:(?:bearer|basic)\s+)?.+?(?=(?:["'\r\n,;]|$|\s+[A-Za-z_][A-Za-z0-9_-]*\s*[:=]))/gi,
       "$1[redacted]",
     )
     .replace(/\b[a-f0-9]{32,}\b/gi, "[redacted-hex]")
