@@ -721,11 +721,109 @@ function generateSyntheticProjectId(): string {
 
 const STREAM_ACTION = "streamGenerateContent";
 
+function appendAnthropicBetaHeader(headers: Headers, value: string): void {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return;
+  }
+
+  const existing = headers.get("anthropic-beta");
+  if (!existing) {
+    headers.set("anthropic-beta", trimmedValue);
+    return;
+  }
+
+  const tokens = existing
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  if (!tokens.includes(trimmedValue)) {
+    tokens.push(trimmedValue);
+  }
+
+  headers.set("anthropic-beta", tokens.join(","));
+}
+
+function isClaudeModelEligibleForLongContextBeta(model: string): boolean {
+  const lower = model.toLowerCase();
+  return lower.startsWith("claude-sonnet-4-6") || lower.startsWith("claude-opus-4-6-thinking");
+}
+
 /**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
  */
 export function isGenerativeLanguageRequest(input: RequestInfo): input is string {
   return typeof input === "string" && input.includes("generativelanguage.googleapis.com");
+}
+
+export function isUnsupportedClaudeLongContextBetaError(
+  status: number,
+  bodyText: string | undefined,
+  expectedHeader?: string,
+): boolean {
+  if (status !== 400 && status !== 403 && status !== 422) {
+    return false;
+  }
+
+  if (!bodyText || typeof bodyText !== "string") {
+    return false;
+  }
+
+  const lower = bodyText.toLowerCase();
+  const normalizedExpectedHeader = expectedHeader?.trim().toLowerCase() ?? "";
+  const mentionsExpectedHeader = normalizedExpectedHeader.length > 0 && lower.includes(normalizedExpectedHeader);
+
+  const mentionsLongContextToken = lower.includes("context-1m");
+  const mentionsAnthropicBeta = lower.includes("anthropic-beta") || lower.includes("anthropic beta");
+  const mentionsInterleavedThinking = lower.includes("interleaved-thinking");
+  const mentionsUnsupportedKeyword =
+    lower.includes("unsupported")
+    || lower.includes("not supported")
+    || lower.includes("unknown")
+    || lower.includes("unrecognized");
+  const mentionsInvalidKeyword = lower.includes("invalid");
+  const mentionsHeaderValueIssue =
+    lower.includes("invalid header")
+    || lower.includes("header value")
+    || lower.includes("malformed");
+  const mentionsQuotaOrRateLimit =
+    lower.includes("quota")
+    || lower.includes("rate limit")
+    || lower.includes("resource_exhausted")
+    || lower.includes("too many requests");
+  const hasHeaderRejectionSignal =
+    mentionsUnsupportedKeyword
+    || mentionsHeaderValueIssue
+    || (
+      mentionsInvalidKeyword
+      && mentionsAnthropicBeta
+      && (lower.includes("header") || mentionsLongContextToken)
+    );
+
+  if (mentionsQuotaOrRateLimit || !hasHeaderRejectionSignal) {
+    return false;
+  }
+
+  if (mentionsExpectedHeader) {
+    return true;
+  }
+
+  if (mentionsLongContextToken && mentionsAnthropicBeta) {
+    return true;
+  }
+
+  if (
+    normalizedExpectedHeader.startsWith("context-1m")
+    && mentionsAnthropicBeta
+    && mentionsLongContextToken
+    && !mentionsInterleavedThinking
+    && (mentionsUnsupportedKeyword || mentionsHeaderValueIssue)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -736,6 +834,12 @@ export interface PrepareRequestOptions {
   claudeToolHardening?: boolean;
   /** Enable top-level Claude prompt auto-caching (`cache_control`). Default: false */
   claudePromptAutoCaching?: boolean;
+  /** Enable experimental Claude 1M long-context beta header injection for Claude 4.6 models. */
+  claudeLongContextBetaEnabled?: boolean;
+  /** Header value for Claude long-context beta capability. */
+  claudeLongContextBetaHeader?: string;
+  /** Disable Claude long-context beta header for one retry attempt. */
+  disableClaudeLongContextBetaForRetry?: boolean;
   /** Google Search configuration (global default) */
   googleSearch?: GoogleSearchConfig;
   /** Per-account fingerprint for rate limit mitigation. Falls back to session fingerprint if not provided. */
@@ -764,6 +868,8 @@ export function prepareAntigravityRequest(
   toolDebugSummary?: string;
   toolDebugPayload?: string;
   needsSignedThinkingWarmup?: boolean;
+  claudeLongContextBetaApplied?: boolean;
+  claudeLongContextBetaHeader?: string;
   headerStyle: HeaderStyle;
   thinkingRecoveryMessage?: string;
 } {
@@ -775,6 +881,8 @@ export function prepareAntigravityRequest(
   let toolDebugPayload: string | undefined;
   let sessionId: string | undefined;
   let needsSignedThinkingWarmup = false;
+  let claudeLongContextBetaApplied = false;
+  let appliedClaudeLongContextBetaHeader: string | undefined;
   let thinkingRecoveryMessage: string | undefined;
 
   if (!isGenerativeLanguageRequest(input)) {
@@ -818,6 +926,9 @@ export function prepareAntigravityRequest(
   const isClaudeThinking = isClaudeThinkingModel(resolved.actualModel);
   const keepThinkingEnabled = getKeepThinking();
   const enableClaudePromptAutoCaching = options?.claudePromptAutoCaching ?? false;
+  const claudeLongContextBetaEnabled = options?.claudeLongContextBetaEnabled ?? false;
+  const claudeLongContextBetaHeader = options?.claudeLongContextBetaHeader?.trim() ?? "";
+  const disableClaudeLongContextBetaForRetry = options?.disableClaudeLongContextBetaForRetry ?? false;
 
   // Tier-based thinking configuration from model resolver (can be overridden by variant config)
   let tierThinkingBudget = resolved.thinkingBudget;
@@ -965,7 +1076,10 @@ export function prepareAntigravityRequest(
         // Claude Sonnet 4.6 is non-thinking only.
         // Ignore any client-provided thinkingConfig for this model.
         const lowerEffective = effectiveModel.toLowerCase();
-        const isClaudeSonnetNonThinking = lowerEffective === "claude-sonnet-4-6";
+        const isClaudeSonnetNonThinking = lowerEffective.startsWith("claude-sonnet-4-6");
+        if (isClaudeSonnetNonThinking && rawGenerationConfig) {
+          delete rawGenerationConfig.thinkingConfig;
+        }
         const effectiveUserThinkingConfig = (isClaudeSonnetNonThinking || isImageModel) ? undefined : userThinkingConfig;
 
         // For image models, add imageConfig instead of thinkingConfig
@@ -1521,19 +1635,23 @@ export function prepareAntigravityRequest(
     headers.set("Accept", "text/event-stream");
   }
 
+  if (
+    isClaude
+    && claudeLongContextBetaEnabled
+    && !disableClaudeLongContextBetaForRetry
+    && claudeLongContextBetaHeader.length > 0
+    && isClaudeModelEligibleForLongContextBeta(effectiveModel)
+  ) {
+    appendAnthropicBetaHeader(headers, claudeLongContextBetaHeader);
+    claudeLongContextBetaApplied = true;
+    appliedClaudeLongContextBetaHeader = claudeLongContextBetaHeader;
+  }
+
   // Add interleaved thinking header for Claude thinking models
   // This enables real-time streaming of thinking tokens
   if (isClaudeThinking) {
-    const existing = headers.get("anthropic-beta");
     const interleavedHeader = "interleaved-thinking-2025-05-14";
-
-    if (existing) {
-      if (!existing.includes(interleavedHeader)) {
-        headers.set("anthropic-beta", `${existing},${interleavedHeader}`);
-      }
-    } else {
-      headers.set("anthropic-beta", interleavedHeader);
-    }
+    appendAnthropicBetaHeader(headers, interleavedHeader);
   }
 
   if (headerStyle === "antigravity") {
@@ -1570,6 +1688,8 @@ export function prepareAntigravityRequest(
     toolDebugSummary: toolDebugSummaries.slice(0, 20).join(" | "),
     toolDebugPayload,
     needsSignedThinkingWarmup,
+    claudeLongContextBetaApplied,
+    claudeLongContextBetaHeader: appliedClaudeLongContextBetaHeader,
     headerStyle,
     thinkingRecoveryMessage,
   };

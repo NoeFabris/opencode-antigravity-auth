@@ -115,8 +115,8 @@ opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --varia
 | `antigravity-gemini-3-pro` | low, high | Gemini 3 Pro with thinking |
 | `antigravity-gemini-3.1-pro` | low, high | Gemini 3.1 Pro with thinking (rollout-dependent) |
 | `antigravity-gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
-| `antigravity-claude-sonnet-4-6` | — | Claude Sonnet 4.6 |
-| `antigravity-claude-opus-4-6-thinking` | low, max | Claude Opus 4.6 with extended thinking |
+| `antigravity-claude-sonnet-4-6` | — | Claude Sonnet 4.6 (200k base context) |
+| `antigravity-claude-opus-4-6-thinking` | low, max | Claude Opus 4.6 with extended thinking (200k base context) |
 
 **Gemini CLI quota** (separate from Antigravity; used when `cli_first` is true or as fallback):
 
@@ -135,6 +135,7 @@ opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --varia
 > - When a Gemini quota pool is exhausted, the plugin automatically falls back to the other pool.
 > - Claude and image models always use Antigravity.
 > Model names are automatically transformed for the target API (e.g., `antigravity-gemini-3-flash` → `gemini-3-flash-preview` for CLI).
+> - Claude Antigravity limits are 200k by default. Experimental opt-in long-context beta header attempts are available via `antigravity.json` (`claude_long_context_beta`) and automatically fall back to stable 200k if rejected.
 
 **Using variants:**
 ```bash
@@ -185,12 +186,12 @@ Add this to your `~/.config/opencode/opencode.json`:
           }
         },
         "antigravity-claude-sonnet-4-6": {
-          "name": "Claude Sonnet 4.6 (Antigravity)",
+          "name": "Claude Sonnet 4.6 (Antigravity, 200k base)",
           "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "antigravity-claude-opus-4-6-thinking": {
-          "name": "Claude Opus 4.6 Thinking (Antigravity)",
+          "name": "Claude Opus 4.6 Thinking (Antigravity, 200k base)",
           "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {

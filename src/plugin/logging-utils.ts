@@ -76,6 +76,29 @@ export function truncateTextForLog(text: string, maxChars: number): string {
   return `${text.slice(0, maxChars)}... (truncated ${text.length - maxChars} chars)`
 }
 
+export function scrubTextForLog(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim()
+  if (!normalized) {
+    return ""
+  }
+
+  const scrubbed = normalized
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+    .replace(
+      /((?:["']?(?:authorization|api[_-]?key|token|secret|password)["']?)\s*[:=]\s*["']?)(?:(?:bearer|basic)\s+)?.+?(?=(?:["'\r\n,;]|$|\s+[A-Za-z_][A-Za-z0-9_-]*\s*[:=]))/gi,
+      "$1[redacted]",
+    )
+    .replace(/\b[a-f0-9]{32,}\b/gi, "[redacted-hex]")
+    .replace(
+      /\b(?:\d{4}[- ]\d{4}[- ]\d{4}[- ]\d{4}|\d{4}[- ]\d{6}[- ]\d{5}|\d{4}[- ]\d{3}[- ]\d{3}[- ]\d{3})\b/g,
+      "[redacted-card]",
+    )
+    .replace(/(?<==)[A-Za-z0-9+/_-][A-Za-z0-9+/_=-]{39,}(?![A-Za-z0-9+/_=-])/g, "[redacted-token]")
+    .replace(/(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{40,}(?![A-Za-z0-9+/_=-])/g, "[redacted-token]")
+
+  return truncateTextForLog(scrubbed, maxChars)
+}
+
 export function formatBodyPreviewForLog(
   body: BodyInit | null | undefined,
   maxChars: number,

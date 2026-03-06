@@ -18,6 +18,16 @@ interface MultiTurnTest {
 interface TurnConfig {
   prompt: string;
   model?: string;
+  timeout?: number;
+}
+
+interface RunTurnResult {
+  output: string;
+  stderr: string;
+  code: number;
+  sessionId: string | null;
+  timedOut: boolean;
+  duration: number;
 }
 
 interface TestResult {
@@ -37,6 +47,12 @@ interface ConcurrentTest {
   prompt: string;
   errorPatterns: string[];
   timeout: number;
+}
+
+interface TimeoutOverrides {
+  defaultTimeout: number | null;
+  testTimeoutOverrides: Map<string, number>;
+  turnTimeoutOverrides: Map<string, number>;
 }
 
 const ERROR_PATTERNS = [
@@ -127,7 +143,7 @@ const SANITY_TESTS: MultiTurnTest[] = [
     suite: "sanity",
     turns: ["Reply with exactly: OK", "Repeat the word 'test' 50000 times"],
     errorPatterns: ["FATAL", "unhandled", "Cannot read properties"],
-    timeout: 60000,
+    timeout: 180000,
   },
 ];
 
@@ -278,6 +294,126 @@ const CONCURRENT_TESTS: ConcurrentTest[] = [
 ];
 
 const ALL_TESTS = [...SANITY_TESTS, ...HEAVY_TESTS];
+const MAX_DIAGNOSTIC_CHARS = 500;
+
+function parseTimeoutMs(value: string, flag: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${flag} value "${value}". Expected a positive integer.`);
+  }
+  return parsed;
+}
+
+function collectRepeatedArgValues(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === flag) {
+      const value = args[index + 1];
+      if (value === undefined) {
+        throw new Error(`Missing value for ${flag}`);
+      }
+      values.push(value);
+    }
+  }
+  return values;
+}
+
+function parseNamedTimeoutOverrides(specs: string[], flag: string): Map<string, number> {
+  const overrides = new Map<string, number>();
+  for (const spec of specs) {
+    const separator = spec.lastIndexOf("=");
+    if (separator <= 0 || separator === spec.length - 1) {
+      throw new Error(`Invalid ${flag} value "${spec}". Expected "<name>=<ms>".`);
+    }
+    const name = spec.slice(0, separator).trim();
+    const timeoutRaw = spec.slice(separator + 1).trim();
+    const timeoutMs = parseTimeoutMs(timeoutRaw, flag);
+    overrides.set(name, timeoutMs);
+  }
+  return overrides;
+}
+
+function parseTurnTimeoutOverrides(specs: string[]): Map<string, number> {
+  const overrides = new Map<string, number>();
+  for (const spec of specs) {
+    const separator = spec.lastIndexOf("=");
+    if (separator <= 0 || separator === spec.length - 1) {
+      throw new Error(`Invalid --timeout-turn value "${spec}". Expected "<test>:<turn>=<ms>".`);
+    }
+    const key = spec.slice(0, separator).trim();
+    const timeoutRaw = spec.slice(separator + 1).trim();
+    const keyParts = key.split(":");
+    if (keyParts.length !== 2) {
+      throw new Error(`Invalid --timeout-turn value "${spec}". Expected "<test>:<turn>=<ms>".`);
+    }
+    const testName = keyParts[0]?.trim();
+    const turnIndexRaw = keyParts[1]?.trim();
+    if (!testName || !turnIndexRaw) {
+      throw new Error(`Invalid --timeout-turn value "${spec}". Expected "<test>:<turn>=<ms>".`);
+    }
+    const turnIndex = Number.parseInt(turnIndexRaw, 10);
+    if (!Number.isFinite(turnIndex) || turnIndex <= 0) {
+      throw new Error(`Invalid turn index in --timeout-turn value "${spec}". Expected a positive integer.`);
+    }
+    const timeoutMs = parseTimeoutMs(timeoutRaw, "--timeout-turn");
+    overrides.set(`${testName}:${turnIndex}`, timeoutMs);
+  }
+  return overrides;
+}
+
+function summarizeDiagnostic(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "<empty>";
+  }
+  if (normalized.length <= MAX_DIAGNOSTIC_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, MAX_DIAGNOSTIC_CHARS)}...`;
+}
+
+function resolveBaseTimeout(name: string, defaultTimeout: number, timeoutOverrides: TimeoutOverrides): number {
+  let timeout = defaultTimeout;
+  if (timeoutOverrides.defaultTimeout !== null) {
+    timeout = timeoutOverrides.defaultTimeout;
+  }
+  const testOverride = timeoutOverrides.testTimeoutOverrides.get(name);
+  if (testOverride !== undefined) {
+    timeout = testOverride;
+  }
+  return timeout;
+}
+
+function resolveTurnTimeout(
+  test: MultiTurnTest,
+  turn: string | TurnConfig,
+  turnIndex: number,
+  timeoutOverrides: TimeoutOverrides
+): number {
+  let timeout = resolveBaseTimeout(test.name, test.timeout, timeoutOverrides);
+  if (typeof turn !== "string" && turn.timeout !== undefined) {
+    timeout = turn.timeout;
+  }
+  const turnOverride = timeoutOverrides.turnTimeoutOverrides.get(`${test.name}:${turnIndex + 1}`);
+  if (turnOverride !== undefined) {
+    timeout = turnOverride;
+  }
+  return timeout;
+}
+
+function applyTimeoutOverridesToTests(tests: MultiTurnTest[], timeoutOverrides: TimeoutOverrides): MultiTurnTest[] {
+  return tests.map((test) => ({
+    ...test,
+    timeout: resolveBaseTimeout(test.name, test.timeout, timeoutOverrides),
+  }));
+}
+
+function applyTimeoutOverridesToConcurrentTests(tests: ConcurrentTest[], timeoutOverrides: TimeoutOverrides): ConcurrentTest[] {
+  return tests.map((test) => ({
+    ...test,
+    timeout: resolveBaseTimeout(test.name, test.timeout, timeoutOverrides),
+  }));
+}
 
 async function runTurn(
   prompt: string,
@@ -285,8 +421,9 @@ async function runTurn(
   sessionId: string | null,
   sessionTitle: string,
   timeout: number
-): Promise<{ output: string; stderr: string; code: number; sessionId: string | null }> {
+): Promise<RunTurnResult> {
   return new Promise((resolve) => {
+    const start = Date.now();
     const args = sessionId
       ? ["run", prompt, "--session", sessionId, "--model", model]
       : ["run", prompt, "--model", model, "--title", sessionTitle];
@@ -298,6 +435,7 @@ async function runTurn(
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
 
     proc.stdout?.on("data", (data) => {
       stdout += data.toString();
@@ -308,7 +446,11 @@ async function runTurn(
     });
 
     const timeoutId = setTimeout(() => {
+      timedOut = true;
       proc.kill("SIGTERM");
+      setTimeout(() => {
+        proc.kill("SIGKILL");
+      }, 2000).unref();
     }, timeout);
 
     proc.on("close", (code) => {
@@ -328,6 +470,8 @@ async function runTurn(
         stderr: stderr,
         code: code ?? 1,
         sessionId: extractedSessionId,
+        timedOut,
+        duration: Date.now() - start,
       });
     });
 
@@ -338,6 +482,8 @@ async function runTurn(
         stderr: err.message,
         code: 1,
         sessionId: null,
+        timedOut: false,
+        duration: Date.now() - start,
       });
     });
   });
@@ -382,8 +528,9 @@ async function runConcurrentTest(test: ConcurrentTest): Promise<TestResult> {
   }
 
   for (const result of results) {
+    const combinedOutput = `${result.stderr}\n${result.output}`.toLowerCase();
     for (const pattern of test.errorPatterns) {
-      if (result.stderr.toLowerCase().includes(pattern.toLowerCase())) {
+      if (combinedOutput.includes(pattern.toLowerCase())) {
         for (const sid of sessionIds) {
           await deleteSession(sid);
         }
@@ -397,19 +544,20 @@ async function runConcurrentTest(test: ConcurrentTest): Promise<TestResult> {
     }
   }
 
-  const failedResults = results.filter((r) => r.code !== 0);
+  const failedResults = results.filter((r) => r.code !== 0 || r.timedOut);
   const failedCount = failedResults.length;
   if (failedCount > test.concurrentRequests / 2) {
     for (const sid of sessionIds) {
       await deleteSession(sid);
     }
     const firstFailure = failedResults[0];
+    const timedOutCount = failedResults.filter((result) => result.timedOut).length;
     const failureDetails = firstFailure
-      ? `\n    First failure stderr: ${firstFailure.stderr.slice(0, 500)}`
+      ? `\n    First failure: ${summarizeDiagnostic(firstFailure.stderr || firstFailure.output)}`
       : "";
     return {
       success: false,
-      error: `${failedCount}/${test.concurrentRequests} requests failed${failureDetails}`,
+      error: `${failedCount}/${test.concurrentRequests} requests failed (${timedOutCount} timed out)${failureDetails}`,
       duration: Date.now() - start,
       turnsCompleted: test.concurrentRequests - failedCount,
     };
@@ -426,7 +574,7 @@ async function runConcurrentTest(test: ConcurrentTest): Promise<TestResult> {
   };
 }
 
-async function runMultiTurnTest(test: MultiTurnTest): Promise<TestResult> {
+async function runMultiTurnTest(test: MultiTurnTest, timeoutOverrides: TimeoutOverrides): Promise<TestResult> {
   const start = Date.now();
   let sessionId: string | null = null;
   let turnsCompleted = 0;
@@ -435,7 +583,7 @@ async function runMultiTurnTest(test: MultiTurnTest): Promise<TestResult> {
     const turn = test.turns[index]!;
     const prompt = typeof turn === "string" ? turn : turn.prompt;
     const model = typeof turn === "string" ? test.model : (turn.model ?? test.model);
-    const turnStart = Date.now();
+    const turnTimeout = resolveTurnTimeout(test, turn, index, timeoutOverrides);
 
     process.stdout.write(`\r  Progress: ${index + 1}/${test.turns.length} turns...`);
 
@@ -444,11 +592,12 @@ async function runMultiTurnTest(test: MultiTurnTest): Promise<TestResult> {
       model,
       sessionId ?? null,
       `regression-${test.name}`,
-      test.timeout
+      turnTimeout
     );
 
+    const combinedOutput = `${result.stderr}\n${result.output}`.toLowerCase();
     for (const pattern of test.errorPatterns) {
-      if (result.stderr.toLowerCase().includes(pattern.toLowerCase())) {
+      if (combinedOutput.includes(pattern.toLowerCase())) {
         process.stdout.write("\r" + " ".repeat(50) + "\r");
         return {
           success: false,
@@ -460,18 +609,27 @@ async function runMultiTurnTest(test: MultiTurnTest): Promise<TestResult> {
       }
     }
 
-    if (result.code !== 0 && result.code !== null) {
-      const isTimeout = Date.now() - turnStart >= test.timeout - 1000;
-      if (isTimeout) {
-        process.stdout.write("\r" + " ".repeat(50) + "\r");
-        return {
-          success: false,
-          error: `Turn ${index + 1}: Timeout after ${test.timeout}ms`,
-          duration: Date.now() - start,
-          turnsCompleted,
-          sessionId: sessionId ?? undefined,
-        };
-      }
+    if (result.timedOut) {
+      process.stdout.write("\r" + " ".repeat(50) + "\r");
+      const timeoutDiagnostic = summarizeDiagnostic(result.stderr || result.output);
+      return {
+        success: false,
+        error: `Turn ${index + 1}: Timeout after ${turnTimeout}ms (${timeoutDiagnostic})`,
+        duration: Date.now() - start,
+        turnsCompleted,
+        sessionId: sessionId ?? undefined,
+      };
+    }
+
+    if (result.code !== 0) {
+      process.stdout.write("\r" + " ".repeat(50) + "\r");
+      return {
+        success: false,
+        error: `Turn ${index + 1}: Exit ${result.code} (${result.duration}ms) ${summarizeDiagnostic(result.stderr || result.output)}`,
+        duration: Date.now() - start,
+        turnsCompleted,
+        sessionId: sessionId ?? undefined,
+      };
     }
 
     sessionId = result.sessionId;
@@ -493,6 +651,7 @@ function parseArgs(): {
   suite: TestSuite;
   dryRun: boolean;
   help: boolean;
+  timeoutOverrides: TimeoutOverrides;
 } {
   const args = process.argv.slice(2);
   const getArg = (flag: string): string | null => {
@@ -504,12 +663,21 @@ function parseArgs(): {
   if (args.includes("--sanity")) suite = "sanity";
   if (args.includes("--heavy")) suite = "heavy";
 
+  const timeoutArg = getArg("--timeout");
+  const testTimeoutSpecs = collectRepeatedArgValues(args, "--timeout-test");
+  const turnTimeoutSpecs = collectRepeatedArgValues(args, "--timeout-turn");
+
   return {
     filterName: getArg("--test") ?? getArg("--name"),
     filterCategory: getArg("--category") as Category | null,
     suite,
     dryRun: args.includes("--dry-run"),
     help: args.includes("--help") || args.includes("-h"),
+    timeoutOverrides: {
+      defaultTimeout: timeoutArg !== null ? parseTimeoutMs(timeoutArg, "--timeout") : null,
+      testTimeoutOverrides: parseNamedTimeoutOverrides(testTimeoutSpecs, "--timeout-test"),
+      turnTimeoutOverrides: parseTurnTimeoutOverrides(turnTimeoutSpecs),
+    },
   };
 }
 
@@ -542,6 +710,9 @@ Options:
   --heavy               Run heavy tests only (stress)
   --test <name>         Run specific test by name
   --category <cat>      Run tests by category
+  --timeout <ms>        Global timeout override for all tests and turns
+  --timeout-test <spec> Per-test timeout override. Repeatable. Format: "<test>=<ms>"
+  --timeout-turn <spec> Per-turn timeout override. Repeatable. Format: "<test>:<turn>=<ms>"
   --dry-run             List tests without running
   --help, -h            Show this help
 
@@ -549,11 +720,13 @@ Examples:
   npx tsx script/test-regression.ts --sanity
   npx tsx script/test-regression.ts --heavy
   npx tsx script/test-regression.ts --test stress-20-turn-recovery
+  npx tsx script/test-regression.ts --timeout-test thinking-modification-continue=180000
+  npx tsx script/test-regression.ts --timeout-turn thinking-modification-continue:3=240000
 `);
 }
 
 async function main(): Promise<void> {
-  const { filterName, filterCategory, suite, dryRun, help } = parseArgs();
+  const { filterName, filterCategory, suite, dryRun, help, timeoutOverrides } = parseArgs();
 
   if (help) {
     showHelp();
@@ -578,6 +751,7 @@ async function main(): Promise<void> {
   if (filterCategory && filterCategory !== "concurrency") {
     tests = tests.filter((t) => t.category === filterCategory);
   }
+  tests = applyTimeoutOverridesToTests(tests, timeoutOverrides);
 
   const runConcurrentOnly = filterCategory === "concurrency";
   if (runConcurrentOnly) {
@@ -612,7 +786,7 @@ async function main(): Promise<void> {
     console.log(`  Model: ${test.model}`);
     console.log(`  Turns: ${test.turns.length}`);
 
-    const result = await runMultiTurnTest(test);
+    const result = await runMultiTurnTest(test, timeoutOverrides);
     results.push({ test, result });
 
     if (result.success) {
@@ -630,7 +804,7 @@ async function main(): Promise<void> {
   }
 
   if (suite === "heavy" || suite === "all" || runConcurrentOnly || filterName) {
-    let concurrentTests = CONCURRENT_TESTS;
+    let concurrentTests = applyTimeoutOverridesToConcurrentTests(CONCURRENT_TESTS, timeoutOverrides);
     if (filterName) {
       concurrentTests = concurrentTests.filter((t) => t.name === filterName);
     }

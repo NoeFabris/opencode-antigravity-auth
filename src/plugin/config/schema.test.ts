@@ -11,7 +11,12 @@ describe("cli_first config", () => {
   it("documents cli_first in the JSON schema", () => {
     const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
     const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
-      properties?: Record<string, { type?: string; default?: unknown; description?: string }>;
+      properties?: Record<string, {
+        type?: string
+        default?: unknown
+        description?: string
+        minLength?: number
+      }>;
     };
 
     const cliFirst = schema.properties?.cli_first;
@@ -44,5 +49,55 @@ describe("claude_prompt_auto_caching config", () => {
     });
     expect(typeof claudePromptAutoCaching?.description).toBe("string");
     expect(claudePromptAutoCaching?.description?.length ?? 0).toBeGreaterThan(0);
+  });
+});
+
+describe("claude_long_context_beta config", () => {
+  it("includes claude_long_context_beta defaults in DEFAULT_CONFIG", () => {
+    expect(DEFAULT_CONFIG).toHaveProperty("claude_long_context_beta", false);
+    expect(DEFAULT_CONFIG).toHaveProperty("claude_long_context_beta_header", "context-1m-2025-08-07");
+  });
+
+  it("documents claude_long_context_beta in the JSON schema", () => {
+    const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
+      properties?: Record<string, {
+        type?: string
+        default?: unknown
+        description?: string
+        minLength?: number
+      }>;
+    };
+
+    const claudeLongContextBeta = schema.properties?.claude_long_context_beta;
+    expect(claudeLongContextBeta).toBeDefined();
+    expect(claudeLongContextBeta).toMatchObject({
+      type: "boolean",
+      default: false,
+    });
+    expect(typeof claudeLongContextBeta?.description).toBe("string");
+    expect(claudeLongContextBeta?.description?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("documents claude_long_context_beta_header in the JSON schema", () => {
+    const schemaPath = new URL("../../../assets/antigravity.schema.json", import.meta.url);
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
+      properties?: Record<string, {
+        type?: string
+        default?: unknown
+        description?: string
+        minLength?: number
+      }>;
+    };
+
+    const claudeLongContextBetaHeader = schema.properties?.claude_long_context_beta_header;
+    expect(claudeLongContextBetaHeader).toBeDefined();
+    expect(claudeLongContextBetaHeader).toMatchObject({
+      type: "string",
+      default: "context-1m-2025-08-07",
+      minLength: 1,
+    });
+    expect(typeof claudeLongContextBetaHeader?.description).toBe("string");
+    expect(claudeLongContextBetaHeader?.description?.length ?? 0).toBeGreaterThan(0);
   });
 });

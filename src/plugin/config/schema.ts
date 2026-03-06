@@ -223,6 +223,26 @@ export const AntigravityConfigSchema = z.object({
    * @default false
    */
   claude_prompt_auto_caching: z.boolean().default(false),
+
+  /**
+   * Enable experimental Claude long-context beta header injection.
+   *
+   * When enabled, Claude 4.6 models attempt a provider beta header for 1M context.
+   * If the provider rejects the beta header, the request automatically falls back
+   * to the stable 200k path.
+   *
+   * @default false
+   */
+  claude_long_context_beta: z.boolean().default(false),
+
+  /**
+   * Claude long-context beta header value.
+   *
+   * Override this if provider beta token changes in the future.
+   *
+   * @default "context-1m-2025-08-07"
+   */
+  claude_long_context_beta_header: z.string().trim().min(1).default("context-1m-2025-08-07"),
   
   // =========================================================================
   // Proactive Token Refresh (ported from LLM-API-Key-Proxy)
@@ -460,6 +480,8 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   tool_id_recovery: true,
   claude_tool_hardening: true,
   claude_prompt_auto_caching: false,
+  claude_long_context_beta: false,
+  claude_long_context_beta_header: "context-1m-2025-08-07",
   proactive_token_refresh: true,
   proactive_refresh_buffer_seconds: 1800,
   proactive_refresh_check_interval_seconds: 300,

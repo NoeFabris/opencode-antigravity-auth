@@ -104,12 +104,15 @@ Claude models use token-based thinking budgets:
 | `low` | 8192 | Light thinking |
 | `max` | 32768 | Maximum thinking |
 
+> **Context Limit Note:** Claude models on Antigravity are configured with a **200k base context**.
+> If you enable `claude_long_context_beta` in `antigravity.json`, the plugin can attempt an experimental long-context beta header and automatically falls back to 200k if rejected.
+
 ### Claude Example
 
 ```json
 {
   "antigravity-claude-opus-4-6-thinking": {
-    "name": "Claude Opus 4.6 Thinking (Antigravity)",
+    "name": "Claude Opus 4.6 Thinking (Antigravity, 200k base)",
     "limit": { "context": 200000, "output": 64000 },
     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
     "variants": {

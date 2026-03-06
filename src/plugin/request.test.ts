@@ -4,6 +4,7 @@ import {
   transformAntigravityResponse,
   getPluginSessionId,
   isGenerativeLanguageRequest,
+  isUnsupportedClaudeLongContextBetaError,
   __testExports,
 } from "./request";
 import { DEFAULT_CONFIG } from "./config";
@@ -88,6 +89,136 @@ describe("request.ts", () => {
     it("returns false for non-string inputs", () => {
       expect(isGenerativeLanguageRequest({} as any)).toBe(false);
       expect(isGenerativeLanguageRequest(new Request("https://example.com"))).toBe(false);
+    });
+  });
+
+  describe("isUnsupportedClaudeLongContextBetaError", () => {
+    it("returns true for unsupported anthropic-beta long-context errors", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(true);
+    });
+
+    it("returns true for 403 unsupported anthropic-beta long-context errors", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(403, body)).toBe(true);
+    });
+
+    it("returns true for 422 unsupported anthropic-beta long-context errors", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(422, body)).toBe(true);
+    });
+
+    it("returns false when message only mentions context-1m beta without rejection signal", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "Request included anthropic-beta context-1m-2025-08-07 during beta rollout",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(false);
+    });
+
+    it("returns false for anthropic-beta errors with generic context wording", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: anthropic-beta header count exceeds limit. Request context was valid.",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(false);
+    });
+
+    it("returns false for anthropic-beta errors with generic context wording when expectedHeader is provided", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: anthropic-beta header count exceeds limit. Request context was valid.",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(false);
+    });
+
+    it("returns false for quota or rate-limit messages even when context-1m is mentioned", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "RESOURCE_EXHAUSTED: rate limit quota exceeded for anthropic-beta context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(403, body)).toBe(false);
+    });
+
+    it("returns false for unrelated context length errors", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "Prompt is too long for this model",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(400, body)).toBe(false);
+    });
+
+    it("returns false for non-4xx statuses", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "unsupported anthropic-beta header context-1m-2025-08-07",
+        },
+      });
+
+      expect(isUnsupportedClaudeLongContextBetaError(500, body)).toBe(false);
+    });
+
+    it("returns false for generic anthropic-beta rejection that does not mention context-1m", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(false);
+    });
+
+    it("returns false for interleaved-thinking beta rejection when expected header is context-1m", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "INVALID_ARGUMENT: unsupported anthropic-beta header interleaved-thinking-2025-05-14",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(false);
+    });
+
+    it("returns false when unsupported anthropic-beta rejection only references unrelated beta header", () => {
+      const body = JSON.stringify({
+        error: {
+          message: "UNKNOWN: unsupported anthropic-beta header foo-beta-2025-01-01",
+        },
+      });
+
+      expect(
+        isUnsupportedClaudeLongContextBetaError(400, body, "context-1m-2025-08-07"),
+      ).toBe(false);
     });
   });
 
@@ -654,6 +785,155 @@ it("removes x-api-key header", () => {
       expect(parsed.requestType).toBeUndefined();
       expect(parsed.userAgent).toBeUndefined();
       expect(parsed.requestId).toBeUndefined();
+    });
+
+    describe("Claude long-context beta header", () => {
+      it("adds long-context beta header for Claude Sonnet 4.6 when enabled", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/claude-sonnet-4-6:generateContent",
+          { method: "POST", body: JSON.stringify({ contents: [] }) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+          false,
+          {
+            claudeLongContextBetaEnabled: true,
+            claudeLongContextBetaHeader: "context-1m-2025-08-07",
+          },
+        );
+
+        const headers = result.init.headers as Headers;
+        const anthropicBeta = headers.get("anthropic-beta");
+        expect(anthropicBeta).toContain("context-1m-2025-08-07");
+        expect(result.claudeLongContextBetaApplied).toBe(true);
+        expect(result.claudeLongContextBetaHeader).toBe("context-1m-2025-08-07");
+      });
+
+      it("adds long-context beta header for versioned Claude Sonnet 4.6 model when enabled", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/claude-sonnet-4-6-20250514:generateContent",
+          { method: "POST", body: JSON.stringify({ contents: [] }) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+          false,
+          {
+            claudeLongContextBetaEnabled: true,
+            claudeLongContextBetaHeader: "context-1m-2025-08-07",
+          },
+        );
+
+        const headers = result.init.headers as Headers;
+        const anthropicBeta = headers.get("anthropic-beta");
+        expect(anthropicBeta).toContain("context-1m-2025-08-07");
+        expect(result.claudeLongContextBetaApplied).toBe(true);
+      });
+
+      it("treats versioned Claude Sonnet 4.6 as non-thinking and strips thinkingConfig", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/claude-sonnet-4-6-20250514:generateContent",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              contents: [],
+              generationConfig: {
+                thinkingConfig: {
+                  includeThoughts: true,
+                  thinkingBudget: 8192,
+                },
+              },
+            }),
+          },
+          mockAccessToken,
+          mockProjectId,
+        );
+
+        const parsed = JSON.parse(result.init.body as string) as {
+          request?: {
+            generationConfig?: {
+              thinkingConfig?: unknown
+            }
+          }
+        };
+
+        expect(parsed.request?.generationConfig?.thinkingConfig).toBeUndefined();
+      });
+
+      it("does not add long-context beta header for non-Claude models", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent",
+          { method: "POST", body: JSON.stringify({ contents: [] }) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+          false,
+          {
+            claudeLongContextBetaEnabled: true,
+            claudeLongContextBetaHeader: "context-1m-2025-08-07",
+          },
+        );
+
+        const headers = result.init.headers as Headers;
+        const anthropicBeta = headers.get("anthropic-beta");
+        expect(anthropicBeta ?? "").not.toContain("context-1m-2025-08-07");
+        expect(result.claudeLongContextBetaApplied).toBe(false);
+      });
+
+      it("deduplicates anthropic-beta values when header already exists", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/claude-opus-4-6-thinking:generateContent",
+          {
+            method: "POST",
+            body: JSON.stringify({ contents: [] }),
+            headers: {
+              "anthropic-beta": "context-1m-2025-08-07,interleaved-thinking-2025-05-14,foo-beta",
+            },
+          },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+          false,
+          {
+            claudeLongContextBetaEnabled: true,
+            claudeLongContextBetaHeader: "context-1m-2025-08-07",
+          },
+        );
+
+        const headers = result.init.headers as Headers;
+        const anthropicBeta = headers.get("anthropic-beta");
+        expect(anthropicBeta).toBeTruthy();
+        const parts = anthropicBeta!.split(",").map((part) => part.trim());
+        expect(parts.filter((part) => part === "context-1m-2025-08-07")).toHaveLength(1);
+        expect(parts.filter((part) => part === "interleaved-thinking-2025-05-14")).toHaveLength(1);
+        expect(parts).toContain("foo-beta");
+      });
+
+      it("disables long-context beta header on retry while keeping interleaved thinking", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/claude-opus-4-6-thinking:generateContent",
+          { method: "POST", body: JSON.stringify({ contents: [] }) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+          false,
+          {
+            claudeLongContextBetaEnabled: true,
+            claudeLongContextBetaHeader: "context-1m-2025-08-07",
+            disableClaudeLongContextBetaForRetry: true,
+          },
+        );
+
+        const headers = result.init.headers as Headers;
+        const anthropicBeta = headers.get("anthropic-beta");
+        expect(anthropicBeta ?? "").not.toContain("context-1m-2025-08-07");
+        expect(anthropicBeta ?? "").toContain("interleaved-thinking-2025-05-14");
+        expect(result.claudeLongContextBetaApplied).toBe(false);
+      });
     });
 
     it("identifies Claude models correctly", () => {
