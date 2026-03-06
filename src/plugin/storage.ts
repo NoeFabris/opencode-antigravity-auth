@@ -357,6 +357,52 @@ const LOCK_OPTIONS = {
   },
 };
 
+function getLockPath(path: string): string {
+  return `${path}.lock`;
+}
+
+async function tryRecoverLegacyLockfile(path: string): Promise<boolean> {
+  const lockPath = getLockPath(path);
+
+  try {
+    const lockStat = await fs.lstat(lockPath);
+    if (!lockStat.isFile()) {
+      return false;
+    }
+
+    await fs.unlink(lockPath);
+    log.warn("Removed legacy lock file that blocked account storage lock", { lockPath });
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      log.warn("Failed to remove legacy account storage lock file", {
+        lockPath,
+        error: String(error),
+      });
+    }
+    return false;
+  }
+}
+
+async function acquireFileLock(path: string): Promise<() => Promise<void>> {
+  try {
+    return await lockfile.lock(path, LOCK_OPTIONS);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ELOCKED" && code !== "EEXIST") {
+      throw error;
+    }
+
+    const recovered = await tryRecoverLegacyLockfile(path);
+    if (!recovered) {
+      throw error;
+    }
+
+    return await lockfile.lock(path, LOCK_OPTIONS);
+  }
+}
+
 /**
  * Ensures the file has secure permissions (0600) on POSIX systems.
  * This is a best-effort operation and ignores errors on Windows/unsupported FS.
@@ -386,7 +432,7 @@ async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   await ensureFileExists(path);
   let release: (() => Promise<void>) | null = null;
   try {
-    release = await lockfile.lock(path, LOCK_OPTIONS);
+    release = await acquireFileLock(path);
     return await fn();
   } finally {
     if (release) {

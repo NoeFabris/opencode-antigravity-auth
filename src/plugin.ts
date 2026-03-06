@@ -39,7 +39,7 @@ import {
 import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
-import { clearAccounts, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
+import { clearAccounts, getStoragePath, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
 import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
@@ -3115,7 +3115,43 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   const isFirstAccount = accounts.length === 1;
                   await persistAccountPool([result], isFirstAccount && startFresh);
                 }
-              } catch {
+              } catch (error) {
+                const reason = error instanceof Error ? error.message : String(error);
+                const lockPath = `${getStoragePath()}.lock`;
+                const errorCode = (
+                  typeof error === "object" &&
+                  error !== null &&
+                  "code" in error &&
+                  typeof (error as { code?: unknown }).code === "string"
+                )
+                  ? (error as { code: string }).code
+                  : undefined;
+                const isLockError =
+                  errorCode === "ELOCKED" ||
+                  errorCode === "EEXIST" ||
+                  /ELOCKED|EEXIST/i.test(reason);
+                const lockGuidance = isLockError
+                  ? ` Storage lock at ${lockPath} may be held by another process (lock directory). ` +
+                    `Retry after current operation finishes. If the lock persists and ${lockPath} exists as a file, remove that file and retry.`
+                  : "";
+                const accountPersistenceWarning =
+                  `failed to persist account data (${reason}).${lockGuidance}`;
+                console.warn(`[opencode-antigravity-auth] ${accountPersistenceWarning}`);
+                try {
+                  const compactReason = reason.length > 120 ? `${reason.slice(0, 117)}...` : reason;
+                  const toastMessage = isLockError
+                    ? `Authenticated, but account was not saved because storage is locked. Another process may hold a lock directory. Retry in a moment; if ${lockPath} persists as a file, remove the file and retry.`
+                    : `Authenticated, but account was not saved: ${compactReason}`;
+                  await client.tui.showToast({
+                    body: {
+                      message: toastMessage,
+                      variant: "error",
+                    },
+                  });
+                } catch (toastError) {
+                  // Toast display is best-effort; auth succeeded even if notification fails.
+                  console.warn("[opencode-antigravity-auth] Failed to show account persistence toast:", toastError);
+                }
               }
 
               if (refreshAccountIndex !== undefined) {
@@ -3130,7 +3166,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
               let currentAccountCount = accounts.length;
               try {
                 const currentStorage = await loadAccounts();
-                if (currentStorage) {
+                if (currentStorage && currentStorage.accounts.length > 0) {
                   currentAccountCount = currentStorage.accounts.length;
                 }
               } catch {
@@ -3156,10 +3192,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
             let actualAccountCount = accounts.length;
             try {
               const finalStorage = await loadAccounts();
-              if (finalStorage) {
+              if (finalStorage && finalStorage.accounts.length > 0) {
                 actualAccountCount = finalStorage.accounts.length;
               }
             } catch {
+              // Fall back to accounts.length if we can't read storage
             }
 
             const successMessage = refreshAccountIndex !== undefined
