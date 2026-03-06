@@ -58,7 +58,8 @@ import {
   needsThinkingRecovery,
 } from "./thinking-recovery";
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
-import { isGemini3Model, isImageGenerationModel, buildImageGenerationConfig, applyGeminiTransforms } from "./transform";
+import { isGemini3Model, isImageGenerationModel, isFlashImageModel, buildImageGenerationConfig, applyGeminiTransforms } from "./transform";
+import { parsePromptFlags, extractLastUserPrompt } from "./transform/prompt-flags";
 import {
   resolveModelWithTier,
   resolveModelWithVariant,
@@ -956,9 +957,11 @@ export function prepareAntigravityRequest(
         }
 
         // Resolve thinking configuration based on user settings and model capabilities
-        // Image generation models don't support thinking - skip thinking config entirely
+        // Pro image models don't support thinking. Flash image models support minimal/high.
         const isImageModel = isImageGenerationModel(effectiveModel);
-        const userThinkingConfig = isImageModel ? undefined : extractThinkingConfig(requestPayload, rawGenerationConfig, extraBody);
+        const isFlashImage = isImageModel && isFlashImageModel(effectiveModel);
+        const skipThinkingForImage = isImageModel && !isFlashImage;
+        const userThinkingConfig = skipThinkingForImage ? undefined : extractThinkingConfig(requestPayload, rawGenerationConfig, extraBody);
         const hasAssistantHistory = Array.isArray(requestPayload.contents) &&
           requestPayload.contents.some((c: any) => c?.role === "model" || c?.role === "assistant");
 
@@ -966,15 +969,46 @@ export function prepareAntigravityRequest(
         // Ignore any client-provided thinkingConfig for this model.
         const lowerEffective = effectiveModel.toLowerCase();
         const isClaudeSonnetNonThinking = lowerEffective === "claude-sonnet-4-6";
-        const effectiveUserThinkingConfig = (isClaudeSonnetNonThinking || isImageModel) ? undefined : userThinkingConfig;
+        const effectiveUserThinkingConfig = (isClaudeSonnetNonThinking || skipThinkingForImage) ? undefined : userThinkingConfig;
 
-        // For image models, add imageConfig instead of thinkingConfig
+        // For image models, add imageConfig (and optionally thinkingConfig for flash-image)
         if (isImageModel) {
-          const imageConfig = buildImageGenerationConfig();
+          // Parse --resolution and --aspect-ratio flags from the last user prompt
+          let imageConfigOverrides: { aspectRatio?: string; imageSize?: string } | undefined;
+          if (Array.isArray(requestPayload.contents)) {
+            const lastPrompt = extractLastUserPrompt(requestPayload.contents as unknown[]);
+            if (lastPrompt) {
+              const parsed = parsePromptFlags(lastPrompt.text);
+              if (parsed.resolution || parsed.aspectRatio) {
+                imageConfigOverrides = {
+                  imageSize: parsed.resolution,
+                  aspectRatio: parsed.aspectRatio,
+                };
+                // Replace prompt text with flags stripped out
+                const content = (requestPayload.contents as any[])[lastPrompt.contentIndex];
+                if (content?.parts?.[lastPrompt.partIndex]) {
+                  content.parts[lastPrompt.partIndex].text = parsed.cleanedPrompt;
+                }
+                log.debug(`[image] Parsed prompt flags: resolution=${parsed.resolution ?? "default"}, aspectRatio=${parsed.aspectRatio ?? "default"}`);
+              }
+            }
+          }
+
+          const imageConfig = buildImageGenerationConfig(effectiveModel, imageConfigOverrides);
           const generationConfig = (rawGenerationConfig ?? {}) as Record<string, unknown>;
           generationConfig.imageConfig = imageConfig;
-          // Remove any thinkingConfig that might have been set
-          delete generationConfig.thinkingConfig;
+
+          // Flash image models support thinking (minimal/high)
+          if (isFlashImage && resolved.isThinkingModel && resolved.thinkingLevel) {
+            generationConfig.thinkingConfig = {
+              includeThoughts: true,
+              thinkingLevel: resolved.thinkingLevel,
+            };
+          } else {
+            // Remove any thinkingConfig for non-thinking image models
+            delete generationConfig.thinkingConfig;
+          }
+
           // Set reasonable defaults for image generation
           if (!generationConfig.candidateCount) {
             generationConfig.candidateCount = 1;
@@ -1748,6 +1782,22 @@ export async function transformAntigravityResponse(
           (errorMessage.includes("without") || errorMessage.includes("immediately after"))
         ) {
           headers.set("x-antigravity-context-error", "tool_pairing");
+        }
+
+        // Detect imageSize / imageConfig errors from Antigravity API
+        // If the endpoint doesn't support imageSize, strip it and let the user know
+        if (
+          response.status === 400 &&
+          (errorMessage.includes("imagesize") ||
+           errorMessage.includes("image_size") ||
+           (errorMessage.includes("imageconfig") && errorMessage.includes("invalid")))
+        ) {
+          headers.set("x-antigravity-image-error", "imagesize_unsupported");
+          console.warn(
+            `[image] imageSize rejected by API (model: ${effectiveModel || "unknown"}). ` +
+            `The Antigravity endpoint may not support imageSize for this model. ` +
+            `Unset OPENCODE_IMAGE_SIZE to use the default 1K resolution.`
+          );
         }
 
         return new Response(JSON.stringify(errorBody), {

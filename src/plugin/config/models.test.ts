@@ -19,6 +19,7 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       "antigravity-claude-sonnet-4-6",
       "antigravity-gemini-3-flash",
       "antigravity-gemini-3-pro",
+      "antigravity-gemini-3.1-flash-image",
       "antigravity-gemini-3.1-pro",
       "gemini-2.5-flash",
       "gemini-2.5-pro",

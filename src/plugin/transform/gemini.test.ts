@@ -4,9 +4,12 @@ import {
   isGemini3Model,
   isGemini25Model,
   isImageGenerationModel,
+  isFlashImageModel,
   buildGemini3ThinkingConfig,
   buildGemini25ThinkingConfig,
   buildImageGenerationConfig,
+  getValidAspectRatios,
+  getValidImageSizes,
   normalizeGeminiTools,
   applyGeminiTransforms,
   toGeminiSchema,
@@ -584,12 +587,12 @@ describe("transform/gemini", () => {
   });
 
   describe("isImageGenerationModel", () => {
-    it("returns true for gemini-3-pro-image", () => {
-      expect(isImageGenerationModel("gemini-3-pro-image")).toBe(true);
+    it("returns true for gemini-3.1-flash-image", () => {
+      expect(isImageGenerationModel("gemini-3.1-flash-image")).toBe(true);
     });
 
-    it("returns true for gemini-3-pro-image-preview", () => {
-      expect(isImageGenerationModel("gemini-3-pro-image-preview")).toBe(true);
+    it("returns true for gemini-3.1-flash-image-preview", () => {
+      expect(isImageGenerationModel("gemini-3.1-flash-image-preview")).toBe(true);
     });
 
     it("returns true for gemini-2.5-flash-image", () => {
@@ -600,8 +603,8 @@ describe("transform/gemini", () => {
       expect(isImageGenerationModel("imagen-3")).toBe(true);
     });
 
-    it("returns true for uppercase GEMINI-3-PRO-IMAGE", () => {
-      expect(isImageGenerationModel("GEMINI-3-PRO-IMAGE")).toBe(true);
+    it("returns true for uppercase GEMINI-3.1-FLASH-IMAGE", () => {
+      expect(isImageGenerationModel("GEMINI-3.1-FLASH-IMAGE")).toBe(true);
     });
 
     it("returns false for gemini-3-pro", () => {
@@ -614,6 +617,37 @@ describe("transform/gemini", () => {
 
     it("returns false for claude-sonnet-4-6", () => {
       expect(isImageGenerationModel("claude-sonnet-4-6")).toBe(false);
+    });
+  });
+
+  describe("isFlashImageModel", () => {
+    it("returns true for gemini-3.1-flash-image", () => {
+      expect(isFlashImageModel("gemini-3.1-flash-image")).toBe(true);
+    });
+
+    it("returns true for gemini-3-flash-image", () => {
+      expect(isFlashImageModel("gemini-3-flash-image")).toBe(true);
+    });
+
+    it("returns true for gemini-3.1-flash-image-preview", () => {
+      expect(isFlashImageModel("gemini-3.1-flash-image-preview")).toBe(true);
+    });
+
+    it("returns true for uppercase GEMINI-3.1-FLASH-IMAGE", () => {
+      expect(isFlashImageModel("GEMINI-3.1-FLASH-IMAGE")).toBe(true);
+    });
+
+    it("returns false for gemini-3-pro (non-image)", () => {
+      expect(isFlashImageModel("gemini-3-pro")).toBe(false);
+    });
+
+    it("returns false for gemini-3-flash (non-image)", () => {
+      expect(isFlashImageModel("gemini-3-flash")).toBe(false);
+    });
+
+    it("returns false for gemini-2.5-flash-image", () => {
+      // 2.5 flash image is not a gemini-3 flash image model
+      expect(isFlashImageModel("gemini-2.5-flash-image")).toBe(true);
     });
   });
 
@@ -651,6 +685,24 @@ describe("transform/gemini", () => {
       }
     });
 
+    it("accepts extended aspect ratios for flash image models", () => {
+      const flashOnlyRatios = ["4:1", "8:1"];
+      for (const ratio of flashOnlyRatios) {
+        process.env.OPENCODE_IMAGE_ASPECT_RATIO = ratio;
+        const config = buildImageGenerationConfig("gemini-3.1-flash-image");
+        expect(config.aspectRatio).toBe(ratio);
+      }
+    });
+
+    it("rejects extended aspect ratios for non-flash image models", () => {
+      const flashOnlyRatios = ["4:1", "8:1"];
+      for (const ratio of flashOnlyRatios) {
+        process.env.OPENCODE_IMAGE_ASPECT_RATIO = ratio;
+        const config = buildImageGenerationConfig("some-image-model");
+        expect(config.aspectRatio).toBe("1:1");
+      }
+    });
+
     it("falls back to 1:1 for invalid aspect ratio", () => {
       process.env.OPENCODE_IMAGE_ASPECT_RATIO = "invalid";
       const config = buildImageGenerationConfig();
@@ -661,6 +713,168 @@ describe("transform/gemini", () => {
       process.env.OPENCODE_IMAGE_ASPECT_RATIO = "5:3";
       const config = buildImageGenerationConfig();
       expect(config).toEqual({ aspectRatio: "1:1" });
+    });
+
+    it("includes imageSize when OPENCODE_IMAGE_SIZE is set to valid value", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      process.env.OPENCODE_IMAGE_SIZE = "2K";
+      const config = buildImageGenerationConfig();
+      expect(config).toEqual({ aspectRatio: "1:1", imageSize: "2K" });
+    });
+
+    it("accepts all standard image sizes (1K, 2K, 4K)", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      for (const size of ["1K", "2K", "4K"]) {
+        process.env.OPENCODE_IMAGE_SIZE = size;
+        const config = buildImageGenerationConfig();
+        expect(config.imageSize).toBe(size);
+      }
+    });
+
+    it("auto-corrects lowercase k to uppercase K", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      process.env.OPENCODE_IMAGE_SIZE = "2k";
+      const config = buildImageGenerationConfig();
+      expect(config.imageSize).toBe("2K");
+    });
+
+    it("ignores invalid imageSize values", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      process.env.OPENCODE_IMAGE_SIZE = "8K";
+      const config = buildImageGenerationConfig();
+      expect(config.imageSize).toBeUndefined();
+    });
+
+    it("allows 0.5K for flash image models", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      process.env.OPENCODE_IMAGE_SIZE = "0.5K";
+      const config = buildImageGenerationConfig("gemini-3.1-flash-image");
+      expect(config.imageSize).toBe("0.5K");
+    });
+
+    it("rejects 0.5K for non-flash image models", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      process.env.OPENCODE_IMAGE_SIZE = "0.5K";
+      const config = buildImageGenerationConfig("some-image-model");
+      expect(config.imageSize).toBeUndefined();
+    });
+
+    it("does not include imageSize when env var is not set", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      delete process.env.OPENCODE_IMAGE_SIZE;
+      const config = buildImageGenerationConfig();
+      expect(config.imageSize).toBeUndefined();
+    });
+
+    it("combines aspectRatio and imageSize", () => {
+      process.env.OPENCODE_IMAGE_ASPECT_RATIO = "16:9";
+      process.env.OPENCODE_IMAGE_SIZE = "4K";
+      const config = buildImageGenerationConfig();
+      expect(config).toEqual({ aspectRatio: "16:9", imageSize: "4K" });
+    });
+
+    describe("overrides (prompt flags)", () => {
+      it("override aspectRatio takes priority over env var", () => {
+        process.env.OPENCODE_IMAGE_ASPECT_RATIO = "1:1";
+        const config = buildImageGenerationConfig(undefined, { aspectRatio: "16:9" });
+        expect(config.aspectRatio).toBe("16:9");
+      });
+
+      it("override imageSize takes priority over env var", () => {
+        process.env.OPENCODE_IMAGE_SIZE = "1K";
+        const config = buildImageGenerationConfig(undefined, { imageSize: "4K" });
+        expect(config.imageSize).toBe("4K");
+      });
+
+      it("override with both aspectRatio and imageSize", () => {
+        delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+        delete process.env.OPENCODE_IMAGE_SIZE;
+        const config = buildImageGenerationConfig("gemini-3.1-flash-image", {
+          aspectRatio: "9:16",
+          imageSize: "2K",
+        });
+        expect(config).toEqual({ aspectRatio: "9:16", imageSize: "2K" });
+      });
+
+      it("falls back to env var when override is undefined", () => {
+        process.env.OPENCODE_IMAGE_ASPECT_RATIO = "3:2";
+        process.env.OPENCODE_IMAGE_SIZE = "2K";
+        const config = buildImageGenerationConfig(undefined, {});
+        expect(config.aspectRatio).toBe("3:2");
+        expect(config.imageSize).toBe("2K");
+      });
+
+      it("validates override aspectRatio against model-specific list", () => {
+        delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+        // 4:1 is only valid for flash models, not for non-flash
+        const config = buildImageGenerationConfig("some-image-model", { aspectRatio: "4:1" });
+        expect(config.aspectRatio).toBe("1:1"); // falls back to default
+      });
+
+      it("accepts flash-only aspect ratio override for flash model", () => {
+        delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+        const config = buildImageGenerationConfig("gemini-3.1-flash-image", { aspectRatio: "8:1" });
+        expect(config.aspectRatio).toBe("8:1");
+      });
+
+      it("validates override imageSize against model-specific list", () => {
+        delete process.env.OPENCODE_IMAGE_SIZE;
+        // 0.5K is only valid for flash models
+        const config = buildImageGenerationConfig("some-image-model", { imageSize: "0.5K" });
+        expect(config.imageSize).toBeUndefined();
+      });
+
+      it("accepts 0.5K override for flash model", () => {
+        delete process.env.OPENCODE_IMAGE_SIZE;
+        const config = buildImageGenerationConfig("gemini-3.1-flash-image", { imageSize: "0.5K" });
+        expect(config.imageSize).toBe("0.5K");
+      });
+
+      it("auto-corrects lowercase k in override", () => {
+        delete process.env.OPENCODE_IMAGE_SIZE;
+        const config = buildImageGenerationConfig(undefined, { imageSize: "4k" });
+        expect(config.imageSize).toBe("4K");
+      });
+    });
+  });
+
+  describe("getValidAspectRatios", () => {
+    it("returns base ratios for non-flash image model", () => {
+      const ratios = getValidAspectRatios("some-image-model");
+      expect(ratios).toContain("1:1");
+      expect(ratios).toContain("16:9");
+      expect(ratios).not.toContain("4:1");
+      expect(ratios).not.toContain("8:1");
+    });
+
+    it("returns extended ratios for flash image model", () => {
+      const ratios = getValidAspectRatios("gemini-3.1-flash-image");
+      expect(ratios).toContain("1:1");
+      expect(ratios).toContain("16:9");
+      expect(ratios).toContain("4:1");
+      expect(ratios).toContain("8:1");
+    });
+
+    it("returns base ratios when no model specified", () => {
+      const ratios = getValidAspectRatios();
+      expect(ratios).not.toContain("4:1");
+    });
+  });
+
+  describe("getValidImageSizes", () => {
+    it("returns base sizes for non-flash image model", () => {
+      const sizes = getValidImageSizes("some-image-model");
+      expect(sizes).toEqual(["1K", "2K", "4K"]);
+    });
+
+    it("returns flash sizes (including 0.5K) for flash image model", () => {
+      const sizes = getValidImageSizes("gemini-3.1-flash-image");
+      expect(sizes).toEqual(["0.5K", "1K", "2K", "4K"]);
+    });
+
+    it("returns pro sizes when no model specified", () => {
+      const sizes = getValidImageSizes();
+      expect(sizes).not.toContain("0.5K");
     });
   });
 

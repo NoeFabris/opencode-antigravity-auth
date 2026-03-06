@@ -50,13 +50,23 @@ export {
   isGemini3Model,
   isGemini25Model,
   isImageGenerationModel,
+  isFlashImageModel,
   buildGemini3ThinkingConfig,
   buildGemini25ThinkingConfig,
   buildImageGenerationConfig,
+  getValidAspectRatios,
+  getValidImageSizes,
   normalizeGeminiTools,
   applyGeminiTransforms,
 } from "./gemini";
-export type { GeminiTransformOptions, GeminiTransformResult, ImageConfig } from "./gemini";
+export type { GeminiTransformOptions, GeminiTransformResult, ImageConfig, ImageConfigOverrides } from "./gemini";
+
+// Prompt flag parsing
+export {
+  parsePromptFlags,
+  extractLastUserPrompt,
+} from "./prompt-flags";
+export type { ParsedPromptFlags } from "./prompt-flags";
 
 // Cross-model sanitization
 export {
