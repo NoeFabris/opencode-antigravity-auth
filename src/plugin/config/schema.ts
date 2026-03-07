@@ -438,6 +438,25 @@ export const AntigravityConfigSchema = z.object({
    */
   auto_update: z.boolean().default(true),
 
+  // =========================================================================
+  // UI Preferences
+  // =========================================================================
+  
+  /**
+   * UI theme and display preferences for the interactive TUI menus.
+   * These are saved when changed via the Settings menu.
+   */
+  ui: z.object({
+    /** Terminal color support level. @default "truecolor" */
+    color_profile: z.enum(['ansi16', 'ansi256', 'truecolor']).default('truecolor'),
+    /** Glyph rendering mode. @default "ascii" */
+    glyph_mode: z.enum(['ascii', 'unicode', 'auto']).default('ascii'),
+    /** Color palette theme. @default "antigravity" */
+    palette: z.enum(['green', 'blue', 'antigravity']).default('antigravity'),
+    /** Accent color for highlights and badges. @default "cyan" */
+    accent: z.enum(['green', 'cyan', 'blue', 'yellow', 'magenta', 'purple']).default('cyan'),
+  }).optional(),
+
 });
 
 export type AntigravityConfig = z.infer<typeof AntigravityConfigSchema>;
@@ -479,6 +498,12 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   quota_refresh_interval_minutes: 15,
   soft_quota_cache_ttl_minutes: "auto",
   auto_update: true,
+  ui: {
+    color_profile: 'truecolor',
+    glyph_mode: 'ascii',
+    palette: 'antigravity',
+    accent: 'cyan',
+  },
   signature_cache: {
     enabled: true,
     memory_ttl_seconds: 3600,

@@ -8,6 +8,11 @@ import {
   type AccountStatus,
 } from "./ui/auth-menu";
 import { updateOpencodeConfig } from "./config/updater";
+import { showSettingsMenu } from "./ui/settings-menu";
+import { runActionPanel } from "./ui/action-panel";
+import { select } from "./ui/select";
+import { UI_COPY } from "./ui/copy";
+import { getUiRuntimeOptions, initUiFromConfig } from "./ui/runtime";
 
 export async function promptProjectId(): Promise<string> {
   const rl = createInterface({ input, output });
@@ -40,6 +45,12 @@ export interface ExistingAccountInfo {
   status?: AccountStatus;
   isCurrentAccount?: boolean;
   enabled?: boolean;
+  quota5hLeftPercent?: number;
+  quota7dLeftPercent?: number;
+  quota5hResetAtMs?: number;
+  quota7dResetAtMs?: number;
+  quotaRateLimited?: boolean;
+  quotaSummary?: string;
   verificationRequiredType?: string;
 }
 
@@ -48,10 +59,39 @@ export interface LoginMenuResult {
   deleteAccountIndex?: number;
   refreshAccountIndex?: number;
   toggleAccountIndex?: number;
+  setCurrentAccountIndex?: number;
   verifyAccountIndex?: number;
   verifyAll?: boolean;
   deleteAll?: boolean;
   geminiCliAccountIndex?: number;
+}
+
+export type SignInMethod = "browser" | "manual" | "back";
+
+export async function promptSignInMethod(): Promise<SignInMethod> {
+  if (!isTTY()) {
+    return "browser";
+  }
+
+  const ui = getUiRuntimeOptions();
+
+  const items = [
+    { label: UI_COPY.oauth.openBrowser, value: "browser" as SignInMethod, color: "green" as const },
+    { label: UI_COPY.oauth.manualMode, value: "manual" as SignInMethod },
+    { label: UI_COPY.oauth.back, value: "back" as SignInMethod, color: "red" as const },
+  ];
+
+  const result = await select<SignInMethod>(items, {
+    message: UI_COPY.oauth.chooseModeTitle,
+    subtitle: UI_COPY.oauth.chooseModeSubtitle,
+    help: UI_COPY.oauth.chooseModeHelp,
+    clearScreen: true,
+    theme: ui.theme,
+    selectedEmphasis: "minimal",
+    allowEscape: true,
+  });
+
+  return result ?? "back";
 }
 
 async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
@@ -94,12 +134,8 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
   }
 }
 
-export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
-  if (!isTTY()) {
-    return promptLoginModeFallback(existingAccounts);
-  }
-
-  const accounts: AccountInfo[] = existingAccounts.map(acc => ({
+function mapToAccountInfo(acc: ExistingAccountInfo): AccountInfo {
+  return {
     email: acc.email,
     index: acc.index,
     addedAt: acc.addedAt,
@@ -107,8 +143,22 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
     status: acc.status,
     isCurrentAccount: acc.isCurrentAccount,
     enabled: acc.enabled,
+    quota5hLeftPercent: acc.quota5hLeftPercent,
+    quota7dLeftPercent: acc.quota7dLeftPercent,
+    quota5hResetAtMs: acc.quota5hResetAtMs,
+    quota7dResetAtMs: acc.quota7dResetAtMs,
+    quotaRateLimited: acc.quotaRateLimited,
+    quotaSummary: acc.quotaSummary,
     verificationRequiredType: acc.verificationRequiredType,
-  }));
+  };
+}
+
+export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
+  if (!isTTY()) {
+    return promptLoginModeFallback(existingAccounts);
+  }
+
+  const accounts: AccountInfo[] = existingAccounts.map(mapToAccountInfo);
 
   console.log("");
 
@@ -142,6 +192,9 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         if (accountAction === "toggle") {
           return { mode: "manage", toggleAccountIndex: action.account.index };
         }
+        if (accountAction === "set-current") {
+          return { mode: "manage", setCurrentAccountIndex: action.account.index };
+        }
         if (accountAction === "verify") {
           return { mode: "verify", verifyAccountIndex: action.account.index };
         }
@@ -151,12 +204,47 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
       case "delete-all":
         return { mode: "fresh", deleteAll: true };
 
+      case "set-current-account":
+        return { mode: "manage", setCurrentAccountIndex: action.account.index };
+
+      case "refresh-account":
+        return { mode: "add", refreshAccountIndex: action.account.index };
+
+      case "toggle-account":
+        return { mode: "manage", toggleAccountIndex: action.account.index };
+
+      case "delete-account":
+        return { mode: "add", deleteAccountIndex: action.account.index };
+
+      case "settings":
+        await showSettingsMenu();
+        continue;
+
+      case "search":
+        continue;
+
       case "configure-models": {
-        const result = await updateOpencodeConfig();
-        if (result.success) {
-          console.log(`\n✓ Models configured in ${result.configPath}\n`);
-        } else {
-          console.log(`\n✗ Failed to configure models: ${result.error}\n`);
+        try {
+          const result = await runActionPanel(
+            "Configure Models",
+            "Updating opencode.json...",
+            async () => updateOpencodeConfig(),
+            { autoReturnMs: 3000 },
+          );
+          if (result.success) {
+            console.log(`
+✓ Models configured in ${result.configPath}
+`);
+          } else {
+            console.log(`
+✗ Failed to configure models: ${result.error}
+`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.log(`
+✗ Failed to configure models: ${message}
+`)
         }
         continue;
       }

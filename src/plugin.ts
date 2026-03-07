@@ -13,7 +13,8 @@ import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import { authorizeGeminiCli, exchangeGeminiCli } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import { promptAddAnotherAccount, promptLoginMode, promptProjectId, promptSignInMethod } from "./plugin/cli";
+import { runActionPanel } from "./plugin/ui/action-panel";
 import { ensureProjectContext } from "./plugin/project";
 import {
   startAntigravityDebugRequest, 
@@ -2573,7 +2574,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
           if (inputs) {
             const accounts: Array<Extract<AntigravityTokenExchangeResult, { type: "success" }>> = [];
             const noBrowser = inputs.noBrowser === "true" || inputs["no-browser"] === "true";
-            const useManualMode = noBrowser || shouldSkipLocalServer();
+            let useManualMode = noBrowser || shouldSkipLocalServer();
 
             // Check for existing accounts and prompt user for login mode
             let startFresh = true;
@@ -2634,152 +2635,158 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 
                 menuResult = await promptLoginMode(existingAccounts);
 
+                console.clear();
                 if (menuResult.mode === "check") {
-                  console.log("\n📊 Checking quotas for all accounts...\n");
-                  const results = await checkAccountsQuota(existingStorage.accounts, client, providerId);
-                  let storageUpdated = false;
-                  
-                  for (const res of results) {
-                    const label = res.email || `Account ${res.index + 1}`;
-                    const disabledStr = res.disabled ? " (disabled)" : "";
-                    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                    console.log(`  ${label}${disabledStr}`);
-                    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+                  await runActionPanel("Check Quotas", "Checking all accounts...", async () => {
+                    const results = await checkAccountsQuota(existingStorage.accounts, client, providerId);
+                    let storageUpdated = false;
                     
-                    if (res.status === "error") {
-                      console.log(`  ❌ Error: ${res.error}\n`);
-                      continue;
-                    }
-
-                    // ANSI color codes
-                    const colors = {
-                      red: '\x1b[31m',
-                      orange: '\x1b[33m',  // Yellow/orange
-                      green: '\x1b[32m',
-                      reset: '\x1b[0m',
-                    };
-
-                    // Get color based on remaining percentage
-                    const getColor = (remaining?: number): string => {
-                      if (typeof remaining !== 'number') return colors.reset;
-                      if (remaining < 0.2) return colors.red;
-                      if (remaining < 0.6) return colors.orange;
-                      return colors.green;
-                    };
-
-                    // Helper to create colored progress bar
-                    const createProgressBar = (remaining?: number, width: number = 20): string => {
-                      if (typeof remaining !== 'number') return '░'.repeat(width) + ' ???';
-                      const filled = Math.round(remaining * width);
-                      const empty = width - filled;
-                      const color = getColor(remaining);
-                      const bar = `${color}${'█'.repeat(filled)}${colors.reset}${'░'.repeat(empty)}`;
-                      const pct = `${color}${Math.round(remaining * 100)}%${colors.reset}`.padStart(4 + color.length + colors.reset.length);
-                      return `${bar} ${pct}`;
-                    };
-
-                    // Helper to format reset time with days support
-                    const formatReset = (resetTime?: string): string => {
-                      if (!resetTime) return '';
-                      const ms = Date.parse(resetTime) - Date.now();
-                      if (ms <= 0) return ' (resetting...)';
+                    for (const res of results) {
+                      const label = res.email || `Account ${res.index + 1}`;
+                      const disabledStr = res.disabled ? " (disabled)" : "";
+                      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+                      console.log(`  ${label}${disabledStr}`);
+                      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
                       
-                      const hours = ms / (1000 * 60 * 60);
-                      if (hours >= 24) {
-                        const days = Math.floor(hours / 24);
-                        const remainingHours = Math.floor(hours % 24);
-                        if (remainingHours > 0) {
-                          return ` (resets in ${days}d ${remainingHours}h)`;
-                        }
-                        return ` (resets in ${days}d)`;
+                      if (res.status === "error") {
+                        console.log(`  ❌ Error: ${res.error}\n`);
+                        continue;
                       }
-                      return ` (resets in ${formatWaitTime(ms)})`;
-                    };
 
-                    // Display Gemini CLI Quota first (as requested - swap order)
-                    const hasGeminiCli = res.geminiCliQuota && res.geminiCliQuota.models.length > 0;
-                    console.log(`\n  ┌─ Gemini CLI Quota`);
-                    if (!hasGeminiCli) {
-                      const errorMsg = res.geminiCliQuota?.error || "No Gemini CLI quota available";
-                      console.log(`  │  └─ ${errorMsg}`);
-                    } else {
-                      const models = res.geminiCliQuota!.models;
-                      models.forEach((model, idx) => {
-                        const isLast = idx === models.length - 1;
-                        const connector = isLast ? "└─" : "├─";
-                        const bar = createProgressBar(model.remainingFraction);
-                        const reset = formatReset(model.resetTime);
-                        const modelName = model.modelId.padEnd(29);
-                        console.log(`  │  ${connector} ${modelName} ${bar}${reset}`);
-                      });
-                    }
+                      // ANSI color codes
+                      const colors = {
+                        red: '\x1b[31m',
+                        orange: '\x1b[33m',  // Yellow/orange
+                        green: '\x1b[32m',
+                        reset: '\x1b[0m',
+                      };
 
-                    // Display Antigravity Quota second
-                    const hasAntigravity = res.quota && Object.keys(res.quota.groups).length > 0;
-                    console.log(`  │`);
-                    console.log(`  └─ Antigravity Quota`);
-                    if (!hasAntigravity) {
-                      const errorMsg = res.quota?.error || "No quota information available";
-                      console.log(`     └─ ${errorMsg}`);
-                    } else {
-                      const groups = res.quota!.groups;
-                      const groupEntries = [
-                        { name: "Claude", data: groups.claude },
-                        { name: "Gemini 3 Pro", data: groups["gemini-pro"] },
-                        { name: "Gemini 3 Flash", data: groups["gemini-flash"] },
-                      ].filter(g => g.data);
-                      
-                      groupEntries.forEach((g, idx) => {
-                        const isLast = idx === groupEntries.length - 1;
-                        const connector = isLast ? "└─" : "├─";
-                        const bar = createProgressBar(g.data!.remainingFraction);
-                        const reset = formatReset(g.data!.resetTime);
-                        const modelName = g.name.padEnd(29);
-                        console.log(`     ${connector} ${modelName} ${bar}${reset}`);
-                      });
-                    }
-                    console.log("");
+                      // Get color based on remaining percentage
+                      const getColor = (remaining?: number): string => {
+                        if (typeof remaining !== 'number') return colors.reset;
+                        if (remaining < 0.2) return colors.red;
+                        if (remaining < 0.6) return colors.orange;
+                        return colors.green;
+                      };
 
-                    // Cache quota data for soft quota protection
-                    if (res.quota?.groups) {
-                      const acc = existingStorage.accounts[res.index];
-                      if (acc) {
-                        acc.cachedQuota = res.quota.groups;
-                        acc.cachedQuotaUpdatedAt = Date.now();
+                      // Helper to create colored progress bar
+                      const createProgressBar = (remaining?: number, width: number = 20): string => {
+                        if (typeof remaining !== 'number') return '░'.repeat(width) + ' ???';
+                        const filled = Math.round(remaining * width);
+                        const empty = width - filled;
+                        const color = getColor(remaining);
+                        const bar = `${color}${'█'.repeat(filled)}${colors.reset}${'░'.repeat(empty)}`;
+                        const pct = `${color}${Math.round(remaining * 100)}%${colors.reset}`.padStart(4 + color.length + colors.reset.length);
+                        return `${bar} ${pct}`;
+                      };
+
+                      // Helper to format reset time with days support
+                      const formatReset = (resetTime?: string): string => {
+                        if (!resetTime) return '';
+                        const ms = Date.parse(resetTime) - Date.now();
+                        if (ms <= 0) return ' (resetting...)';
+                        
+                        const hours = ms / (1000 * 60 * 60);
+                        if (hours >= 24) {
+                          const days = Math.floor(hours / 24);
+                          const remainingHours = Math.floor(hours % 24);
+                          if (remainingHours > 0) {
+                            return ` (resets in ${days}d ${remainingHours}h)`;
+                          }
+                          return ` (resets in ${days}d)`;
+                        }
+                        return ` (resets in ${formatWaitTime(ms)})`;
+                      };
+
+                      // Display Gemini CLI Quota first (as requested - swap order)
+                      const hasGeminiCli = res.geminiCliQuota && res.geminiCliQuota.models.length > 0;
+                      console.log(`\n  ┌─ Gemini CLI Quota`);
+                      if (!hasGeminiCli) {
+                        const errorMsg = res.geminiCliQuota?.error || "No Gemini CLI quota available";
+                        console.log(`  │  └─ ${errorMsg}`);
+                      } else {
+                        const models = res.geminiCliQuota!.models;
+                        models.forEach((model, idx) => {
+                          const isLast = idx === models.length - 1;
+                          const connector = isLast ? "└─" : "├─";
+                          const bar = createProgressBar(model.remainingFraction);
+                          const reset = formatReset(model.resetTime);
+                          const modelName = model.modelId.padEnd(29);
+                          console.log(`  │  ${connector} ${modelName} ${bar}${reset}`);
+                        });
+                      }
+
+                      // Display Antigravity Quota second
+                      const hasAntigravity = res.quota && Object.keys(res.quota.groups).length > 0;
+                      console.log(`  │`);
+                      console.log(`  └─ Antigravity Quota`);
+                      if (!hasAntigravity) {
+                        const errorMsg = res.quota?.error || "No quota information available";
+                        console.log(`     └─ ${errorMsg}`);
+                      } else {
+                        const groups = res.quota!.groups;
+                        const groupEntries = [
+                          { name: "Claude", data: groups.claude },
+                          { name: "Gemini 3 Pro", data: groups["gemini-pro"] },
+                          { name: "Gemini 3 Flash", data: groups["gemini-flash"] },
+                        ].filter(g => g.data);
+                        
+                        groupEntries.forEach((g, idx) => {
+                          const isLast = idx === groupEntries.length - 1;
+                          const connector = isLast ? "└─" : "├─";
+                          const bar = createProgressBar(g.data!.remainingFraction);
+                          const reset = formatReset(g.data!.resetTime);
+                          const modelName = g.name.padEnd(29);
+                          console.log(`     ${connector} ${modelName} ${bar}${reset}`);
+                        });
+                      }
+                      console.log("");
+
+                      // Cache quota data for soft quota protection
+                      if (res.quota?.groups) {
+                        const acc = existingStorage.accounts[res.index];
+                        if (acc) {
+                          acc.cachedQuota = res.quota.groups;
+                          acc.cachedQuotaUpdatedAt = Date.now();
+                          storageUpdated = true;
+                        }
+                      }
+
+                      if (res.updatedAccount) {
+                        existingStorage.accounts[res.index] = {
+                          ...res.updatedAccount,
+                          cachedQuota: res.quota?.groups,
+                          cachedQuotaUpdatedAt: Date.now(),
+                        };
                         storageUpdated = true;
                       }
                     }
-
-                    if (res.updatedAccount) {
-                      existingStorage.accounts[res.index] = {
-                        ...res.updatedAccount,
-                        cachedQuota: res.quota?.groups,
-                        cachedQuotaUpdatedAt: Date.now(),
-                      };
-                      storageUpdated = true;
+                    if (storageUpdated) {
+                      await saveAccounts(existingStorage);
                     }
-                  }
-                  if (storageUpdated) {
-                    await saveAccounts(existingStorage);
-                  }
-                  console.log("");
+                    console.log("");
+                  });
                   continue;
                 }
 
                 if (menuResult.mode === "manage") {
                   if (menuResult.toggleAccountIndex !== undefined) {
-                    const acc = existingStorage.accounts[menuResult.toggleAccountIndex];
+                    const toggleIdx = menuResult.toggleAccountIndex;
+                    const acc = existingStorage.accounts[toggleIdx];
                     if (acc) {
-                      acc.enabled = acc.enabled === false;
-                      await saveAccounts(existingStorage);
-                      activeAccountManager?.setAccountEnabled(menuResult.toggleAccountIndex, acc.enabled);
-                      console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
+                      await runActionPanel("Applying Change", "Updating account...", async () => {
+                        acc.enabled = acc.enabled === false;
+                        await saveAccounts(existingStorage);
+                        activeAccountManager?.setAccountEnabled(toggleIdx, acc.enabled);
+                        console.log(`Account ${acc.email || toggleIdx + 1} ${acc.enabled ? 'enabled' : 'disabled'}.`);
+                      });
                     }
                   }
                   continue;
                 }
 
                 if (menuResult.mode === "gemini-cli-login") {
+                  console.clear();
                   if (existingStorage.accounts.length === 0) {
                     console.log("\nNo accounts available. Add an account first.\n");
                     continue;
@@ -2886,86 +2893,90 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       continue;
                     }
 
-                    console.log(`\nChecking verification status for ${existingStorage.accounts.length} account(s)...\n`);
+                    await runActionPanel("Verify All", `Checking ${existingStorage.accounts.length} accounts...`, async () => {
+                      let okCount = 0;
+                      let blockedCount = 0;
+                      let errorCount = 0;
+                      let storageUpdated = false;
 
-                    let okCount = 0;
-                    let blockedCount = 0;
-                    let errorCount = 0;
-                    let storageUpdated = false;
+                      const blockedResults: Array<{ label: string; message: string; verifyUrl?: string }> = [];
 
-                    const blockedResults: Array<{ label: string; message: string; verifyUrl?: string }> = [];
+                      for (let i = 0; i < existingStorage.accounts.length; i++) {
+                        const account = existingStorage.accounts[i];
+                        if (!account) continue;
 
-                    for (let i = 0; i < existingStorage.accounts.length; i++) {
-                      const account = existingStorage.accounts[i];
-                      if (!account) continue;
+                        const label = account.email || `Account ${i + 1}`;
 
-                      const label = account.email || `Account ${i + 1}`;
-                      process.stdout.write(`- [${i + 1}/${existingStorage.accounts.length}] ${label} ... `);
-
-                      const verification = await verifyAccountAccess(account, client, providerId);
-                      if (verification.status === "ok") {
-                        const { changed, wasVerificationRequired } = clearStoredAccountVerificationRequired(account, true);
-                        if (changed) {
-                          storageUpdated = true;
+                        const verification = await verifyAccountAccess(account, client, providerId);
+                        if (verification.status === "ok") {
+                          const { changed, wasVerificationRequired } = clearStoredAccountVerificationRequired(account, true);
+                          if (changed) {
+                            storageUpdated = true;
+                          }
+                          activeAccountManager?.clearAccountVerificationRequired(i, wasVerificationRequired);
+                          okCount += 1;
+                          console.log(`- [${i + 1}/${existingStorage.accounts.length}] ${label} ... ok`);
+                          continue;
                         }
-                        activeAccountManager?.clearAccountVerificationRequired(i, wasVerificationRequired);
-                        okCount += 1;
-                        console.log("ok");
-                        continue;
+
+                        if (verification.status === "blocked") {
+                          const changed = markStoredAccountVerificationRequired(
+                            account,
+                            verification.message,
+                            verification.verifyUrl,
+                            verification.verificationType,
+                          );
+                          if (changed) {
+                            storageUpdated = true;
+                          }
+                          activeAccountManager?.markAccountVerificationRequired(
+                            i,
+                            verification.message,
+                            verification.verifyUrl,
+                            verification.verificationType,
+                          );
+
+                          blockedCount += 1;
+                          const verifyUrl = verification.verifyUrl ?? account.verificationUrl;
+                          blockedResults.push({
+                            label,
+                            message: verification.message,
+                            verifyUrl,
+                          });
+                          console.log(`- [${i + 1}/${existingStorage.accounts.length}] ${label} ... needs verification`);
+                          continue;
+                        }
+
+                        errorCount += 1;
+                        console.log(`- [${i + 1}/${existingStorage.accounts.length}] ${label} ... error (${verification.message})`);
                       }
 
-                      if (verification.status === "blocked") {
-                        const changed = markStoredAccountVerificationRequired(
-                          account,
-                          verification.message,
-                          verification.verifyUrl,
-                          verification.verificationType,
-                        );
-                        if (changed) {
-                          storageUpdated = true;
-                        }
-                        activeAccountManager?.markAccountVerificationRequired(i, verification.message, verification.verifyUrl, verification.verificationType);
-
-                        blockedCount += 1;
-                        console.log("needs verification");
-                        const verifyUrl = verification.verifyUrl ?? account.verificationUrl;
-                        blockedResults.push({
-                          label,
-                          message: verification.message,
-                          verifyUrl,
-                        });
-                        continue;
+                      if (storageUpdated) {
+                        await saveAccounts(existingStorage);
                       }
 
-                      errorCount += 1;
-                      console.log(`error (${verification.message})`);
-                    }
+                      console.log(`\nVerification summary: ${okCount} ready, ${blockedCount} need verification, ${errorCount} errors.`);
 
-                    if (storageUpdated) {
-                      await saveAccounts(existingStorage);
-                    }
-
-                    console.log(`\nVerification summary: ${okCount} ready, ${blockedCount} need verification, ${errorCount} errors.`);
-
-                    if (blockedResults.length > 0) {
-                      console.log("\nAccounts needing verification:");
-                      for (const result of blockedResults) {
-                        console.log(`\n- ${result.label}`);
-                        console.log(`  ${result.message}`);
-                        if (result.verifyUrl) {
-                          console.log(`  URL: ${result.verifyUrl}`);
-                        } else {
-                          console.log("  URL: not provided by API response");
+                      if (blockedResults.length > 0) {
+                        console.log("\nAccounts needing verification:");
+                        for (const result of blockedResults) {
+                          console.log(`\n- ${result.label}`);
+                          console.log(`  ${result.message}`);
+                          if (result.verifyUrl) {
+                            console.log(`  URL: ${result.verifyUrl}`);
+                          } else {
+                            console.log("  URL: not provided by API response");
+                          }
                         }
+                        console.log("");
+                      } else {
+                        console.log("");
                       }
-                      console.log("");
-                    } else {
-                      console.log("");
-                    }
-
+                    });
                     continue;
                   }
 
+                  console.clear();
                   let verifyAccountIndex = menuResult.verifyAccountIndex;
                   if (verifyAccountIndex === undefined) {
                     verifyAccountIndex = await promptAccountIndexForVerification(existingAccounts);
@@ -3137,6 +3148,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 });
                 // Sync in-memory state so deleted account stops being used immediately
                 activeAccountManager?.removeAccountByIndex(menuResult.deleteAccountIndex);
+                console.clear();
                 console.log("\nAccount deleted.\n");
 
                 if (updatedAccounts.length > 0) {
@@ -3185,12 +3197,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
               if (menuResult.refreshAccountIndex !== undefined) {
                 refreshAccountIndex = menuResult.refreshAccountIndex;
                 const refreshEmail = existingStorage.accounts[refreshAccountIndex]?.email;
+                console.clear();
                 console.log(`\nRe-authenticating ${refreshEmail || 'account'}...\n`);
                 startFresh = false;
               }
               
               if (menuResult.deleteAll) {
                 await clearAccounts();
+                console.clear();
                 console.log("\nAll accounts deleted.\n");
                 startFresh = true;
                 try {
@@ -3209,6 +3223,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 console.log("\nStarting fresh - existing accounts will be replaced.\n");
               } else if (!startFresh) {
                 console.log("\nAdding to existing accounts.\n");
+              }
+            }
+
+            // Sign-in method picker (TUI)
+            if (!useManualMode) {
+              const signInMethod = await promptSignInMethod();
+              if (signInMethod === "back") {
+                return {
+                  url: "",
+                  instructions: "Authentication cancelled",
+                  method: "auto",
+                  callback: async () => ({ type: "failed", error: "Authentication cancelled" }),
+                };
+              }
+              if (signInMethod === "manual") {
+                useManualMode = true;
               }
             }
 

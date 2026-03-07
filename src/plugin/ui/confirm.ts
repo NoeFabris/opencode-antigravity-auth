@@ -1,6 +1,8 @@
+import { getUiRuntimeOptions } from './runtime';
 import { select } from './select';
 
 export async function confirm(message: string, defaultYes = false): Promise<boolean> {
+  const ui = getUiRuntimeOptions();
   const items = defaultYes
     ? [
         { label: 'Yes', value: true },
@@ -11,6 +13,6 @@ export async function confirm(message: string, defaultYes = false): Promise<bool
         { label: 'Yes', value: true },
       ];
 
-  const result = await select(items, { message });
+  const result = await select(items, { message, theme: ui.theme });
   return result ?? false;
 }

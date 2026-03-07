@@ -7,24 +7,35 @@ export const ANSI = {
   // Cursor control
   hide: '\x1b[?25l',
   show: '\x1b[?25h',
+  altScreenOn: '\x1b[?1049h',
+  altScreenOff: '\x1b[?1049l',
   up: (n = 1) => `\x1b[${n}A`,
   down: (n = 1) => `\x1b[${n}B`,
   clearLine: '\x1b[2K',
   clearScreen: '\x1b[2J',
+  clearBelow: '\x1b[J',
   moveTo: (row: number, col: number) => `\x1b[${row};${col}H`,
   
   // Styles
+  black: '\x1b[30m',
+  white: '\x1b[97m',
   cyan: '\x1b[36m',
   green: '\x1b[32m',
   red: '\x1b[31m',
+  magenta: '\x1b[35m',
   yellow: '\x1b[33m',
+  bgBlue: '\x1b[44m',
+  bgBrightBlue: '\x1b[104m',
+  bgGreen: '\x1b[42m',
+  bgYellow: '\x1b[43m',
+  bgRed: '\x1b[41m',
   dim: '\x1b[2m',
   bold: '\x1b[1m',
   reset: '\x1b[0m',
   inverse: '\x1b[7m',
 } as const;
 
-export type KeyAction = 'up' | 'down' | 'enter' | 'escape' | 'escape-start' | null;
+export type KeyAction = 'up' | 'down' | 'home' | 'end' | 'enter' | 'escape' | 'escape-start' | null;
 
 /**
  * Parse raw keyboard input buffer into a key action.
@@ -38,6 +49,8 @@ export function parseKey(data: Buffer): KeyAction {
   // Application mode: \x1bOA (up), \x1bOB (down)
   if (s === '\x1b[A' || s === '\x1bOA') return 'up';
   if (s === '\x1b[B' || s === '\x1bOB') return 'down';
+  if (s === '\x1b[H' || s === '\x1bOH' || s === '\x1b[1~' || s === '\x1b[7~') return 'home';
+  if (s === '\x1b[F' || s === '\x1bOF' || s === '\x1b[4~' || s === '\x1b[8~') return 'end';
   
   // Enter (CR or LF)
   if (s === '\r' || s === '\n') return 'enter';
@@ -53,5 +66,5 @@ export function parseKey(data: Buffer): KeyAction {
  * Check if the terminal supports interactive input.
  */
 export function isTTY(): boolean {
-  return Boolean(process.stdin.isTTY);
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
