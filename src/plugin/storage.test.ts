@@ -1,10 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   deduplicateAccountsByEmail,
+  mergeAccountStorage,
   migrateV2ToV3,
   loadAccounts,
   type AccountMetadata,
   type AccountStorage,
+  type AccountStorageV4,
 } from "./storage";
 import { promises as fs } from "node:fs";
 import {
@@ -206,6 +208,71 @@ describe("deduplicateAccountsByEmail", () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.refreshToken).toBe("token-10"); // The newest one
     expect(result[0]?.email).toBe("user@example.com");
+  });
+});
+
+describe("mergeAccountStorage", () => {
+  it("lets an empty incoming rateLimitResetTimes clear stale stored limits", () => {
+    const existing: AccountStorageV4 = {
+      version: 4,
+      accounts: [
+        {
+          refreshToken: "r1",
+          projectId: "p1",
+          addedAt: 1,
+          lastUsed: 10,
+          rateLimitResetTimes: { claude: 123456 },
+        },
+      ],
+      activeIndex: 0,
+    };
+    const incoming: AccountStorageV4 = {
+      version: 4,
+      accounts: [
+        {
+          refreshToken: "r1",
+          projectId: "p1",
+          addedAt: 1,
+          lastUsed: 20,
+          rateLimitResetTimes: {},
+        },
+      ],
+      activeIndex: 0,
+    };
+
+    const merged = mergeAccountStorage(existing, incoming);
+    expect(merged.accounts[0]?.rateLimitResetTimes).toBeUndefined();
+  });
+
+  it("preserves existing limits when incoming storage does not specify them", () => {
+    const existing: AccountStorageV4 = {
+      version: 4,
+      accounts: [
+        {
+          refreshToken: "r1",
+          projectId: "p1",
+          addedAt: 1,
+          lastUsed: 10,
+          rateLimitResetTimes: { claude: 123456 },
+        },
+      ],
+      activeIndex: 0,
+    };
+    const incoming: AccountStorageV4 = {
+      version: 4,
+      accounts: [
+        {
+          refreshToken: "r1",
+          projectId: "p1",
+          addedAt: 1,
+          lastUsed: 20,
+        },
+      ],
+      activeIndex: 0,
+    };
+
+    const merged = mergeAccountStorage(existing, incoming);
+    expect(merged.accounts[0]?.rateLimitResetTimes).toEqual({ claude: 123456 });
   });
 });
 

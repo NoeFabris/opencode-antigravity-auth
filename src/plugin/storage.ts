@@ -399,7 +399,7 @@ async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function mergeAccountStorage(
+export function mergeAccountStorage(
   existing: AccountStorageV4,
   incoming: AccountStorageV4,
 ): AccountStorageV4 {
@@ -415,16 +415,22 @@ function mergeAccountStorage(
     if (acc.refreshToken) {
       const existingAcc = accountMap.get(acc.refreshToken);
       if (existingAcc) {
+        const incomingRateLimitResetTimes = acc.rateLimitResetTimes;
+        const mergedRateLimitResetTimes = incomingRateLimitResetTimes === undefined
+          ? existingAcc.rateLimitResetTimes
+          : Object.keys(incomingRateLimitResetTimes).length === 0
+            ? undefined
+            : {
+                ...existingAcc.rateLimitResetTimes,
+                ...incomingRateLimitResetTimes,
+              };
         accountMap.set(acc.refreshToken, {
           ...existingAcc,
           ...acc,
           // Preserve manually configured projectId/managedProjectId if not in incoming
           projectId: acc.projectId ?? existingAcc.projectId,
           managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
-          rateLimitResetTimes: {
-            ...existingAcc.rateLimitResetTimes,
-            ...acc.rateLimitResetTimes,
-          },
+          rateLimitResetTimes: mergedRateLimitResetTimes,
           lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
         });
       } else {
