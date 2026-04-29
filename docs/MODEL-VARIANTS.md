@@ -97,7 +97,7 @@ Gemini 3 models use string-based thinking levels. Available levels differ by mod
 
 ## Claude Thinking Budget
 
-Claude models use token-based thinking budgets:
+Claude models use token-based thinking budgets (in tokens):
 
 | Variant | Budget | Description |
 |---------|--------|-------------|
