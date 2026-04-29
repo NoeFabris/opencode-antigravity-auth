@@ -45,7 +45,7 @@ pkill -f opencode || true
 Stop-Process -Name "opencode" -Force -ErrorAction SilentlyContinue
 ```
 
-2) Clear the plugin caches and re-login:
+2) Clear the plugin caches and re-authenticate:
 
 **macOS/Linux:**
 ```bash
