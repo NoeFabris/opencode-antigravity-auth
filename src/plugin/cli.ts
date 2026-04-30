@@ -31,6 +31,7 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
 }
 
 export async function promptContinue(): Promise<void> {
+  if (!isTTY()) return;
   const rl = createInterface({ input, output });
   try {
     await rl.question("Press Enter to return to menu...");
