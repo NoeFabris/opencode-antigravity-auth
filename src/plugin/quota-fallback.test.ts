@@ -29,7 +29,7 @@ let getHeaderStyleFromUrl: GetHeaderStyleFromUrl | undefined;
 let resolveHeaderRoutingDecision: ResolveHeaderRoutingDecision | undefined;
 
 beforeAll(async () => {
-  vi.mock("@opencode-ai/plugin", () => ({
+  vi.mock("@opencode-ai/plugin/tool", () => ({
     tool: vi.fn(),
   }));
 
