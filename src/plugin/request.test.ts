@@ -1036,7 +1036,7 @@ it("removes x-api-key header", () => {
         expect(result.effectiveModel).toBe("gemini-3-flash");
       });
 
-      it("transforms gemini-3-pro-preview to gemini-3-pro-low for antigravity headerStyle", () => {
+      it("transforms legacy gemini-3-pro-preview to gemini-3.1-pro-low for antigravity headerStyle", () => {
         const result = prepareAntigravityRequest(
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent",
           { method: "POST", body: JSON.stringify({ contents: [] }) },
@@ -1045,7 +1045,7 @@ it("removes x-api-key header", () => {
           undefined,
           "antigravity"
         );
-        expect(result.effectiveModel).toBe("gemini-3-pro-low");
+        expect(result.effectiveModel).toBe("gemini-3.1-pro-low");
       });
 
       it("transforms gemini-3.1-pro-preview to gemini-3.1-pro-low for antigravity headerStyle", () => {
@@ -1084,7 +1084,7 @@ it("removes x-api-key header", () => {
         expect(result.effectiveModel).toBe("gemini-3-flash-preview");
       });
 
-      it("transforms gemini-3-pro-low to gemini-3-pro-preview for gemini-cli headerStyle", () => {
+      it("transforms legacy gemini-3-pro-low to gemini-3.1-pro-preview for gemini-cli headerStyle", () => {
         const result = prepareAntigravityRequest(
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-low:generateContent",
           { method: "POST", body: JSON.stringify({ contents: [] }) },
@@ -1093,7 +1093,7 @@ it("removes x-api-key header", () => {
           undefined,
           "gemini-cli"
         );
-        expect(result.effectiveModel).toBe("gemini-3-pro-preview");
+        expect(result.effectiveModel).toBe("gemini-3.1-pro-preview");
       });
 
       it("transforms gemini-3.1-pro-low to gemini-3.1-pro-preview for gemini-cli headerStyle", () => {

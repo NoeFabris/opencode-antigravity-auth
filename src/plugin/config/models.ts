@@ -38,15 +38,6 @@ const DEFAULT_MODALITIES: ModelModalities = {
 };
 
 export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
-  "antigravity-gemini-3-pro": {
-    name: "Gemini 3 Pro (Antigravity)",
-    limit: { context: 1048576, output: 65535 },
-    modalities: DEFAULT_MODALITIES,
-    variants: {
-      low: { thinkingLevel: "low" },
-      high: { thinkingLevel: "high" },
-    },
-  },
   "antigravity-gemini-3.1-pro": {
     name: "Gemini 3.1 Pro (Antigravity)",
     limit: { context: 1048576, output: 65535 },
@@ -94,11 +85,6 @@ export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
   "gemini-3-flash-preview": {
     name: "Gemini 3 Flash Preview (Gemini CLI)",
     limit: { context: 1048576, output: 65536 },
-    modalities: DEFAULT_MODALITIES,
-  },
-  "gemini-3-pro-preview": {
-    name: "Gemini 3 Pro Preview (Gemini CLI)",
-    limit: { context: 1048576, output: 65535 },
     modalities: DEFAULT_MODALITIES,
   },
   "gemini-3.1-pro-preview": {
