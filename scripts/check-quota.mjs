@@ -94,6 +94,7 @@ async function loadProjectId(accessToken) {
 function classifyGroup(modelName) {
   const lower = modelName.toLowerCase();
   if (lower.includes("claude")) return "claude";
+  if (lower.includes("gpt-oss")) return "gpt-oss";
   if (!lower.includes("gemini-3")) return null;
   if (lower.includes("flash")) return "gemini-flash";
   return "gemini-pro";
@@ -204,8 +205,9 @@ async function run() {
       }
 
       printGroup("Claude", groups["claude"]);
-      printGroup("Gemini 3 Pro", groups["gemini-pro"]);
-      printGroup("Gemini 3 Flash", groups["gemini-flash"]);
+      printGroup("Gemini 3.x Pro", groups["gemini-pro"]);
+      printGroup("Gemini 3.x Flash", groups["gemini-flash"]);
+      printGroup("GPT-OSS", groups["gpt-oss"]);
     } catch (error) {
       console.log(`   error: ${error instanceof Error ? error.message : String(error)}`);
     }

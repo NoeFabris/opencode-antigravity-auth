@@ -334,6 +334,103 @@
       "default": true,
       "type": "boolean",
       "description": "Enable automatic plugin updates."
+    },
+    "transport": {
+      "default": {
+        "id": "gateway"
+      },
+      "type": "object",
+      "properties": {
+        "id": {
+          "default": "gateway",
+          "type": "string",
+          "enum": [
+            "gateway",
+            "cli",
+            "managed-agent"
+          ]
+        },
+        "cli": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "type": "boolean"
+            },
+            "binary": {
+              "type": "string"
+            },
+            "print_timeout_seconds": {
+              "default": 300,
+              "type": "number",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "process_timeout_seconds": {
+              "default": 330,
+              "type": "number",
+              "minimum": 1,
+              "maximum": 3900
+            },
+            "log_file": {
+              "type": "string"
+            },
+            "sandbox": {
+              "default": false,
+              "type": "boolean"
+            },
+            "dangerously_skip_permissions": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "print_timeout_seconds",
+            "process_timeout_seconds",
+            "sandbox",
+            "dangerously_skip_permissions"
+          ],
+          "additionalProperties": false
+        },
+        "managed_agent": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "type": "boolean"
+            },
+            "api_key": {
+              "default": "",
+              "type": "string"
+            },
+            "stream": {
+              "default": false,
+              "type": "boolean"
+            },
+            "system_instruction": {
+              "type": "string"
+            },
+            "environment": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "enabled",
+            "api_key",
+            "stream"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

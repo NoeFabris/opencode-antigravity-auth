@@ -3,26 +3,21 @@ import { spawn } from "child_process";
 
 interface ModelTest {
   model: string;
-  category: "gemini-cli" | "antigravity-gemini" | "antigravity-claude";
+  category: "antigravity-gemini" | "antigravity-claude" | "antigravity-open";
 }
 
 const MODELS: ModelTest[] = [
-  // Gemini CLI (direct Google API)
-  { model: "google/gemini-3-flash-preview", category: "gemini-cli" },
-  { model: "google/gemini-3-pro-preview", category: "gemini-cli" },
-  { model: "google/gemini-2.5-pro", category: "gemini-cli" },
-  { model: "google/gemini-2.5-flash", category: "gemini-cli" },
-
-  // Antigravity Gemini
-  { model: "google/antigravity-gemini-3-pro-low", category: "antigravity-gemini" },
-  { model: "google/antigravity-gemini-3-pro-high", category: "antigravity-gemini" },
-  { model: "google/antigravity-gemini-3-flash", category: "antigravity-gemini" },
+  // Current Antigravity Gemini quota rows
+  { model: "google/antigravity-gemini-3.1-pro-low", category: "antigravity-gemini" },
+  { model: "google/antigravity-gemini-3.1-pro-high", category: "antigravity-gemini" },
+  { model: "google/antigravity-gemini-3.5-flash-low", category: "antigravity-gemini" },
 
   // Antigravity Claude
   { model: "google/antigravity-claude-sonnet-4-6", category: "antigravity-claude" },
-  { model: "google/antigravity-claude-opus-4-6-thinking-low", category: "antigravity-claude" },
-  { model: "google/antigravity-claude-opus-4-6-thinking-medium", category: "antigravity-claude" },
-  { model: "google/antigravity-claude-opus-4-6-thinking-high", category: "antigravity-claude" },
+  { model: "google/antigravity-claude-opus-4-6-thinking", category: "antigravity-claude" },
+
+  // Antigravity open model row
+  { model: "google/antigravity-gpt-oss-120b-medium", category: "antigravity-open" },
 ];
 
 const TEST_PROMPT = "Reply with exactly one word: WORKING";
@@ -58,6 +53,8 @@ async function testModel(model: string, timeoutMs: number): Promise<TestResult> 
 
       if (code !== 0) {
         resolve({ success: false, error: `Exit ${code}: ${stderr || stdout}`.slice(0, 200), duration });
+      } else if (/\bError:\s|Requested entity was not found|\[Debug Info\]/i.test(stderr)) {
+        resolve({ success: false, error: `Runtime error: ${stderr || stdout}`.slice(0, 300), duration });
       } else {
         resolve({ success: true, duration });
       }
@@ -94,14 +91,14 @@ Usage:
 
 Options:
   --model <model>      Test specific model
-  --category <cat>     Test by category (gemini-cli, antigravity-gemini, antigravity-claude)
+  --category <cat>     Test by category (antigravity-gemini, antigravity-claude, antigravity-open)
   --timeout <ms>       Timeout per model (default: 120000)
   --dry-run            List models without testing
   --help, -h           Show this help
 
 Examples:
   npx tsx script/test-models.ts --dry-run
-  npx tsx script/test-models.ts --model google/gemini-3-flash-preview
+  npx tsx script/test-models.ts --model google/antigravity-gemini-3.5-flash-low
   npx tsx script/test-models.ts --category antigravity-claude
 `);
 }

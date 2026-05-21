@@ -41,14 +41,13 @@ body:
       label: Model used
       description: Which model were you using when the issue occurred?
       options:
-        - antigravity-gemini-3-pro
-        - antigravity-gemini-3-flash
+        - antigravity-gemini-3.1-pro-low
+        - antigravity-gemini-3.1-pro-high
+        - antigravity-gemini-3.5-flash-low
+        - antigravity-gemini-3.5-flash-low
         - antigravity-claude-sonnet-4-6
         - antigravity-claude-opus-4-6-thinking
-        - gemini-2.5-flash
-        - gemini-2.5-pro
-        - gemini-3-flash-preview
-        - gemini-3-pro-preview
+        - antigravity-gpt-oss-120b-medium
         - Other (specify in description)
         - Not applicable
     validations:

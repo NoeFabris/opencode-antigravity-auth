@@ -3,6 +3,8 @@
 # Tests gemini-cli models routing through cloudcode-pa.googleapis.com/v1internal
 #
 # Models tested:
+# Legacy Gemini CLI smoke. Individual Gemini CLI access sunsets on 2026-06-18;
+# keep this script only for backward-compatible fallback debugging.
 # 1. google/gemini-2.5-pro
 # 2. google/gemini-2.5-flash
 # 3. google/gemini-3-pro-preview
@@ -113,8 +115,8 @@ if [ -z "$SID" ]; then
   log_fail "Test 5 - No session ID created"
 else
   log_info "Session: $SID"
-  log_info "Step 2: Switch to antigravity-gemini-3-flash..."
-  timeout 60 opencode run -s "$SID" -m google/antigravity-gemini-3-flash \
+  log_info "Step 2: Switch to antigravity-gemini-3.5-flash-low..."
+  timeout 60 opencode run -s "$SID" -m google/antigravity-gemini-3.5-flash-low \
     "Say: SESSION_CONTINUE" \
     2>&1 > /tmp/gemini-cli-e2e-cross-s2.log || true
   
@@ -128,8 +130,8 @@ echo ""
 
 # Test 6: Reverse cross-model (antigravity → gemini-cli)
 echo "Test 6: Cross-model session (antigravity → gemini-cli)"
-log_info "Step 1: Start with antigravity-gemini-3-pro-low..."
-timeout 60 opencode run -m google/antigravity-gemini-3-pro-low \
+log_info "Step 1: Start with antigravity-gemini-3.1-pro-low..."
+timeout 60 opencode run -m google/antigravity-gemini-3.1-pro-low \
   "Say: ANTIGRAVITY_START" \
   2>&1 > /tmp/gemini-cli-e2e-reverse-s1.log || true
 

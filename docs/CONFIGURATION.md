@@ -243,3 +243,114 @@ Used by `hybrid` strategy. Most users don't need to configure this.
 | `token_bucket.initial_tokens` | `50` | Starting tokens |
 
 </details>
+
+---
+
+## Authentication Alignment
+
+The plugin uses Google OAuth for the default `gateway` transport. Phase 1 aligned the OAuth shape with official Antigravity CLI signals while preserving the local callback as the default.
+
+| Mode | Redirect URI | Auth endpoint | Status |
+|------|--------------|---------------|--------|
+| `local-callback` | `http://localhost:51121/oauth-callback` | `https://accounts.google.com/o/oauth2/v2/auth` | Default |
+| `official-callback` | `https://antigravity.google/oauth-callback` | `https://accounts.google.com/o/oauth2/auth` | Experimental/manual |
+
+Scopes:
+
+- `https://www.googleapis.com/auth/cloud-platform`
+- `https://www.googleapis.com/auth/userinfo.email`
+- `https://www.googleapis.com/auth/userinfo.profile`
+- `https://www.googleapis.com/auth/cclog`
+- `https://www.googleapis.com/auth/experimentsandconfigs`
+- `openid`
+
+The hosted callback is useful for comparing with official `agy` behavior, but normal plugin login should use the local callback. The official CLI cannot reliably act as this plugin's auth broker because its OAuth flow is interactive and time-limited.
+
+OAuth state handling is plugin-owned. The authorization URL contains an opaque `state` nonce; the matching PKCE verifier is kept in the running plugin process with a short TTL. This is why a code copied from a different `agy` or Antigravity browser flow cannot be redeemed by the plugin: it does not have the matching verifier.
+
+If the local callback does not return automatically, use the manual fallback from the same login attempt and paste the full localhost callback URL or the authorization code. Do not start a separate `agy` auth flow for the code.
+
+## Endpoint Alignment
+
+| Endpoint | Status | Used for |
+|----------|--------|----------|
+| `https://daily-cloudcode-pa.googleapis.com` | Active primary | Default gateway requests |
+| `https://daily-cloudcode-pa.sandbox.googleapis.com` | Legacy fallback | Fallback gateway requests |
+| `https://cloudcode-pa.googleapis.com` | Production | Quota checks, model discovery, account verification |
+
+The `gemini-cli` header style is intentionally restricted to the production endpoint.
+
+## Transport Selection
+
+The `transport` block controls which backend handles model requests. The default remains the current gateway shim.
+
+### Gateway (default)
+
+```json
+{
+  "transport": {
+    "id": "gateway"
+  }
+}
+```
+
+Supports OAuth, multi-account rotation, quota fallback, endpoint fallback, streaming, tool calls, schema sanitization, thinking recovery, and session recovery.
+
+### CLI Transport (experimental)
+
+```json
+{
+  "transport": {
+    "id": "cli",
+    "cli": {
+      "enabled": true,
+      "binary": "/path/to/agy",
+      "print_timeout_seconds": 300,
+      "process_timeout_seconds": 330,
+      "sandbox": false,
+      "dangerously_skip_permissions": true
+    }
+  }
+}
+```
+
+Runs `agy --print` as a subprocess. Limitations:
+
+- Double-agent mode: OpenCode and `agy` both act as agents.
+- Only text prompts are mapped; OpenCode tool calls and streaming are not forwarded to `agy`.
+- `agy` authentication must be completed separately in a terminal/browser.
+- No plugin-level multi-account rotation or quota fallback.
+
+### Managed Agent Transport (experimental)
+
+```json
+{
+  "transport": {
+    "id": "managed-agent",
+    "managed_agent": {
+      "enabled": true,
+      "api_key": "YOUR_GEMINI_API_KEY",
+      "stream": false,
+      "system_instruction": "You are a helpful coding assistant."
+    }
+  }
+}
+```
+
+Uses the public Gemini Managed Agents / Interactions API with `antigravity-preview-05-2026`.
+
+Warnings:
+
+- Requires a Gemini API key; this is separate from Antigravity OAuth accounts.
+- Requests may bill the Google Cloud project associated with the API key.
+- Preview API behavior, availability, and pricing may change.
+- No plugin-level multi-account rotation or quota fallback.
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCODE_ANTIGRAVITY_DEBUG` | `false` | Enable debug logging |
+| `OPENCODE_ANTIGRAVITY_QUIET` | `false` | Suppress toast notifications |
+| `OPENCODE_ANTIGRAVITY_OAUTH_BIND` | `127.0.0.1:51121` | Local OAuth callback bind address |
+| `OPENCODE_ANTIGRAVITY_OAUTH_CALLBACK_TIMEOUT_MS` | `120000` | How long to wait for the localhost OAuth callback before falling back to manual paste input. Values are clamped between 10 seconds and 10 minutes. |

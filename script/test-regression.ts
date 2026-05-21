@@ -52,10 +52,9 @@ const ERROR_PATTERNS = [
   "must remain as they were",
 ];
 
-const GEMINI_FLASH = "google/antigravity-gemini-3-flash";
-const GEMINI_FLASH_CLI_QUOTA = "google/gemini-2.5-flash";
+const GEMINI_FLASH = "google/antigravity-gemini-3.5-flash-low";
 const CLAUDE_SONNET = "google/antigravity-claude-sonnet-4-6";
-const CLAUDE_OPUS = "google/antigravity-claude-opus-4-6-thinking-low";
+const CLAUDE_OPUS = "google/antigravity-claude-opus-4-6-thinking";
 
 const SANITY_TESTS: MultiTurnTest[] = [
   {

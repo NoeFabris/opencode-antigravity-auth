@@ -13,9 +13,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
  * network-failure path correctly uses it.
  */
 
+// Hoist mock so it applies before dynamic imports in each test
+const mockExecFile = vi.hoisted(() =>
+  vi.fn((_bin: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout?: string) => void) => {
+    cb(new Error("ENOENT"))
+  })
+)
+
+vi.mock("node:child_process", () => ({
+  execFile: mockExecFile,
+}))
+
 // Reset module state between tests so versionLocked starts fresh
 beforeEach(() => {
   vi.resetModules()
+  // Default: agy not found
+  mockExecFile.mockImplementation((_bin: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout?: string) => void) => {
+    cb(new Error("ENOENT"))
+  })
 })
 
 afterEach(() => {
@@ -48,6 +63,49 @@ describe("setAntigravityVersion", () => {
     setAntigravityVersion("2.0.0")
     setAntigravityVersion("3.0.0")
     expect(getAntigravityVersion()).toBe("2.0.0")
+  })
+})
+
+describe("initAntigravityVersion — local agy detection", () => {
+  it("uses local agy version when binary is available", async () => {
+    mockExecFile.mockImplementation((_bin: string, _args: string[], _opts: unknown, cb: (err: null, stdout: string) => void) => {
+      cb(null, "1.0.0\n")
+    })
+
+    const { getAntigravityVersion } = await import("../constants.ts")
+    const { initAntigravityVersion } = await import("./version.ts")
+    await initAntigravityVersion()
+
+    expect(getAntigravityVersion()).toBe("1.0.0")
+  })
+
+  it("falls through to API when agy binary is not found", async () => {
+    // mockExecFile already returns ENOENT by default
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => "1.19.0" }),
+    )
+
+    const { getAntigravityVersion } = await import("../constants.ts")
+    const { initAntigravityVersion } = await import("./version.ts")
+    await initAntigravityVersion()
+
+    expect(getAntigravityVersion()).toBe("1.19.0")
+  })
+
+  it("local agy version takes priority over API version", async () => {
+    mockExecFile.mockImplementation((_bin: string, _args: string[], _opts: unknown, cb: (err: null, stdout: string) => void) => {
+      cb(null, "1.0.0\n")
+    })
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, text: async () => "1.99.0" })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const { getAntigravityVersion } = await import("../constants.ts")
+    const { initAntigravityVersion } = await import("./version.ts")
+    await initAntigravityVersion()
+
+    expect(getAntigravityVersion()).toBe("1.0.0")
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 })
 

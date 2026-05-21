@@ -47,8 +47,83 @@ src/
     │   └── loader.ts        # Config file loading
     ├── accounts.ts          # Multi-account management
     ├── server.ts            # OAuth callback server
+    ├── transport/
+    │   ├── types.ts              # Transport interface and related types
+    │   ├── gateway-transport.ts  # GatewayTransport (default)
+    │   ├── cli-transport.ts      # CliTransport (opt-in agy --print)
+    │   ├── managed-agent-transport.ts # ManagedAgentTransport (opt-in API)
+    │   ├── agy-cli.ts            # agy binary detection, auth, execution
+    │   ├── gateway-transport.test.ts
+    │   ├── cli-transport.test.ts
+    │   ├── managed-agent-transport.test.ts
+    │   └── agy-cli.test.ts
     └── debug.ts             # Debug logging
 ```
+
+---
+
+## Transport Boundary (Phase 3)
+
+The plugin uses a **transport interface** to separate request/response logic from the fetch interceptor's orchestration concerns.
+
+```
+OpenCode request
+  └─ plugin.ts (fetch interceptor)
+      ├─ account selection, quota rotation, rate limiting, retries
+      └─ gatewayTransport
+          ├─ matches()          — request recognition
+          ├─ getRequestMetadata() — model/family extraction
+          ├─ prepareRequest()   — delegates to prepareAntigravityRequest()
+          └─ transformResponse() — delegates to transformAntigravityResponse()
+```
+
+### Transport responsibilities
+
+| Concern | Owner |
+|---------|-------|
+| Request recognition | Transport (`matches()`) |
+| Model/family extraction | Transport (`getRequestMetadata()`) |
+| Request body transformation | Transport (`prepareRequest()`) |
+| Response/stream transformation | Transport (`transformResponse()`) |
+| Account selection | Fetch interceptor (`plugin.ts`) |
+| Quota rotation | Fetch interceptor (`plugin.ts`) |
+| Rate limit backoff | Fetch interceptor (`plugin.ts`) |
+| Endpoint fallback loop | Fetch interceptor (`plugin.ts`) |
+| Auth token refresh | Fetch interceptor (`plugin.ts`) |
+
+### Adding a new transport
+
+1. Add a new `TransportId` value to `src/plugin/transport/types.ts`.
+2. Implement the `Transport` interface in a new file under `src/plugin/transport/`.
+3. Select the transport in `plugin.ts` based on config or request shape.
+4. The fetch interceptor's orchestration loop does not need to change.
+
+`GatewayTransport` is the default transport. Two opt-in alternatives are now available:
+
+### CliTransport (`transport.id: "cli"`)
+
+Runs `agy --print` as a subprocess. The plugin extracts the text prompt from the request body, passes it to the Antigravity CLI, and wraps the stdout response in Gemini text format.
+
+**Limitations (double-agent):**
+- OpenCode is an agent; `agy` is also an agent. This creates a nested agent stack where OpenCode's tool calls are NOT forwarded to `agy`.
+- Only text prompts are supported. Tool calls, streaming, and multi-turn conversation history are NOT passed through.
+- Auth must be completed separately: run `agy` in a terminal and complete browser OAuth before enabling this transport.
+- No quota rotation, no multi-account, no endpoint fallback.
+
+**When to use:** Experimental high-level agent tasks where you want the official Antigravity agent runtime instead of the raw model gateway.
+
+### ManagedAgentTransport (`transport.id: "managed-agent"`)
+
+Uses the public Gemini Managed Agents / Interactions API (`/v1beta/interactions`) with a Gemini API key. Sends text input to the `antigravity-preview-05-2026` base agent and returns the response in Gemini format.
+
+**Limitations:**
+- Requires a Gemini API key with appropriate billing.
+- Uses the public API, not the internal CloudCode gateway — separate from OAuth accounts.
+- Preview API: behavior, pricing, and availability may change without notice.
+- Streaming support is conservative (SSE passed as-is until real payloads are observed).
+- No quota rotation, no multi-account.
+
+**When to use:** When you have a Gemini API key and want to use the official Managed Agents harness without OAuth.
 
 ---
 
@@ -57,7 +132,7 @@ src/
 ### 1. Interception (`plugin.ts`)
 
 ```typescript
-fetch() intercepted → isGenerativeLanguageRequest() → prepareAntigravityRequest()
+fetch() intercepted → gatewayTransport.matches() → gatewayTransport.prepareRequest()
 ```
 
 - Account selection (round-robin, rate-limit aware)

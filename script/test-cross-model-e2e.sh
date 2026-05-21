@@ -3,7 +3,7 @@
 # Tests fix for "Invalid `signature` in `thinking` block" error
 #
 # Models tested:
-# 1. Gemini (google/antigravity-gemini-3-pro-low, gemini-3-flash)
+# 1. Gemini (google/antigravity-gemini-3.1-pro-low, gemini-3.5-flash-low)
 # 2. Claude via Anthropic (anthropic/claude-opus-4-5)
 # 3. Claude via Google (google/antigravity-claude-*-thinking-*)
 # 4. OpenAI (openai/gpt-5.2-medium)
@@ -42,7 +42,7 @@ echo ""
 # Test 1: Gemini → Anthropic Claude (original bug + direct Anthropic API)
 echo "Test 1: Gemini Pro → Anthropic Claude Opus (direct API)"
 log_info "Step 1: Gemini with thinking + tool..."
-opencode run -m google/antigravity-gemini-3-pro-low \
+opencode run -m google/antigravity-gemini-3.1-pro-low \
   "Run: echo 'Test1-Gemini'. Think about sequences." \
   > /tmp/e2e-t1-s1.log 2>&1 || true
 
@@ -67,7 +67,7 @@ echo ""
 # Test 2: Gemini → Google Claude (Google-hosted Claude)
 echo "Test 2: Gemini Pro → Google Claude Opus Thinking"
 log_info "Step 1: Gemini with thinking + tool..."
-opencode run -m google/antigravity-gemini-3-pro-low \
+opencode run -m google/antigravity-gemini-3.1-pro-low \
   "Run: echo 'Test2-Gemini'. Think about this." \
   > /tmp/e2e-t2-s1.log 2>&1 || true
 
@@ -77,7 +77,7 @@ if [ -z "$SID" ]; then
 else
   log_info "Session: $SID"
   log_info "Step 2: Google Claude Opus Thinking + tool..."
-  opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking-low \
+  opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking \
     "Run: echo 'Test2-Google-Claude'" \
     > /tmp/e2e-t2-s2.log 2>&1 || true
   
@@ -92,7 +92,7 @@ echo ""
 # Test 3: Gemini → OpenAI
 echo "Test 3: Gemini Pro → OpenAI GPT-5.2"
 log_info "Step 1: Gemini with thinking + tool..."
-opencode run -m google/antigravity-gemini-3-pro-low \
+opencode run -m google/antigravity-gemini-3.1-pro-low \
   "Run: echo 'Test3-Gemini'. Think about AI models." \
   > /tmp/e2e-t3-s1.log 2>&1 || true
 
@@ -129,7 +129,7 @@ if [ -z "$SID" ]; then
 else
   log_info "Session: $SID"
   log_info "Step 2: Gemini + thinking + tool..."
-  opencode run -s "$SID" -m google/antigravity-gemini-3-pro-low \
+  opencode run -s "$SID" -m google/antigravity-gemini-3.1-pro-low \
     "Run: echo 'Test4-Gemini'. Think about reversal." \
     > /tmp/e2e-t4-s2.log 2>&1 || true
   
@@ -157,7 +157,7 @@ else
   else
     log_info "Session: $SID"
     log_info "Step 2: Google Claude Opus Thinking + tool..."
-    opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking-low \
+    opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking \
       "Run: echo 'Test5-Google-Claude'" \
       > /tmp/e2e-t5-s2.log 2>&1 || true
     
@@ -173,7 +173,7 @@ echo ""
 # Test 6: 5-Model Round-Robin (all models in sequence)
 echo "Test 6: 5-Model Round-Robin"
 log_info "Turn 1: Gemini Pro Low..."
-opencode run -m google/antigravity-gemini-3-pro-low \
+opencode run -m google/antigravity-gemini-3.1-pro-low \
   "Run: echo 'Turn1'. Think about the chain." \
   > /tmp/e2e-t6-s1.log 2>&1 || true
 
@@ -190,7 +190,7 @@ else
   check_signature_error /tmp/e2e-t6-s2.log && CHAIN_OK=false
   
   log_info "Turn 3: Google Claude Opus..."
-  opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking-low \
+  opencode run -s "$SID" -m google/antigravity-claude-opus-4-6-thinking \
     "Run: echo 'Turn3'" > /tmp/e2e-t6-s3.log 2>&1 || true
   check_signature_error /tmp/e2e-t6-s3.log && CHAIN_OK=false
   
@@ -203,7 +203,7 @@ else
   fi
   
   log_info "Turn 5: Gemini Flash..."
-  opencode run -s "$SID" -m google/antigravity-gemini-3-flash \
+  opencode run -s "$SID" -m google/antigravity-gemini-3.5-flash-low \
     "Run: echo 'Turn5-Complete'" > /tmp/e2e-t6-s5.log 2>&1 || true
   check_signature_error /tmp/e2e-t6-s5.log && CHAIN_OK=false
   
@@ -218,7 +218,7 @@ echo ""
 # Test 7: Google Claude → Anthropic Claude (same family, different API)
 echo "Test 7: Google Claude → Anthropic Claude (same family)"
 log_info "Step 1: Google Claude Opus Thinking..."
-opencode run -m google/antigravity-claude-opus-4-6-thinking-low \
+opencode run -m google/antigravity-claude-opus-4-6-thinking \
   "Run: echo 'Test7-Google-Claude'" \
   > /tmp/e2e-t7-s1.log 2>&1 || true
 
@@ -243,7 +243,7 @@ echo ""
 # Test 8: Triple switch with different model families
 echo "Test 8: Triple Switch (Gemini → Anthropic → OpenAI)"
 log_info "Step 1: Gemini Flash..."
-opencode run -m google/antigravity-gemini-3-flash \
+opencode run -m google/antigravity-gemini-3.5-flash-low \
   "Run: echo 'Triple-1'. Think about it." \
   > /tmp/e2e-t8-s1.log 2>&1 || true
 

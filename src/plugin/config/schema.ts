@@ -271,17 +271,19 @@ export const AntigravityConfigSchema = z.object({
   /**
    * @deprecated Kept only for backward compatibility.
    * This flag is ignored at runtime.
-   * Gemini requests always fall back between Antigravity and Gemini CLI quotas.
+   * Legacy Gemini CLI fallback remains only for existing Gemini CLI-capable model configs.
+   * Current default model definitions use Antigravity quota model IDs.
    *
    * @default false
    */
   quota_fallback: z.boolean().default(false),
 
   /**
-   * Prefer gemini-cli routing before Antigravity for Gemini models.
+   * Prefer gemini-cli routing before Antigravity for legacy Gemini model configs.
    * 
    * When false (default): Antigravity is tried first, then gemini-cli.
    * When true: gemini-cli is tried first, then Antigravity.
+   * New configs should leave this disabled because individual Gemini CLI access sunsets on 2026-06-18.
    * 
    * @default false
    */
@@ -438,6 +440,52 @@ export const AntigravityConfigSchema = z.object({
    */
   auto_update: z.boolean().default(true),
 
+  // =========================================================================
+  // Transport Selection (Phase 4+5)
+  // =========================================================================
+
+  /**
+   * Transport configuration.
+   * Controls which backend the plugin uses for model requests.
+   *
+   * - "gateway" (default): existing CloudCode gateway shim (Phase 1-3)
+   * - "cli": opt-in Antigravity CLI (`agy --print`) agent backend (Phase 4)
+   * - "managed-agent": opt-in public Managed Agents / Interactions API (Phase 5)
+   *
+   * @default "gateway"
+   */
+  transport: z.object({
+    id: z.enum(["gateway", "cli", "managed-agent"]).default("gateway"),
+
+    cli: z.object({
+      enabled: z.boolean().default(false),
+      /** Path to agy binary. Auto-detected if not set. */
+      binary: z.string().optional(),
+      /** Timeout for agy --print to produce output. */
+      print_timeout_seconds: z.number().min(1).max(3600).default(300),
+      /** Overall process timeout (includes startup + print). */
+      process_timeout_seconds: z.number().min(1).max(3900).default(330),
+      /** Write agy debug logs to this file. */
+      log_file: z.string().optional(),
+      /** Run agy in sandbox mode. */
+      sandbox: z.boolean().default(false),
+      /** Skip permission prompts in agy. */
+      dangerously_skip_permissions: z.boolean().default(true),
+    }).optional(),
+
+    managed_agent: z.object({
+      enabled: z.boolean().default(false),
+      /** Gemini API key for the Interactions API. NOT the same as OAuth. */
+      api_key: z.string().default(""),
+      /** Enable streaming responses (preview). */
+      stream: z.boolean().default(false),
+      /** System instruction for the managed agent. */
+      system_instruction: z.string().optional(),
+      /** Environment configuration for the managed agent. */
+      environment: z.record(z.string(), z.unknown()).optional(),
+    }).optional(),
+  }).default({ id: "gateway" }),
+
 });
 
 export type AntigravityConfig = z.infer<typeof AntigravityConfigSchema>;
@@ -498,5 +546,8 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
     max_tokens: 50,
     regeneration_rate_per_minute: 6,
     initial_tokens: 50,
+  },
+  transport: {
+    id: "gateway",
   },
 };

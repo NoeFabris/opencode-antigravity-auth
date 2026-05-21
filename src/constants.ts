@@ -17,12 +17,54 @@ export const ANTIGRAVITY_SCOPES: readonly string[] = [
   "https://www.googleapis.com/auth/userinfo.profile",
   "https://www.googleapis.com/auth/cclog",
   "https://www.googleapis.com/auth/experimentsandconfigs",
+  "openid",
 ];
 
 /**
  * OAuth redirect URI used by the local CLI callback server.
  */
 export const ANTIGRAVITY_REDIRECT_URI = "http://localhost:51121/oauth-callback";
+
+/**
+ * OAuth redirect URI used by the official Antigravity CLI (`agy`).
+ * The hosted callback page at antigravity.google consumes the code server-side
+ * and cannot be used for manual token exchange from this plugin.
+ * This constant is kept for reference and future hosted-callback experiments.
+ */
+export const ANTIGRAVITY_OFFICIAL_REDIRECT_URI = "https://antigravity.google/oauth-callback";
+
+/**
+ * OAuth authorization endpoint used by the official Antigravity CLI (`agy`).
+ * The current plugin uses the v2 endpoint; the official CLI uses the v1 endpoint.
+ */
+export const ANTIGRAVITY_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/auth";
+
+/**
+ * Redirect mode controls which OAuth callback URI and auth endpoint to use.
+ * - `local-callback`: existing behavior, local HTTP server on port 51121.
+ * - `official-callback`: experimental, uses the hosted Antigravity callback URI
+ *   and v1 auth endpoint matching official `agy`. Not fully functional yet
+ *   because the hosted callback consumes the authorization code server-side.
+ */
+export type AntigravityRedirectMode = "local-callback" | "official-callback";
+
+/**
+ * Resolve the redirect URI for the given redirect mode.
+ */
+export function getRedirectUri(mode: AntigravityRedirectMode): string {
+  return mode === "official-callback"
+    ? ANTIGRAVITY_OFFICIAL_REDIRECT_URI
+    : ANTIGRAVITY_REDIRECT_URI;
+}
+
+/**
+ * Resolve the authorization endpoint for the given redirect mode.
+ */
+export function getAuthEndpoint(mode: AntigravityRedirectMode): string {
+  return mode === "official-callback"
+    ? ANTIGRAVITY_AUTH_ENDPOINT
+    : "https://accounts.google.com/o/oauth2/v2/auth";
+}
 
 /**
  * Root endpoints for the Antigravity API (in fallback order).
@@ -34,12 +76,23 @@ export const ANTIGRAVITY_ENDPOINT_AUTOPUSH = "https://autopush-cloudcode-pa.sand
 export const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
 
 /**
- * Endpoint fallback order (daily → autopush → prod).
+ * Non-sandbox daily endpoint observed in official `agy` CLI logs (v1.0.0).
+ * The official CLI uses `daily-cloudcode-pa.googleapis.com` (no `.sandbox.` subdomain).
+ * Added as a candidate in Phase 2 without removing the sandbox daily endpoint.
+ * Placed first in the fallback order to match official CLI behavior.
+ */
+export const ANTIGRAVITY_ENDPOINT_DAILY_NONSANDBOX = "https://daily-cloudcode-pa.googleapis.com";
+
+/**
+ * Endpoint fallback order (non-sandbox daily → sandbox daily → prod).
+ * Non-sandbox daily is placed first to match official `agy` CLI behavior observed in logs.
+ * Sandbox daily is kept as a fallback until non-sandbox daily is proven stable.
+ * Autopush sandbox is removed from the main fallback chain (consistently unavailable).
  * Shared across request handling and project discovery to mirror CLIProxy behavior.
  */
 export const ANTIGRAVITY_ENDPOINT_FALLBACKS = [
+  ANTIGRAVITY_ENDPOINT_DAILY_NONSANDBOX,
   ANTIGRAVITY_ENDPOINT_DAILY,
-  ANTIGRAVITY_ENDPOINT_AUTOPUSH,
   ANTIGRAVITY_ENDPOINT_PROD,
 ] as const;
 
@@ -49,14 +102,15 @@ export const ANTIGRAVITY_ENDPOINT_FALLBACKS = [
  */
 export const ANTIGRAVITY_LOAD_ENDPOINTS = [
   ANTIGRAVITY_ENDPOINT_PROD,
+  ANTIGRAVITY_ENDPOINT_DAILY_NONSANDBOX,
   ANTIGRAVITY_ENDPOINT_DAILY,
-  ANTIGRAVITY_ENDPOINT_AUTOPUSH,
 ] as const;
 
 /**
- * Primary endpoint to use (daily sandbox - same as CLIProxy/Vibeproxy).
+ * Primary endpoint to use (non-sandbox daily - matches official `agy` CLI behavior).
+ * Falls back to sandbox daily if non-sandbox daily is unavailable.
  */
-export const ANTIGRAVITY_ENDPOINT = ANTIGRAVITY_ENDPOINT_DAILY;
+export const ANTIGRAVITY_ENDPOINT = ANTIGRAVITY_ENDPOINT_DAILY_NONSANDBOX;
 
 /**
  * Gemini CLI endpoint (production).

@@ -53,6 +53,7 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-claude-opus-4-6-thinking-medium": "claude-opus-4-6-thinking",
   "gemini-claude-opus-4-6-thinking-high": "claude-opus-4-6-thinking",
   "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
+  "claude-sonnet-4-6-thinking": "claude-sonnet-4-6",
 
   // Image generation models - only gemini-3-pro-image is available via Antigravity API
   // Note: gemini-2.5-flash-image (Nano Banana) is NOT supported by Antigravity - only Google AI API
@@ -63,6 +64,7 @@ const TIER_REGEX = /-(minimal|low|medium|high)$/;
 const QUOTA_PREFIX_REGEX = /^antigravity-/i;
 const GEMINI_3_PRO_REGEX = /^gemini-3(?:\.\d+)?-pro/i;
 const GEMINI_3_FLASH_REGEX = /^gemini-3(?:\.\d+)?-flash/i;
+const GEMINI_35_FLASH_REGEX = /^gemini-3\.5-flash/i;
 
 // ANTIGRAVITY_ONLY_MODELS removed - all models now default to antigravity
 
@@ -137,6 +139,10 @@ function isGemini3FlashModel(model: string): boolean {
   return GEMINI_3_FLASH_REGEX.test(model);
 }
 
+function isGemini35FlashModel(model: string): boolean {
+  return GEMINI_35_FLASH_REGEX.test(model);
+}
+
 /**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
@@ -176,18 +182,23 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
   const skipAlias = isAntigravity && isGemini3;
 
-  // For Antigravity Gemini 3 Pro models without explicit tier, append default tier
-  // Antigravity API: gemini-3-pro requires tier suffix (gemini-3-pro-low/high)
-  //                  gemini-3-flash uses bare name + thinkingLevel param
-  // Pro defaults to -low unless an explicit tier is provided
+  // For current Antigravity quota-row models, keep row-specific model IDs.
+  // Antigravity API: Gemini 3/3.1 Pro requires tier suffix (gemini-3.1-pro-low/high).
+  //                  Gemini 3.5 Flash currently resolves to gemini-3.5-flash-low.
+  //                  Keep high/medium requested IDs as compatibility aliases, but
+  //                  route them to the live model returned by fetchAvailableModels.
+  // Legacy Gemini 3 Flash keeps using bare model + thinkingLevel for compatibility.
   const isGemini3Pro = isGemini3ProModel(modelWithoutQuota);
   const isGemini3Flash = isGemini3FlashModel(modelWithoutQuota);
+  const isGemini35Flash = isGemini35FlashModel(modelWithoutQuota);
   
   let antigravityModel = modelWithoutQuota;
   if (skipAlias) {
     if (isGemini3Pro && !tier && !isImageModel) {
       antigravityModel = `${modelWithoutQuota}-low`;
-    } else if (isGemini3Flash && tier) {
+    } else if (isGemini35Flash) {
+      antigravityModel = `${baseName}-low`;
+    } else if (isGemini3Flash && !isGemini35Flash && tier) {
       antigravityModel = baseName;
     }
   }
@@ -216,11 +227,17 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isClaudeThinking = resolvedModel.toLowerCase().includes("claude") && resolvedModel.toLowerCase().includes("thinking");
 
   if (!tier) {
-    // Gemini 3 models without explicit tier get a default thinkingLevel
+    // Gemini 3 models without explicit tier get a default thinkingLevel.
+    // Current Antigravity availability exposes Gemini 3.5 Flash as low.
+    // Stale medium/high config IDs are compatibility aliases to the live low row.
     if (isEffectiveGemini3) {
+      const defaultThinkingLevel = resolvedModel.toLowerCase().startsWith("gemini-3.5-flash")
+        ? "low"
+        : "low";
+
       return {
         actualModel: resolvedModel,
-        thinkingLevel: "low",
+        thinkingLevel: defaultThinkingLevel,
         isThinkingModel: true,
         quotaPreference,
         explicitQuota,
@@ -242,10 +259,14 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 
   // Gemini 3 models with tier always get thinkingLevel set
   if (isEffectiveGemini3) {
+    const thinkingLevel = resolvedModel.toLowerCase().startsWith("gemini-3.5-flash")
+      ? "low"
+      : tier;
+
     return {
       actualModel: resolvedModel,
-      thinkingLevel: tier,
-      tier,
+      thinkingLevel,
+      tier: thinkingLevel,
       isThinkingModel: true,
       quotaPreference,
       explicitQuota,
@@ -269,10 +290,13 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 /**
  * Gets the model family for routing decisions.
  */
-export function getModelFamily(model: string): "claude" | "gemini-flash" | "gemini-pro" {
+export function getModelFamily(model: string): "claude" | "gemini-flash" | "gemini-pro" | "gpt-oss" {
   const lower = model.toLowerCase();
   if (lower.includes("claude")) {
     return "claude";
+  }
+  if (lower.includes("gpt-oss")) {
+    return "gpt-oss";
   }
   if (lower.includes("flash")) {
     return "gemini-flash";

@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![X (Twitter)](https://img.shields.io/badge/X-@dopesalmon-000000?style=flat&logo=x)](https://x.com/dopesalmon)
 
-Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access models like `gemini-3.1-pro` and `claude-opus-4-6-thinking` with your Google credentials.
+Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access current models like `gemini-3.1-pro`, `gemini-3.5-flash`, `claude-sonnet-4-6`, and `gpt-oss-120b-medium` with your Google credentials.
 
 ## What You Get
 
-- **Claude Opus 4.6, Sonnet 4.6** and **Gemini 3.1 Pro/Flash** via Google OAuth
+- **Gemini 3.1 Pro, Gemini 3.5 Flash, Claude Opus/Sonnet 4.6 Thinking, and GPT-OSS 120B** via Google OAuth
 - **Multi-account support** — add multiple Google accounts, auto-rotates when rate-limited
-- **Dual quota system** — access both Antigravity and Gemini CLI quotas from one plugin
+- **Antigravity quota routing** — current defaults avoid Gemini CLI models because individual Gemini CLI access sunsets on 2026-06-18
 - **Thinking models** — extended thinking for Claude and Gemini 3 with configurable budgets
 - **Google Search grounding** — enable web search for Gemini models (auto or always-on)
 - **Auto-recovery** — handles session errors and tool failures automatically
@@ -74,7 +74,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 4. **Use it:**
 
    ```bash
-   opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --variant=max
+   opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking
    ```
 
 </details>
@@ -97,7 +97,7 @@ Install the opencode-antigravity-auth plugin and add the Antigravity model defin
 ### Verification
 
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --variant=max
+opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking
 ```
 
 </details>
@@ -108,40 +108,26 @@ opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --varia
 
 ### Model Reference
 
-**Antigravity quota** (default routing for Claude and Gemini):
+**Current Antigravity quota set** (from the Antigravity Model Quota view):
 
-| Model | Variants | Notes |
-|-------|----------|-------|
-| `antigravity-gemini-3-pro` | low, high | Gemini 3 Pro with thinking |
-| `antigravity-gemini-3.1-pro` | low, high | Gemini 3.1 Pro with thinking (rollout-dependent) |
-| `antigravity-gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
-| `antigravity-claude-sonnet-4-6` | — | Claude Sonnet 4.6 |
-| `antigravity-claude-opus-4-6-thinking` | low, max | Claude Opus 4.6 with extended thinking |
+| Model ID | Quota row |
+|----------|-----------|
+| `antigravity-gemini-3.1-pro-low` | Gemini 3.1 Pro (Low) |
+| `antigravity-gemini-3.1-pro-high` | Gemini 3.1 Pro (High) |
+| `antigravity-claude-sonnet-4-6` | Claude Sonnet 4.6 |
+| `antigravity-claude-opus-4-6-thinking` | Claude Opus 4.6 (Thinking) |
+| `antigravity-gpt-oss-120b-medium` | GPT-OSS 120B (Medium) |
+| `antigravity-gemini-3.5-flash-low` | Gemini 3.5 Flash (Low) |
 
-**Gemini CLI quota** (separate from Antigravity; used when `cli_first` is true or as fallback):
+> **Gemini CLI sunset:** Gemini CLI quota models are no longer included in the default model list. Google announced Gemini CLI access for individual/free Google AI Pro/Ultra and Gemini Code Assist users stops on **2026-06-18**. Legacy Gemini CLI routing remains in the plugin for backward compatibility only.
 
-| Model | Notes |
-|-------|-------|
-| `gemini-2.5-flash` | Gemini 2.5 Flash |
-| `gemini-2.5-pro` | Gemini 2.5 Pro |
-| `gemini-3-flash-preview` | Gemini 3 Flash (preview) |
-| `gemini-3-pro-preview` | Gemini 3 Pro (preview) |
-| `gemini-3.1-pro-preview` | Gemini 3.1 Pro (preview, rollout-dependent) |
-| `gemini-3.1-pro-preview-customtools` | Gemini 3.1 Pro Preview Custom Tools (preview, rollout-dependent) |
-
-> **Routing Behavior:**
-> - **Antigravity-first (default):** Gemini models use Antigravity quota across accounts.
-> - **CLI-first (`cli_first: true`):** Gemini models use Gemini CLI quota first.
-> - When a Gemini quota pool is exhausted, the plugin automatically falls back to the other pool.
-> - Claude and image models always use Antigravity.
-> Model names are automatically transformed for the target API (e.g., `antigravity-gemini-3-flash` → `gemini-3-flash-preview` for CLI).
-
-**Using variants:**
+**Use a current model:**
 ```bash
-opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --variant=max
+opencode run "Hello" --model=google/antigravity-gemini-3.5-flash-low
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6
 ```
 
-For details on variant configuration and thinking levels, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
+For details on compatibility with older variant/tier names, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
 
 <details>
 <summary><b>Full models configuration (copy-paste ready)</b></summary>
@@ -151,82 +137,113 @@ Add this to your `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-antigravity-auth@latest"],
+  "plugin": [
+    "opencode-antigravity-auth@latest"
+  ],
   "provider": {
     "google": {
       "models": {
-        "antigravity-gemini-3-pro": {
-          "name": "Gemini 3 Pro (Antigravity)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingLevel": "low" },
-            "high": { "thinkingLevel": "high" }
+        "antigravity-gemini-3.1-pro-low": {
+          "name": "Gemini 3.1 Pro Low (Antigravity)",
+          "limit": {
+            "context": 1048576,
+            "output": 65535
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
           }
         },
-        "antigravity-gemini-3.1-pro": {
-          "name": "Gemini 3.1 Pro (Antigravity)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingLevel": "low" },
-            "high": { "thinkingLevel": "high" }
-          }
-        },
-        "antigravity-gemini-3-flash": {
-          "name": "Gemini 3 Flash (Antigravity)",
-          "limit": { "context": 1048576, "output": 65536 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "minimal": { "thinkingLevel": "minimal" },
-            "low": { "thinkingLevel": "low" },
-            "medium": { "thinkingLevel": "medium" },
-            "high": { "thinkingLevel": "high" }
+        "antigravity-gemini-3.1-pro-high": {
+          "name": "Gemini 3.1 Pro High (Antigravity)",
+          "limit": {
+            "context": 1048576,
+            "output": 65535
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
           }
         },
         "antigravity-claude-sonnet-4-6": {
           "name": "Claude Sonnet 4.6 (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          }
         },
         "antigravity-claude-opus-4-6-thinking": {
           "name": "Claude Opus 4.6 Thinking (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-          "variants": {
-            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
           }
         },
-        "gemini-2.5-flash": {
-          "name": "Gemini 2.5 Flash (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65536 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        "antigravity-gpt-oss-120b-medium": {
+          "name": "GPT-OSS 120B Medium (Antigravity)",
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          }
         },
-        "gemini-2.5-pro": {
-          "name": "Gemini 2.5 Pro (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65536 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "gemini-3-flash-preview": {
-          "name": "Gemini 3 Flash Preview (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65536 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "gemini-3-pro-preview": {
-          "name": "Gemini 3 Pro Preview (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "gemini-3.1-pro-preview": {
-          "name": "Gemini 3.1 Pro Preview (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "gemini-3.1-pro-preview-customtools": {
-          "name": "Gemini 3.1 Pro Preview Custom Tools (Gemini CLI)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        "antigravity-gemini-3.5-flash-low": {
+          "name": "Gemini 3.5 Flash Low (Antigravity)",
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          }
         }
       }
     }
@@ -234,7 +251,7 @@ Add this to your `~/.config/opencode/opencode.json`:
 }
 ```
 
-> **Backward Compatibility:** Legacy model names with `antigravity-` prefix (e.g., `antigravity-gemini-3-flash`) still work. The plugin automatically handles model name transformation for both Antigravity and Gemini CLI APIs.
+> **Backward Compatibility:** Legacy model names still resolve in the plugin where possible, but they are no longer listed by default. Prefer the current Antigravity quota model IDs above.
 
 </details>
 
@@ -422,8 +439,8 @@ If you encounter errors during a session:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
-    "document-writer": { "model": "google/antigravity-gemini-3-flash" }
+    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.1-pro-high" },
+    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-low" }
   }
 }
 ```
@@ -560,9 +577,9 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
 {
   "google_auth": false,
   "agents": {
-    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3-pro" },
-    "document-writer": { "model": "google/antigravity-gemini-3-flash" },
-    "multimodal-looker": { "model": "google/antigravity-gemini-3-flash" }
+    "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.1-pro-high" },
+    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-low" },
+    "multimodal-looker": { "model": "google/antigravity-gemini-3.5-flash-low" }
   }
 }
 ```
@@ -593,7 +610,7 @@ Most users don't need to configure anything — defaults work well.
 |--------|---------|--------------
 | `keep_thinking` | `false` | Preserve Claude's thinking across turns. **Warning:** enabling may degrade model stability. |
 | `session_recovery` | `true` | Auto-recover from tool errors |
-| `cli_first` | `false` | Route Gemini models to Gemini CLI first (Claude and image models stay on Antigravity). |
+| `cli_first` | `false` | Legacy option for Gemini CLI quota fallback. Current default model definitions avoid Gemini CLI because individual access sunsets on 2026-06-18. |
 
 ### Account Rotation
 
@@ -638,6 +655,20 @@ Control how the plugin handles rate limits:
 | `debug_tui` | `false` | Show debug logs in the TUI log panel (independent from `debug`) |
 | `auto_update` | `true` | Auto-update plugin |
 
+### Transport (Advanced)
+
+The plugin supports three transport modes. The default `gateway` mode is recommended for all normal use.
+
+| Mode | Default | Description |
+|------|---------|-------------|
+| `gateway` | ✅ | CloudCode gateway shim — full streaming, tool calls, multi-account |
+| `cli` | No | Opt-in: runs `agy --print` as subprocess. Text only, no tool calls. |
+| `managed-agent` | No | Opt-in: public Managed Agents API with Gemini API key. Billing applies. |
+
+> **⚠️ Gemini CLI sunset: 2026-06-18.** The `gemini-cli` quota pool stops serving requests for Google AI Pro/Ultra and free Gemini Code Assist individuals after this date. If requests fail after June 18, disable `quota_fallback` in your config.
+
+See [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) for the full feature/model/credential matrix per transport.
+
 For all options, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 **Environment variables:**
@@ -672,6 +703,7 @@ See the full [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for solutions to c
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — Common issues and fixes
 - [Architecture](docs/ARCHITECTURE.md) — How the plugin works
 - [API Spec](docs/ANTIGRAVITY_API_SPEC.md) — Antigravity API reference
+- [Support Matrix](docs/SUPPORT_MATRIX.md) — Feature/model/credential matrix per transport
 
 ---
 

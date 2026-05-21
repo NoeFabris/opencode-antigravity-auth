@@ -12,32 +12,32 @@ opencode auth login  # Run again to add more accounts
 
 - **Sticky account selection** — Sticks to the same account until rate-limited (preserves Anthropic's prompt cache)
 - **Per-model-family limits** — Rate limits tracked separately for Claude and Gemini models
-- **Antigravity-first for Gemini** — All Gemini requests use Antigravity quota first, then automatically fall back to Gemini CLI when exhausted across all accounts
+- **Antigravity-first for Gemini** — Current default models use Antigravity quota first; legacy Gemini CLI fallback remains only for existing Gemini CLI model configs
 - **Smart retry threshold** — Short rate limits (≤5s) are retried on same account
 - **Exponential backoff** — Increasing delays for consecutive rate limits
 
 ---
 
-## Dual Quota Pools
+## Quota Pools
 
-For Gemini models, the plugin accesses **two independent quota pools** per account:
+For current Antigravity models, the plugin uses the Antigravity quota pool. Legacy Gemini CLI fallback still exists for users with older Gemini CLI model configs, but those models are no longer listed by default because individual Gemini CLI access sunsets on **2026-06-18**.
 
 | Quota Pool | When Used |
 |------------|-----------|
 | **Antigravity** | Default for all requests |
-| **Gemini CLI** | Automatic fallback between Antigravity and Gemini CLI in both directions |
+| **Gemini CLI** | Legacy fallback only for existing configs that still use Gemini CLI-capable model IDs |
 
-This effectively **doubles your Gemini quota** through automatic fallback between Antigravity and Gemini CLI pools.
+Do not rely on Gemini CLI quota for new setups.
 
 ### How Quota Fallback Works
 
 1. Request uses Antigravity quota on current account
 2. If rate-limited, plugin checks if ANY other account has Antigravity available
 3. If yes → switch to that account (stay on Antigravity)
-4. If no (all accounts exhausted) → fall back to Gemini CLI quota on current account
-5. Model names are automatically transformed (e.g., `gemini-3-flash` → `gemini-3-flash-preview`)
+4. If no (all accounts exhausted) → wait/back off or use legacy Gemini CLI fallback only when the request/model config allows it
+5. Current model names stay on Antigravity (for example `antigravity-gemini-3.5-flash-low`)
 
-Automatic fallback between pools is always enabled for Gemini requests.
+Automatic fallback remains enabled for backward compatibility. Current recommended configs use Antigravity-only model IDs.
 
 ---
 
@@ -52,8 +52,9 @@ opencode auth login
 
 This shows remaining quota percentages and reset times for each model family:
 - **Claude** - Claude Opus/Sonnet quota
-- **Gemini 3 Pro** - Gemini 3 Pro quota
-- **Gemini 3 Flash** - Gemini 3 Flash quota
+- **Gemini 3.1 Pro** - Gemini 3.1 Pro quota
+- **Gemini 3.5 Flash** - Gemini 3.5 Flash quota
+- **GPT-OSS 120B** - GPT-OSS quota, when exposed by the quota API
 
 ### Standalone Quota Script
 

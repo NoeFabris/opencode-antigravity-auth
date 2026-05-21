@@ -23,9 +23,20 @@ Antigravity is Google's **Unified Gateway API** for accessing multiple AI models
 
 | Environment | URL | Status |
 |-------------|-----|--------|
-| **Daily (Sandbox)** | `https://daily-cloudcode-pa.sandbox.googleapis.com` | ✅ Active |
-| **Production** | `https://cloudcode-pa.googleapis.com` | ✅ Active |
-| **Autopush (Sandbox)** | `https://autopush-cloudcode-pa.sandbox.googleapis.com` | ❌ Unavailable |
+| **Daily (Non-Sandbox)** | `https://daily-cloudcode-pa.googleapis.com` | ✅ Observed in official `agy` CLI v1.0.0 — primary endpoint |
+| **Daily (Sandbox)** | `https://daily-cloudcode-pa.sandbox.googleapis.com` | ⚠️ Legacy fallback — kept until non-sandbox daily is proven stable |
+| **Production** | `https://cloudcode-pa.googleapis.com` | ✅ Active — used for Gemini CLI header style and project discovery |
+| **Autopush (Sandbox)** | `https://autopush-cloudcode-pa.sandbox.googleapis.com` | ❌ Unavailable — removed from fallback chain in Phase 2 |
+
+### Endpoint Fallback Order
+
+The plugin tries endpoints in this order for `antigravity` header style requests:
+
+1. `daily-cloudcode-pa.googleapis.com` (non-sandbox daily — matches official `agy` CLI)
+2. `daily-cloudcode-pa.sandbox.googleapis.com` (sandbox daily — legacy fallback)
+3. `cloudcode-pa.googleapis.com` (production)
+
+For `gemini-cli` header style, **only the production endpoint is used**. Both daily variants are skipped because Gemini CLI quota only works on the production endpoint.
 
 ### API Actions
 
@@ -42,8 +53,11 @@ Antigravity is Google's **Unified Gateway API** for accessing multiple AI models
 
 ### OAuth 2.0 Setup
 
+The plugin uses the same OAuth client as the official Antigravity CLI (`agy`).
+
 ```
-Authorization URL: https://accounts.google.com/o/oauth2/auth
+Authorization URL (local-callback mode): https://accounts.google.com/o/oauth2/v2/auth
+Authorization URL (official-callback mode): https://accounts.google.com/o/oauth2/auth
 Token URL: https://oauth2.googleapis.com/token
 ```
 
@@ -55,7 +69,10 @@ https://www.googleapis.com/auth/userinfo.email
 https://www.googleapis.com/auth/userinfo.profile
 https://www.googleapis.com/auth/cclog
 https://www.googleapis.com/auth/experimentsandconfigs
+openid
 ```
+
+> **Note:** `openid` was added in Phase 1 to align with the official `agy` CLI scope set.
 
 ### Required Headers
 

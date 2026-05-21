@@ -4,6 +4,7 @@ import {
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_ENDPOINT_PROD,
+  ANTIGRAVITY_ENDPOINT_DAILY_NONSANDBOX,
   ANTIGRAVITY_PROVIDER_ID,
   getAntigravityHeaders,
   type HeaderStyle,
@@ -27,10 +28,13 @@ import {
 } from "./plugin/debug";
 import {
   buildThinkingWarmupBody,
-  isGenerativeLanguageRequest,
-  prepareAntigravityRequest,
-  transformAntigravityResponse,
 } from "./plugin/request";
+import { gatewayTransport } from "./plugin/transport/gateway-transport";
+import { createCliTransport } from "./plugin/transport/cli-transport";
+import { createManagedAgentTransport } from "./plugin/transport/managed-agent-transport";
+import { findAgyBinary, checkAgyAuthState, executeAgyCommand } from "./plugin/transport/agy-cli";
+import type { PreparedTransportRequest } from "./plugin/transport/types";
+import type { AgyCommand } from "./plugin/transport/agy-cli";
 import { resolveModelWithTier } from "./plugin/transform/model-resolver";
 import {
   isEmptyResponseBody,
@@ -65,6 +69,9 @@ const MAX_OAUTH_ACCOUNTS = 10;
 const MAX_WARMUP_SESSIONS = 1000;
 const MAX_WARMUP_RETRIES = 2;
 const CAPACITY_BACKOFF_TIERS_MS = [5000, 10000, 20000, 30000, 60000];
+const DEFAULT_OAUTH_CALLBACK_TIMEOUT_MS = 120000;
+const MIN_OAUTH_CALLBACK_TIMEOUT_MS = 10000;
+const MAX_OAUTH_CALLBACK_TIMEOUT_MS = 10 * 60 * 1000;
 
 function getCapacityBackoffDelay(consecutiveFailures: number): number {
   const index = Math.min(consecutiveFailures, CAPACITY_BACKOFF_TIERS_MS.length - 1);
@@ -240,6 +247,23 @@ function isRemoteEnvironment(): boolean {
 
 function shouldSkipLocalServer(): boolean {
   return isWSL2() || isRemoteEnvironment();
+}
+
+function getOAuthCallbackTimeoutMs(): number {
+  const raw = process.env.OPENCODE_ANTIGRAVITY_OAUTH_CALLBACK_TIMEOUT_MS;
+  if (!raw) {
+    return DEFAULT_OAUTH_CALLBACK_TIMEOUT_MS;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_OAUTH_CALLBACK_TIMEOUT_MS;
+  }
+
+  return Math.min(
+    MAX_OAUTH_CALLBACK_TIMEOUT_MS,
+    Math.max(MIN_OAUTH_CALLBACK_TIMEOUT_MS, parsed),
+  );
 }
 
 async function openBrowser(url: string): Promise<boolean> {
@@ -503,6 +527,8 @@ async function verifyAccountAccess(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
 
+  // Prod-only by design: account verification must hit the production gateway
+  // to confirm the token is valid for real requests.
   let response: Response;
   try {
     response = await fetch(`${ANTIGRAVITY_ENDPOINT_PROD}/v1internal:streamGenerateContent?alt=sse`, {
@@ -1449,11 +1475,108 @@ export const createAntigravityPlugin = (providerId: string) => async (
         }
       }
 
+      // Select transport based on config
+      const transport = (() => {
+        const tid = config.transport?.id ?? "gateway"
+        if (tid === "cli" && config.transport?.cli?.enabled) {
+          return createCliTransport(config.transport.cli)
+        }
+        if (tid === "managed-agent" && config.transport?.managed_agent?.enabled) {
+          return createManagedAgentTransport(config.transport.managed_agent)
+        }
+        return gatewayTransport
+      })()
+
+      // Cache agy auth state per plugin session to avoid probing on every request.
+      // Null means not yet checked; "unknown" means probe was inconclusive.
+      let cachedAgyAuthState: "authenticated" | "unauthenticated" | "unknown" | null = null
+      let cachedAgyBinaryPath: string | null = null
+
       return {
         apiKey: "",
         async fetch(input, init) {
-          if (!isGenerativeLanguageRequest(input)) {
+          if (!transport.matches(input)) {
             return fetch(input, init);
+          }
+
+          // Non-OAuth transports skip account management entirely
+          if (!transport.auth.requiresOAuth) {
+            const debugLines: string[] = []
+            const pushDebug = (line: string) => {
+              if (!isDebugEnabled()) return
+              debugLines.push(line)
+            }
+            pushDebug(`transport=${transport.id}`)
+
+            try {
+              const prepared = transport.prepareRequest({
+                input,
+                init,
+                accessToken: "",
+                projectId: "",
+                headerStyle: "antigravity",
+              })
+
+              let backendResponse: Response
+
+              if (transport.id === "cli") {
+                // CliTransport: execute agy binary.
+                // Binary detection and auth state are cached per plugin session
+                // to avoid spawning agy on every request.
+                if (cachedAgyBinaryPath === null) {
+                  const configuredBinary = config.transport?.cli?.binary
+                  const detectedBinary = configuredBinary ? null : await findAgyBinary()
+                  cachedAgyBinaryPath = configuredBinary ?? detectedBinary?.path ?? ""
+                }
+                const binaryPath = cachedAgyBinaryPath
+                if (!binaryPath) {
+                  return Response.json({
+                    error: {
+                      code: 404,
+                      status: "AGY_NOT_FOUND",
+                      message: "Could not find agy binary. Install Antigravity CLI (https://antigravity.google/cli) or set transport.cli.binary in config.",
+                    },
+                  }, { status: 404 })
+                }
+
+                if (cachedAgyAuthState === null) {
+                  cachedAgyAuthState = await checkAgyAuthState(binaryPath)
+                }
+                if (cachedAgyAuthState === "unauthenticated") {
+                  return Response.json({
+                    error: {
+                      code: 401,
+                      status: "UNAUTHENTICATED",
+                      message: "agy is not logged into Antigravity. Run `agy` manually in a terminal and complete the browser OAuth flow.",
+                    },
+                  }, { status: 401 })
+                }
+
+                const command = (prepared as PreparedTransportRequest & { transportPayload: AgyCommand }).transportPayload
+                backendResponse = await executeAgyCommand({
+                  ...command,
+                  binary: binaryPath,
+                })
+              } else {
+                // ManagedAgentTransport or other HTTP-based non-OAuth transport
+                backendResponse = await fetch(prepared.request, prepared.init)
+              }
+
+              return transport.transformResponse({
+                response: backendResponse,
+                prepared,
+                debugLines,
+              })
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error)
+              return Response.json({
+                error: {
+                  code: 500,
+                  status: "TRANSPORT_ERROR",
+                  message,
+                },
+              }, { status: 500 })
+            }
           }
 
           const latestAuth = await getAuth();
@@ -1466,13 +1589,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
           }
 
           const urlString = toUrlString(input);
-          const family = getModelFamilyFromUrl(urlString);
-          const model = extractModelFromUrl(urlString);
+          const { family: familyStr, model } = gatewayTransport.getRequestMetadata(input);
+          const family = familyStr as ModelFamily;
           const debugLines: string[] = [];
           const pushDebug = (line: string) => {
             if (!isDebugEnabled()) return;
             debugLines.push(line);
           };
+          pushDebug(`transport=${gatewayTransport.id}`);
           pushDebug(`request=${urlString}`);
 
           type FailureContext = {
@@ -1487,6 +1611,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             toolDebugMissing?: number;
             toolDebugSummary?: string;
             toolDebugPayload?: string;
+            headerStyle?: HeaderStyle;
           };
 
           let lastFailure: FailureContext | null = null;
@@ -1805,7 +1930,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
 
             const runThinkingWarmup = async (
-              prepared: ReturnType<typeof prepareAntigravityRequest>,
+              prepared: PreparedTransportRequest,
               projectId: string,
             ): Promise<void> => {
               if (!prepared.needsSignedThinkingWarmup || !prepared.sessionId) {
@@ -1848,16 +1973,22 @@ export const createAntigravityPlugin = (providerId: string) => async (
               try {
                 pushDebug("thinking-warmup: start");
                 const warmupResponse = await fetch(warmupUrl, warmupInit);
-                const transformed = await transformAntigravityResponse(
-                  warmupResponse,
-                  true,
-                  warmupDebugContext,
-                  prepared.requestedModel,
-                  projectId,
-                  warmupUrl,
-                  prepared.effectiveModel,
-                  prepared.sessionId,
-                );
+                const transformed = await gatewayTransport.transformResponse({
+                  response: warmupResponse,
+                  prepared: {
+                    request: warmupUrl,
+                    init: warmupInit,
+                    streaming: true,
+                    action: "",
+                    headerStyle: prepared.headerStyle,
+                    requestedModel: prepared.requestedModel,
+                    projectId,
+                    endpoint: warmupUrl,
+                    effectiveModel: prepared.effectiveModel,
+                    sessionId: prepared.sessionId,
+                  },
+                  debugContext: warmupDebugContext,
+                });
                 await transformed.text();
                 markWarmupSuccess(prepared.sessionId);
                 pushDebug("thinking-warmup: done");
@@ -1956,33 +2087,35 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
               const currentEndpoint = ANTIGRAVITY_ENDPOINT_FALLBACKS[i];
 
-              // Skip sandbox endpoints for Gemini CLI models - they only work with Antigravity quota
-              // Gemini CLI models must use production endpoint (cloudcode-pa.googleapis.com)
+              // Skip non-prod endpoints for Gemini CLI models — they only work with Antigravity quota
+              // on the production endpoint (cloudcode-pa.googleapis.com).
+              // Both sandbox and non-sandbox daily endpoints are skipped for gemini-cli style.
               if (headerStyle === "gemini-cli" && currentEndpoint !== ANTIGRAVITY_ENDPOINT_PROD) {
-                pushDebug(`Skipping sandbox endpoint ${currentEndpoint} for gemini-cli headerStyle`);
+                pushDebug(`Skipping non-prod endpoint ${currentEndpoint} for gemini-cli headerStyle`);
                 continue;
               }
 
               try {
-                const prepared = prepareAntigravityRequest(
+                const prepared = gatewayTransport.prepareRequest({
                   input,
                   init,
                   accessToken,
-                  projectContext.effectiveProjectId,
-                  currentEndpoint,
+                  projectId: projectContext.effectiveProjectId,
+                  endpointOverride: currentEndpoint,
                   headerStyle,
                   forceThinkingRecovery,
-                  {
+                  options: {
                     claudeToolHardening: config.claude_tool_hardening,
                     claudePromptAutoCaching: config.claude_prompt_auto_caching,
                     fingerprint: account.fingerprint,
                   },
-                );
+                });
 
                 const originalUrl = toUrlString(input);
                 const resolvedUrl = toUrlString(prepared.request);
                 pushDebug(`endpoint=${currentEndpoint}`);
                 pushDebug(`resolved=${resolvedUrl}`);
+                pushDebug(`action=${prepared.action} headerStyle=${headerStyle} model=${prepared.requestedModel ?? "unknown"} effectiveModel=${prepared.effectiveModel ?? "unknown"} accountIdx=${account.index} hasEmail=${!!account.email}`);
                 const debugContext = startAntigravityDebugRequest({
                   originalUrl,
                   resolvedUrl,
@@ -2005,6 +2138,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   toolDebugMissing: prepared.toolDebugMissing,
                   toolDebugSummary: prepared.toolDebugSummary,
                   toolDebugPayload: prepared.toolDebugPayload,
+                  headerStyle: prepared.headerStyle,
                 });
 
                 await runThinkingWarmup(prepared, projectContext.effectiveProjectId);
@@ -2364,20 +2498,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   emptyResponseAttempts.delete(emptyAttemptKeyClean);
                 }
                 
-                const transformedResponse = await transformAntigravityResponse(
+                const transformedResponse = await gatewayTransport.transformResponse({
                   response,
-                  prepared.streaming,
+                  prepared,
                   debugContext,
-                  prepared.requestedModel,
-                  prepared.projectId,
-                  prepared.endpoint,
-                  prepared.effectiveModel,
-                  prepared.sessionId,
-                  prepared.toolDebugMissing,
-                  prepared.toolDebugSummary,
-                  prepared.toolDebugPayload,
                   debugLines,
-                );
+                });
 
                 // Check for context errors and show appropriate toast
                 const contextError = transformedResponse.headers.get("x-antigravity-context-error");
@@ -2454,20 +2580,26 @@ export const createAntigravityPlugin = (providerId: string) => async (
               // Avoid tight retry loops when there's only one account.
               if (accountCount <= 1) {
                 if (lastFailure) {
-                  return transformAntigravityResponse(
-                    lastFailure.response,
-                    lastFailure.streaming,
-                    lastFailure.debugContext,
-                    lastFailure.requestedModel,
-                    lastFailure.projectId,
-                    lastFailure.endpoint,
-                    lastFailure.effectiveModel,
-                    lastFailure.sessionId,
-                    lastFailure.toolDebugMissing,
-                    lastFailure.toolDebugSummary,
-                    lastFailure.toolDebugPayload,
+                  return gatewayTransport.transformResponse({
+                    response: lastFailure.response,
+                    prepared: {
+                      request: input,
+                      init: init ?? {},
+                      streaming: lastFailure.streaming,
+                      action: "",
+                      headerStyle: lastFailure.headerStyle ?? "antigravity",
+                      requestedModel: lastFailure.requestedModel,
+                      projectId: lastFailure.projectId,
+                      endpoint: lastFailure.endpoint,
+                      effectiveModel: lastFailure.effectiveModel,
+                      sessionId: lastFailure.sessionId,
+                      toolDebugMissing: lastFailure.toolDebugMissing,
+                      toolDebugSummary: lastFailure.toolDebugSummary,
+                      toolDebugPayload: lastFailure.toolDebugPayload,
+                    },
+                    debugContext: lastFailure.debugContext,
                     debugLines,
-                  );
+                  });
                 }
 
                 throw lastError || new Error("All Antigravity endpoints failed");
@@ -2478,20 +2610,26 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             // If we get here without returning, something went wrong
             if (lastFailure) {
-              return transformAntigravityResponse(
-                lastFailure.response,
-                lastFailure.streaming,
-                lastFailure.debugContext,
-                lastFailure.requestedModel,
-                lastFailure.projectId,
-                lastFailure.endpoint,
-                lastFailure.effectiveModel,
-                lastFailure.sessionId,
-                lastFailure.toolDebugMissing,
-                lastFailure.toolDebugSummary,
-                lastFailure.toolDebugPayload,
+              return gatewayTransport.transformResponse({
+                response: lastFailure.response,
+                prepared: {
+                  request: input,
+                  init: init ?? {},
+                  streaming: lastFailure.streaming,
+                  action: "",
+                  headerStyle: lastFailure.headerStyle ?? "antigravity",
+                  requestedModel: lastFailure.requestedModel,
+                  projectId: lastFailure.projectId,
+                  endpoint: lastFailure.endpoint,
+                  effectiveModel: lastFailure.effectiveModel,
+                  sessionId: lastFailure.sessionId,
+                  toolDebugMissing: lastFailure.toolDebugMissing,
+                  toolDebugSummary: lastFailure.toolDebugSummary,
+                  toolDebugPayload: lastFailure.toolDebugPayload,
+                },
+                debugContext: lastFailure.debugContext,
                 debugLines,
-              );
+              });
             }
 
             throw lastError || new Error("All Antigravity accounts failed");
@@ -3008,10 +3146,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                 if (listener) {
                   try {
-                    const SOFT_TIMEOUT_MS = 30000;
+                    const softTimeoutMs = getOAuthCallbackTimeoutMs();
                     const callbackPromise = listener.waitForCallback();
                     const timeoutPromise = new Promise<never>((_, reject) =>
-                      setTimeout(() => reject(new Error("SOFT_TIMEOUT")), SOFT_TIMEOUT_MS)
+                      setTimeout(() => reject(new Error("SOFT_TIMEOUT")), softTimeoutMs)
                     );
 
                     let callbackUrl: URL;
@@ -3019,7 +3157,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       callbackUrl = await Promise.race([callbackPromise, timeoutPromise]);
                     } catch (err) {
                       if (err instanceof Error && err.message === "SOFT_TIMEOUT") {
-                        console.log("\n⏳ Automatic callback not received after 30 seconds.");
+                        console.log(`\n⏳ Automatic callback not received after ${Math.round(softTimeoutMs / 1000)} seconds.`);
                         console.log("You can paste the redirect URL manually.\n");
                         console.log("OAuth URL (in case you need it again):");
                         console.log(authorization.url + "\n");
@@ -3212,11 +3350,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 "Complete sign-in in your browser. We'll automatically detect the redirect back to localhost.",
               method: "auto",
               callback: async (): Promise<AntigravityTokenExchangeResult> => {
-                const CALLBACK_TIMEOUT_MS = 30000;
+                const callbackTimeoutMs = getOAuthCallbackTimeoutMs();
                 try {
                   const callbackPromise = listener.waitForCallback();
                   const timeoutPromise = new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error("CALLBACK_TIMEOUT")), CALLBACK_TIMEOUT_MS),
+                    setTimeout(() => reject(new Error("CALLBACK_TIMEOUT")), callbackTimeoutMs),
                   );
 
                   let callbackUrl: URL;
@@ -3226,7 +3364,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     if (err instanceof Error && err.message === "CALLBACK_TIMEOUT") {
                       return {
                         type: "failed",
-                        error: "Callback timeout - please use CLI with --no-browser flag for manual input",
+                        error: `Callback timeout after ${Math.round(callbackTimeoutMs / 1000)} seconds - please use CLI with --no-browser flag for manual input`,
                       };
                     }
                     throw err;

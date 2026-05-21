@@ -1848,6 +1848,7 @@ describe("resolveQuotaGroup", () => {
     expect(resolveQuotaGroup("claude", "claude-opus-4-6-thinking")).toBe("claude");
     expect(resolveQuotaGroup("gemini", "gemini-2.5-pro")).toBe("gemini-pro");
     expect(resolveQuotaGroup("gemini", "gemini-2.5-flash")).toBe("gemini-flash");
+    expect(resolveQuotaGroup("gemini", "antigravity-gpt-oss-120b-medium")).toBe("gpt-oss");
   });
 
   it("falls back to claude for claude family when no model", () => {

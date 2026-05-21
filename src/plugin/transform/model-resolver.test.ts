@@ -2,6 +2,24 @@ import { describe, it, expect } from "vitest";
 import { resolveModelWithTier, resolveModelWithVariant, resolveModelForHeaderStyle } from "./model-resolver";
 
 describe("resolveModelWithTier", () => {
+  describe("current Antigravity quota-row model IDs", () => {
+    it.each([
+      ["antigravity-gemini-3.1-pro-low", "gemini-3.1-pro-low", "low", undefined],
+      ["antigravity-gemini-3.1-pro-high", "gemini-3.1-pro-high", "high", undefined],
+      ["antigravity-claude-sonnet-4-6", "claude-sonnet-4-6", undefined, undefined],
+      ["antigravity-claude-opus-4-6-thinking", "claude-opus-4-6-thinking", undefined, 32768],
+      ["antigravity-gpt-oss-120b-medium", "gpt-oss-120b-medium", undefined, undefined],
+      ["antigravity-gemini-3.5-flash-low", "gemini-3.5-flash-low", "low", undefined],
+    ])("keeps %s mapped to %s", (requestedModel, actualModel, thinkingLevel, thinkingBudget) => {
+      const result = resolveModelForHeaderStyle(requestedModel, "antigravity");
+      expect(result.actualModel).toBe(actualModel);
+      expect(result.thinkingLevel).toBe(thinkingLevel);
+      expect(result.thinkingBudget).toBe(thinkingBudget);
+      expect(result.quotaPreference).toBe("antigravity");
+      expect(result.explicitQuota).toBe(true);
+    });
+  });
+
   describe("Gemini 3 flash models (Issue #109)", () => {
     it("antigravity-gemini-3-flash gets default thinkingLevel 'low'", () => {
       const result = resolveModelWithTier("antigravity-gemini-3-flash");
@@ -116,6 +134,37 @@ describe("resolveModelWithTier", () => {
       expect(result.actualModel).toBe("gemini-3.1-pro-low");
       expect(result.thinkingLevel).toBe("low");
     });
+
+    it("antigravity-gemini-3.5-flash defaults to current live Low quota tier", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3.5-flash");
+      expect(result.actualModel).toBe("gemini-3.5-flash-low");
+      expect(result.thinkingLevel).toBe("low");
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+
+    it("antigravity-gemini-3.5-flash-low keeps the current live quota-row model ID", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3.5-flash-low");
+      expect(result.actualModel).toBe("gemini-3.5-flash-low");
+      expect(result.thinkingLevel).toBe("low");
+    });
+
+    it("antigravity-gemini-3.5-flash-medium aliases to current live low row", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3.5-flash-medium");
+      expect(result.actualModel).toBe("gemini-3.5-flash-low");
+      expect(result.thinkingLevel).toBe("low");
+    });
+
+    it("antigravity-gemini-3.5-flash-high aliases to current live low row", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3.5-flash-high");
+      expect(result.actualModel).toBe("gemini-3.5-flash-low");
+      expect(result.thinkingLevel).toBe("low");
+    });
+
+    it("header-style resolution aliases stale antigravity-gemini-3.5-flash-high to live low row", () => {
+      const result = resolveModelForHeaderStyle("antigravity-gemini-3.5-flash-high", "antigravity");
+      expect(result.actualModel).toBe("gemini-3.5-flash-low");
+      expect(result.thinkingLevel).toBe("low");
+    });
   });
 
   describe("Claude thinking models default budget", () => {
@@ -152,6 +201,14 @@ describe("resolveModelWithTier", () => {
       expect(result.isThinkingModel).toBe(false);
       expect(result.quotaPreference).toBe("antigravity");
     });
+
+    it("stale antigravity-claude-sonnet-4-6-thinking alias resolves to live non-thinking model", () => {
+      const result = resolveModelWithTier("antigravity-claude-sonnet-4-6-thinking");
+      expect(result.actualModel).toBe("claude-sonnet-4-6");
+      expect(result.isThinkingModel).toBe(false);
+      expect(result.thinkingBudget).toBeUndefined();
+      expect(result.quotaPreference).toBe("antigravity");
+    });
   });
 
   describe("Image models", () => {
@@ -168,6 +225,16 @@ describe("resolveModelWithTier", () => {
       expect(result.actualModel).toBe("gemini-3-pro-image");
       expect(result.isImageModel).toBe(true);
       expect(result.explicitQuota).toBe(true);
+      expect(result.quotaPreference).toBe("antigravity");
+    });
+  });
+
+  describe("GPT-OSS current quota model", () => {
+    it("does not strip -medium because it is part of the model ID", () => {
+      const result = resolveModelWithTier("antigravity-gpt-oss-120b-medium");
+      expect(result.actualModel).toBe("gpt-oss-120b-medium");
+      expect(result.thinkingLevel).toBeUndefined();
+      expect(result.thinkingBudget).toBeUndefined();
       expect(result.quotaPreference).toBe("antigravity");
     });
   });

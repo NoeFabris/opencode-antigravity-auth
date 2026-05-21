@@ -105,6 +105,26 @@ function mergeConfigs(
           ...override.signature_cache,
         }
       : base.signature_cache,
+    // Deep merge transport so users can override nested cli/managed_agent
+    // settings without restating the entire transport block.
+    transport: override.transport
+      ? {
+          ...base.transport,
+          ...override.transport,
+          cli: override.transport.cli
+            ? {
+                ...base.transport?.cli,
+                ...override.transport.cli,
+              }
+            : base.transport?.cli,
+          managed_agent: override.transport.managed_agent
+            ? {
+                ...base.transport?.managed_agent,
+                ...override.transport.managed_agent,
+              }
+            : base.transport?.managed_agent,
+        }
+      : base.transport,
   };
 }
 

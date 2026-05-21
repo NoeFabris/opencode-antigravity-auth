@@ -13,7 +13,7 @@ import type { AccountMetadataV3 } from "./storage";
 
 const FETCH_TIMEOUT_MS = 10000;
 
-export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash";
+export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash" | "gpt-oss";
 
 export interface QuotaGroupSummary {
   remainingFraction?: number;
@@ -112,6 +112,9 @@ function classifyQuotaGroup(modelName: string, displayName?: string): QuotaGroup
   if (combined.includes("claude")) {
     return "claude";
   }
+  if (combined.includes("gpt-oss")) {
+    return "gpt-oss";
+  }
   const isGemini3 = combined.includes("gemini-3") || combined.includes("gemini 3");
   if (!isGemini3) {
     return null;
@@ -186,6 +189,8 @@ async function fetchAvailableModels(
   accessToken: string,
   projectId: string,
 ): Promise<FetchAvailableModelsResponse> {
+  // Prod-only by design: model availability must be checked against the
+  // production gateway to reflect what the user can actually access.
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   const quotaUserAgent = getAntigravityHeaders()["User-Agent"] || "antigravity/windows/amd64";
   const errors: string[] = [];
@@ -218,6 +223,8 @@ async function fetchGeminiCliQuota(
   accessToken: string,
   projectId: string,
 ): Promise<RetrieveUserQuotaResponse> {
+  // Prod-only by design: quota retrieval must target production to report
+  // the user's actual quota state, not a daily/staging environment.
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   // Use Gemini CLI user-agent to get CLI quota buckets (not Antigravity buckets)
   const platform = process.platform || "darwin";
