@@ -139,7 +139,7 @@ Only after Phase 7A/7B passes:
 4. Run one low-risk gateway model smoke:
 
 ```bash
-npx tsx script/test-models.ts --model google/antigravity-gemini-3.5-flash-medium --timeout 120000
+npx tsx script/test-models.ts --model google/antigravity-gemini-3.5-flash-low --timeout 120000
 ```
 
 5. Then run one Claude/tool smoke:

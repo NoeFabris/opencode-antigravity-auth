@@ -44,8 +44,8 @@
 
 - **Current Antigravity model set** — default OpenCode model definitions now match the current Antigravity Model Quota view:
   - Gemini 3.1 Pro Low/High as direct model IDs
-  - Gemini 3.5 Flash Medium/High as direct model IDs
-  - Claude Sonnet 4.6 Thinking
+  - Gemini 3.5 Flash Low/High as direct model IDs
+  - Claude Sonnet 4.6
   - Claude Opus 4.6 Thinking
   - GPT-OSS 120B Medium
 

@@ -8,14 +8,14 @@ The default model list now contains one direct OpenCode model ID for each curren
 |-----------|-------------------|
 | Gemini 3.1 Pro (Low) | `google/antigravity-gemini-3.1-pro-low` |
 | Gemini 3.1 Pro (High) | `google/antigravity-gemini-3.1-pro-high` |
-| Gemini 3.5 Flash (Medium) | `google/antigravity-gemini-3.5-flash-medium` |
-| Gemini 3.5 Flash (High) | `google/antigravity-gemini-3.5-flash-high` |
-| Claude Sonnet 4.6 (Thinking) | `google/antigravity-claude-sonnet-4-6-thinking` |
+| Gemini 3.5 Flash (Low) | `google/antigravity-gemini-3.5-flash-low` |
+| Gemini 3.5 Flash (Low) | `google/antigravity-gemini-3.5-flash-low` |
+| Claude Sonnet 4.6 | `google/antigravity-claude-sonnet-4-6` |
 | Claude Opus 4.6 (Thinking) | `google/antigravity-claude-opus-4-6-thinking` |
 | GPT-OSS 120B (Medium) | `google/antigravity-gpt-oss-120b-medium` |
 
 ```bash
-opencode run "Hello" --model=google/antigravity-gemini-3.5-flash-medium
+opencode run "Hello" --model=google/antigravity-gemini-3.5-flash-low
 opencode run "Hello" --model=google/antigravity-gemini-3.1-pro-high
 ```
 
@@ -25,14 +25,14 @@ Gemini CLI models are intentionally not part of the default model list because i
 
 ## Why direct IDs instead of variants?
 
-The current Antigravity quota UI exposes rows such as "Gemini 3.5 Flash (Medium)" and "Gemini 3.5 Flash (High)". OpenCode only treats configured model keys as selectable model IDs in all contexts, including scripts and agent configs. Direct IDs therefore avoid "Model not found" errors in non-interactive usage.
+The current Antigravity quota UI exposes rows such as "Gemini 3.5 Flash (Low)" and "Gemini 3.5 Flash (Low)". OpenCode only treats configured model keys as selectable model IDs in all contexts, including scripts and agent configs. Direct IDs therefore avoid "Model not found" errors in non-interactive usage.
 
 Internally, the resolver still understands the tier suffixes:
 
 - `antigravity-gemini-3.1-pro-low` → API model `gemini-3.1-pro-low`
 - `antigravity-gemini-3.1-pro-high` → API model `gemini-3.1-pro-high`
-- `antigravity-gemini-3.5-flash-medium` → API model `gemini-3.5-flash-medium` + `thinkingLevel: "medium"`
-- `antigravity-gemini-3.5-flash-high` → API model `gemini-3.5-flash-high` + `thinkingLevel: "high"`
+- `antigravity-gemini-3.5-flash-low` → API model `gemini-3.5-flash-low` + `thinkingLevel: "medium"`
+- `antigravity-gemini-3.5-flash-low` → API model `gemini-3.5-flash-low` + `thinkingLevel: "high"`
 
 The bare legacy `antigravity-gemini-3.5-flash` resolves to `medium`, but it is not listed by default.
 
@@ -62,7 +62,7 @@ But for new installs, prefer direct IDs from the current model list.
 
 Current Claude Thinking rows are direct model IDs. The plugin enables Claude thinking with its default high budget when no explicit tier/budget is provided:
 
-- `google/antigravity-claude-sonnet-4-6-thinking`
+- `google/antigravity-claude-sonnet-4-6`
 - `google/antigravity-claude-opus-4-6-thinking`
 
 Legacy tier-suffixed Claude names are still understood, such as:

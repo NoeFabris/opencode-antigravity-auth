@@ -67,7 +67,7 @@ describe("updateOpencodeConfig", () => {
     expect(writtenConfig.provider.google.models["old-model"]).toBeUndefined();
     // New models should be present
     expect(writtenConfig.provider.google.models["antigravity-gemini-3.1-pro-low"]).toBeDefined();
-    expect(writtenConfig.provider.google.models["antigravity-claude-sonnet-4-6-thinking"]).toBeDefined();
+    expect(writtenConfig.provider.google.models["antigravity-claude-sonnet-4-6"]).toBeDefined();
   });
 
   test("preserves non-google provider sections", async () => {

@@ -47,8 +47,8 @@ This document describes what each transport mode supports, which models work, ho
 | Model family | Variants | Notes |
 |---|---|---|
 | Gemini 3.1 Pro | `antigravity-gemini-3.1-pro-low`, `antigravity-gemini-3.1-pro-high` | Current quota rows |
-| Gemini 3.5 Flash | `antigravity-gemini-3.5-flash-medium`, `antigravity-gemini-3.5-flash-high` | Current quota rows |
-| Claude Sonnet 4.6 Thinking | `antigravity-claude-sonnet-4-6-thinking` | Current quota row |
+| Gemini 3.5 Flash | `antigravity-gemini-3.5-flash-low`, `antigravity-gemini-3.5-flash-low` | Current quota rows |
+| Claude Sonnet 4.6 | `antigravity-claude-sonnet-4-6` | Current quota row |
 | Claude Opus 4.6 Thinking | `antigravity-claude-opus-4-6-thinking` | Current quota row |
 | GPT-OSS 120B Medium | `antigravity-gpt-oss-120b-medium` | Current quota row |
 | Google Search grounding | Via `google_search` tool | Gemini models only |

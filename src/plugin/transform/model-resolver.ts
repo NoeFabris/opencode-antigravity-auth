@@ -53,6 +53,7 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-claude-opus-4-6-thinking-medium": "claude-opus-4-6-thinking",
   "gemini-claude-opus-4-6-thinking-high": "claude-opus-4-6-thinking",
   "gemini-claude-sonnet-4-6": "claude-sonnet-4-6",
+  "claude-sonnet-4-6-thinking": "claude-sonnet-4-6",
 
   // Image generation models - only gemini-3-pro-image is available via Antigravity API
   // Note: gemini-2.5-flash-image (Nano Banana) is NOT supported by Antigravity - only Google AI API
@@ -183,8 +184,9 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 
   // For current Antigravity quota-row models, keep row-specific model IDs.
   // Antigravity API: Gemini 3/3.1 Pro requires tier suffix (gemini-3.1-pro-low/high).
-  //                  Gemini 3.5 Flash is exposed as tiered rows
-  //                  (gemini-3.5-flash-medium/high), not the bare base model.
+  //                  Gemini 3.5 Flash currently resolves to gemini-3.5-flash-low.
+  //                  Keep high/medium requested IDs as compatibility aliases, but
+  //                  route them to the live model returned by fetchAvailableModels.
   // Legacy Gemini 3 Flash keeps using bare model + thinkingLevel for compatibility.
   const isGemini3Pro = isGemini3ProModel(modelWithoutQuota);
   const isGemini3Flash = isGemini3FlashModel(modelWithoutQuota);
@@ -194,8 +196,8 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   if (skipAlias) {
     if (isGemini3Pro && !tier && !isImageModel) {
       antigravityModel = `${modelWithoutQuota}-low`;
-    } else if (isGemini35Flash && !tier) {
-      antigravityModel = `${modelWithoutQuota}-medium`;
+    } else if (isGemini35Flash) {
+      antigravityModel = `${baseName}-low`;
     } else if (isGemini3Flash && !isGemini35Flash && tier) {
       antigravityModel = baseName;
     }
@@ -226,11 +228,11 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 
   if (!tier) {
     // Gemini 3 models without explicit tier get a default thinkingLevel.
-    // Current Antigravity quota exposes Gemini 3.5 Flash as Medium/High only,
-    // so the bare model maps to Medium instead of the legacy Low default.
+    // Current Antigravity availability exposes Gemini 3.5 Flash as low.
+    // Stale medium/high config IDs are compatibility aliases to the live low row.
     if (isEffectiveGemini3) {
       const defaultThinkingLevel = resolvedModel.toLowerCase().startsWith("gemini-3.5-flash")
-        ? "medium"
+        ? "low"
         : "low";
 
       return {
@@ -257,10 +259,14 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 
   // Gemini 3 models with tier always get thinkingLevel set
   if (isEffectiveGemini3) {
+    const thinkingLevel = resolvedModel.toLowerCase().startsWith("gemini-3.5-flash")
+      ? "low"
+      : tier;
+
     return {
       actualModel: resolvedModel,
-      thinkingLevel: tier,
-      tier,
+      thinkingLevel,
+      tier: thinkingLevel,
       isThinkingModel: true,
       quotaPreference,
       explicitQuota,

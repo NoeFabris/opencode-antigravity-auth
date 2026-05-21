@@ -10,11 +10,10 @@ const MODELS: ModelTest[] = [
   // Current Antigravity Gemini quota rows
   { model: "google/antigravity-gemini-3.1-pro-low", category: "antigravity-gemini" },
   { model: "google/antigravity-gemini-3.1-pro-high", category: "antigravity-gemini" },
-  { model: "google/antigravity-gemini-3.5-flash-medium", category: "antigravity-gemini" },
-  { model: "google/antigravity-gemini-3.5-flash-high", category: "antigravity-gemini" },
+  { model: "google/antigravity-gemini-3.5-flash-low", category: "antigravity-gemini" },
 
   // Antigravity Claude
-  { model: "google/antigravity-claude-sonnet-4-6-thinking", category: "antigravity-claude" },
+  { model: "google/antigravity-claude-sonnet-4-6", category: "antigravity-claude" },
   { model: "google/antigravity-claude-opus-4-6-thinking", category: "antigravity-claude" },
 
   // Antigravity open model row
@@ -54,6 +53,8 @@ async function testModel(model: string, timeoutMs: number): Promise<TestResult> 
 
       if (code !== 0) {
         resolve({ success: false, error: `Exit ${code}: ${stderr || stdout}`.slice(0, 200), duration });
+      } else if (/\bError:\s|Requested entity was not found|\[Debug Info\]/i.test(stderr)) {
+        resolve({ success: false, error: `Runtime error: ${stderr || stdout}`.slice(0, 300), duration });
       } else {
         resolve({ success: true, duration });
       }
@@ -97,7 +98,7 @@ Options:
 
 Examples:
   npx tsx script/test-models.ts --dry-run
-  npx tsx script/test-models.ts --model google/antigravity-gemini-3.5-flash-medium
+  npx tsx script/test-models.ts --model google/antigravity-gemini-3.5-flash-low
   npx tsx script/test-models.ts --category antigravity-claude
 `);
 }

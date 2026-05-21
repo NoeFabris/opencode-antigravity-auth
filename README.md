@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![X (Twitter)](https://img.shields.io/badge/X-@dopesalmon-000000?style=flat&logo=x)](https://x.com/dopesalmon)
 
-Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access current models like `gemini-3.1-pro`, `gemini-3.5-flash`, `claude-sonnet-4-6-thinking`, and `gpt-oss-120b-medium` with your Google credentials.
+Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access current models like `gemini-3.1-pro`, `gemini-3.5-flash`, `claude-sonnet-4-6`, and `gpt-oss-120b-medium` with your Google credentials.
 
 ## What You Get
 
@@ -114,18 +114,17 @@ opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking
 |----------|-----------|
 | `antigravity-gemini-3.1-pro-low` | Gemini 3.1 Pro (Low) |
 | `antigravity-gemini-3.1-pro-high` | Gemini 3.1 Pro (High) |
-| `antigravity-claude-sonnet-4-6-thinking` | Claude Sonnet 4.6 (Thinking) |
+| `antigravity-claude-sonnet-4-6` | Claude Sonnet 4.6 |
 | `antigravity-claude-opus-4-6-thinking` | Claude Opus 4.6 (Thinking) |
 | `antigravity-gpt-oss-120b-medium` | GPT-OSS 120B (Medium) |
-| `antigravity-gemini-3.5-flash-medium` | Gemini 3.5 Flash (Medium) |
-| `antigravity-gemini-3.5-flash-high` | Gemini 3.5 Flash (High) |
+| `antigravity-gemini-3.5-flash-low` | Gemini 3.5 Flash (Low) |
 
 > **Gemini CLI sunset:** Gemini CLI quota models are no longer included in the default model list. Google announced Gemini CLI access for individual/free Google AI Pro/Ultra and Gemini Code Assist users stops on **2026-06-18**. Legacy Gemini CLI routing remains in the plugin for backward compatibility only.
 
 **Use a current model:**
 ```bash
-opencode run "Hello" --model=google/antigravity-gemini-3.5-flash-medium
-opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6-thinking
+opencode run "Hello" --model=google/antigravity-gemini-3.5-flash-low
+opencode run "Hello" --model=google/antigravity-claude-sonnet-4-6
 ```
 
 For details on compatibility with older variant/tier names, see [docs/MODEL-VARIANTS.md](docs/MODEL-VARIANTS.md).
@@ -178,8 +177,8 @@ Add this to your `~/.config/opencode/opencode.json`:
             ]
           }
         },
-        "antigravity-claude-sonnet-4-6-thinking": {
-          "name": "Claude Sonnet 4.6 Thinking (Antigravity)",
+        "antigravity-claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6 (Antigravity)",
           "limit": {
             "context": 200000,
             "output": 64000
@@ -229,25 +228,8 @@ Add this to your `~/.config/opencode/opencode.json`:
             ]
           }
         },
-        "antigravity-gemini-3.5-flash-high": {
-          "name": "Gemini 3.5 Flash High (Antigravity)",
-          "limit": {
-            "context": 1048576,
-            "output": 65536
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          }
-        },
-        "antigravity-gemini-3.5-flash-medium": {
-          "name": "Gemini 3.5 Flash Medium (Antigravity)",
+        "antigravity-gemini-3.5-flash-low": {
+          "name": "Gemini 3.5 Flash Low (Antigravity)",
           "limit": {
             "context": 1048576,
             "output": 65536
@@ -458,7 +440,7 @@ If you encounter errors during a session:
   "google_auth": false,
   "agents": {
     "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.1-pro-high" },
-    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-medium" }
+    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-low" }
   }
 }
 ```
@@ -596,8 +578,8 @@ Disable built-in auth and override agent models in `oh-my-opencode.json`:
   "google_auth": false,
   "agents": {
     "frontend-ui-ux-engineer": { "model": "google/antigravity-gemini-3.1-pro-high" },
-    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-medium" },
-    "multimodal-looker": { "model": "google/antigravity-gemini-3.5-flash-high" }
+    "document-writer": { "model": "google/antigravity-gemini-3.5-flash-low" },
+    "multimodal-looker": { "model": "google/antigravity-gemini-3.5-flash-low" }
   }
 }
 ```

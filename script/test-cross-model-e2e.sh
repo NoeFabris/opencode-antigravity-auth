@@ -3,7 +3,7 @@
 # Tests fix for "Invalid `signature` in `thinking` block" error
 #
 # Models tested:
-# 1. Gemini (google/antigravity-gemini-3.1-pro-low, gemini-3.5-flash-medium)
+# 1. Gemini (google/antigravity-gemini-3.1-pro-low, gemini-3.5-flash-low)
 # 2. Claude via Anthropic (anthropic/claude-opus-4-5)
 # 3. Claude via Google (google/antigravity-claude-*-thinking-*)
 # 4. OpenAI (openai/gpt-5.2-medium)
@@ -203,7 +203,7 @@ else
   fi
   
   log_info "Turn 5: Gemini Flash..."
-  opencode run -s "$SID" -m google/antigravity-gemini-3.5-flash-medium \
+  opencode run -s "$SID" -m google/antigravity-gemini-3.5-flash-low \
     "Run: echo 'Turn5-Complete'" > /tmp/e2e-t6-s5.log 2>&1 || true
   check_signature_error /tmp/e2e-t6-s5.log && CHAIN_OK=false
   
@@ -243,7 +243,7 @@ echo ""
 # Test 8: Triple switch with different model families
 echo "Test 8: Triple Switch (Gemini → Anthropic → OpenAI)"
 log_info "Step 1: Gemini Flash..."
-opencode run -m google/antigravity-gemini-3.5-flash-medium \
+opencode run -m google/antigravity-gemini-3.5-flash-low \
   "Run: echo 'Triple-1'. Think about it." \
   > /tmp/e2e-t8-s1.log 2>&1 || true
 

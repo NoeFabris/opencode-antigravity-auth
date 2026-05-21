@@ -35,7 +35,7 @@ Do not rely on Gemini CLI quota for new setups.
 2. If rate-limited, plugin checks if ANY other account has Antigravity available
 3. If yes → switch to that account (stay on Antigravity)
 4. If no (all accounts exhausted) → wait/back off or use legacy Gemini CLI fallback only when the request/model config allows it
-5. Current model names stay on Antigravity (for example `antigravity-gemini-3.5-flash-medium`)
+5. Current model names stay on Antigravity (for example `antigravity-gemini-3.5-flash-low`)
 
 Automatic fallback remains enabled for backward compatibility. Current recommended configs use Antigravity-only model IDs.
 

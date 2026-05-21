@@ -455,9 +455,9 @@ Current default model IDs are based on the Antigravity Model Quota view:
 
 - `antigravity-gemini-3.1-pro-low`
 - `antigravity-gemini-3.1-pro-high`
-- `antigravity-gemini-3.5-flash-medium`
-- `antigravity-gemini-3.5-flash-high`
-- `antigravity-claude-sonnet-4-6-thinking`
+- `antigravity-gemini-3.5-flash-low`
+- `antigravity-gemini-3.5-flash-low`
+- `antigravity-claude-sonnet-4-6`
 - `antigravity-claude-opus-4-6-thinking`
 - `antigravity-gpt-oss-120b-medium`
 
@@ -470,8 +470,8 @@ v1.2.7+ uses explicit `antigravity-` prefix:
 | Old Name | New Name |
 |----------|----------|
 | `gemini-3-pro-low` | `antigravity-gemini-3.1-pro-low` |
-| `gemini-3-flash` | `antigravity-gemini-3.5-flash-medium` |
-| `claude-sonnet-4-6` | `antigravity-claude-sonnet-4-6-thinking` |
+| `gemini-3-flash` | `antigravity-gemini-3.5-flash-low` |
+| `claude-sonnet-4-6` | `antigravity-claude-sonnet-4-6` |
 
 Use the `antigravity-` prefixed model names shown above.
 

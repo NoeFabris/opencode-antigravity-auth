@@ -68,8 +68,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
             ]
           }
         },
-        "antigravity-claude-sonnet-4-6-thinking": {
-          "name": "Claude Sonnet 4.6 Thinking (Antigravity)",
+        "antigravity-claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6 (Antigravity)",
           "limit": {
             "context": 200000,
             "output": 64000
@@ -119,25 +119,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
             ]
           }
         },
-        "antigravity-gemini-3.5-flash-high": {
-          "name": "Gemini 3.5 Flash High (Antigravity)",
-          "limit": {
-            "context": 1048576,
-            "output": 65536
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          }
-        },
-        "antigravity-gemini-3.5-flash-medium": {
-          "name": "Gemini 3.5 Flash Medium (Antigravity)",
+        "antigravity-gemini-3.5-flash-low": {
+          "name": "Gemini 3.5 Flash Low (Antigravity)",
           "limit": {
             "context": 1048576,
             "output": 65536

@@ -115,8 +115,8 @@ if [ -z "$SID" ]; then
   log_fail "Test 5 - No session ID created"
 else
   log_info "Session: $SID"
-  log_info "Step 2: Switch to antigravity-gemini-3.5-flash-medium..."
-  timeout 60 opencode run -s "$SID" -m google/antigravity-gemini-3.5-flash-medium \
+  log_info "Step 2: Switch to antigravity-gemini-3.5-flash-low..."
+  timeout 60 opencode run -s "$SID" -m google/antigravity-gemini-3.5-flash-low \
     "Say: SESSION_CONTINUE" \
     2>&1 > /tmp/gemini-cli-e2e-cross-s2.log || true
   
