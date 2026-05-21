@@ -119,14 +119,26 @@ describe("resolveModelWithTier", () => {
 
     it("antigravity-gemini-3.5-flash defaults to current Medium quota tier", () => {
       const result = resolveModelWithTier("antigravity-gemini-3.5-flash");
-      expect(result.actualModel).toBe("gemini-3.5-flash");
+      expect(result.actualModel).toBe("gemini-3.5-flash-medium");
       expect(result.thinkingLevel).toBe("medium");
       expect(result.quotaPreference).toBe("antigravity");
     });
 
-    it("antigravity-gemini-3.5-flash-high gets thinkingLevel from tier", () => {
+    it("antigravity-gemini-3.5-flash-medium keeps the current quota-row model ID", () => {
+      const result = resolveModelWithTier("antigravity-gemini-3.5-flash-medium");
+      expect(result.actualModel).toBe("gemini-3.5-flash-medium");
+      expect(result.thinkingLevel).toBe("medium");
+    });
+
+    it("antigravity-gemini-3.5-flash-high keeps the current quota-row model ID", () => {
       const result = resolveModelWithTier("antigravity-gemini-3.5-flash-high");
-      expect(result.actualModel).toBe("gemini-3.5-flash");
+      expect(result.actualModel).toBe("gemini-3.5-flash-high");
+      expect(result.thinkingLevel).toBe("high");
+    });
+
+    it("header-style resolution keeps antigravity-gemini-3.5-flash-high as a quota-row model", () => {
+      const result = resolveModelForHeaderStyle("antigravity-gemini-3.5-flash-high", "antigravity");
+      expect(result.actualModel).toBe("gemini-3.5-flash-high");
       expect(result.thinkingLevel).toBe("high");
     });
   });

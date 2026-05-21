@@ -31,8 +31,8 @@ Internally, the resolver still understands the tier suffixes:
 
 - `antigravity-gemini-3.1-pro-low` → API model `gemini-3.1-pro-low`
 - `antigravity-gemini-3.1-pro-high` → API model `gemini-3.1-pro-high`
-- `antigravity-gemini-3.5-flash-medium` → API model `gemini-3.5-flash` + `thinkingLevel: "medium"`
-- `antigravity-gemini-3.5-flash-high` → API model `gemini-3.5-flash` + `thinkingLevel: "high"`
+- `antigravity-gemini-3.5-flash-medium` → API model `gemini-3.5-flash-medium` + `thinkingLevel: "medium"`
+- `antigravity-gemini-3.5-flash-high` → API model `gemini-3.5-flash-high` + `thinkingLevel: "high"`
 
 The bare legacy `antigravity-gemini-3.5-flash` resolves to `medium`, but it is not listed by default.
 

@@ -63,6 +63,7 @@ const TIER_REGEX = /-(minimal|low|medium|high)$/;
 const QUOTA_PREFIX_REGEX = /^antigravity-/i;
 const GEMINI_3_PRO_REGEX = /^gemini-3(?:\.\d+)?-pro/i;
 const GEMINI_3_FLASH_REGEX = /^gemini-3(?:\.\d+)?-flash/i;
+const GEMINI_35_FLASH_REGEX = /^gemini-3\.5-flash/i;
 
 // ANTIGRAVITY_ONLY_MODELS removed - all models now default to antigravity
 
@@ -137,6 +138,10 @@ function isGemini3FlashModel(model: string): boolean {
   return GEMINI_3_FLASH_REGEX.test(model);
 }
 
+function isGemini35FlashModel(model: string): boolean {
+  return GEMINI_35_FLASH_REGEX.test(model);
+}
+
 /**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
@@ -176,18 +181,22 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
   const skipAlias = isAntigravity && isGemini3;
 
-  // For Antigravity Gemini 3 Pro models without explicit tier, append default tier
-  // Antigravity API: gemini-3-pro requires tier suffix (gemini-3-pro-low/high)
-  //                  gemini-3-flash uses bare name + thinkingLevel param
-  // Pro defaults to -low unless an explicit tier is provided
+  // For current Antigravity quota-row models, keep row-specific model IDs.
+  // Antigravity API: Gemini 3/3.1 Pro requires tier suffix (gemini-3.1-pro-low/high).
+  //                  Gemini 3.5 Flash is exposed as tiered rows
+  //                  (gemini-3.5-flash-medium/high), not the bare base model.
+  // Legacy Gemini 3 Flash keeps using bare model + thinkingLevel for compatibility.
   const isGemini3Pro = isGemini3ProModel(modelWithoutQuota);
   const isGemini3Flash = isGemini3FlashModel(modelWithoutQuota);
+  const isGemini35Flash = isGemini35FlashModel(modelWithoutQuota);
   
   let antigravityModel = modelWithoutQuota;
   if (skipAlias) {
     if (isGemini3Pro && !tier && !isImageModel) {
       antigravityModel = `${modelWithoutQuota}-low`;
-    } else if (isGemini3Flash && tier) {
+    } else if (isGemini35Flash && !tier) {
+      antigravityModel = `${modelWithoutQuota}-medium`;
+    } else if (isGemini3Flash && !isGemini35Flash && tier) {
       antigravityModel = baseName;
     }
   }
