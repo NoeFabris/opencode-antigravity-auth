@@ -1,7 +1,7 @@
 # Support Matrix
 
 **Last Updated:** May 2026
-**Plugin Version:** Unreleased / next release
+**Plugin Version:** 1.7.0-beta.0
 
 This document describes what each transport mode supports, which models work, how credentials are stored, and how rate limits behave.
 
@@ -144,7 +144,7 @@ Deduplication window: 120s. Max wait: configurable via `max_rate_limit_wait_seco
 
 ## Migration Notes for Existing Users
 
-### Upgrading from v1.6.x to the next release
+### Upgrading from v1.6.x to 1.7.0-beta.0
 
 **No breaking changes.** The default transport is still `gateway`. All existing accounts, tokens, and config continue to work.
 
