@@ -22,6 +22,11 @@ function withConfig(overrides: Partial<AntigravityConfig>): AntigravityConfig {
   };
 }
 
+async function readPreparedBody(body: BodyInit | null | undefined): Promise<unknown> {
+  if (typeof body === "string") return JSON.parse(body);
+  return JSON.parse(await new Response(body).text());
+}
+
 describe("api-key agy sdk support", () => {
   beforeEach(() => {
     resetAgySdkCredentialStateForTests();
@@ -29,6 +34,7 @@ describe("api-key agy sdk support", () => {
 
   it("loads API key credentials from auth, config cloud projects, and environment", () => {
     vi.stubEnv("GEMINI_API_KEY", "env-key");
+    vi.stubEnv("GOOGLE_API_KEY", "google-key");
     try {
       const credentials = getAgySdkCredentials(
         withConfig({
@@ -46,14 +52,15 @@ describe("api-key agy sdk support", () => {
         { label: "opencode api key", apiKey: "auth-key" },
         { label: "backup", apiKey: "config-key", projectId: "cloud-project" },
         { label: "environment", apiKey: "env-key" },
+        { label: "environment", apiKey: "google-key" },
       ]);
     } finally {
       vi.unstubAllEnvs();
     }
   });
 
-  it("prepares public Gemini API requests with API key headers and no URL secret", () => {
-    const prepared = prepareAgySdkGeminiRequest(
+  it("prepares public Gemini API requests with API key headers and no URL secret", async () => {
+    const prepared = await prepareAgySdkGeminiRequest(
       "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3-pro-high:streamGenerateContent?alt=sse&key=old-url-key",
       {
         method: "POST",
@@ -85,7 +92,7 @@ describe("api-key agy sdk support", () => {
     expect(headers.get("x-api-key")).toBeNull();
     expect(headers.get("x-goog-api-key")).toBe("test-key");
     expect(headers.get("x-goog-user-project")).toBeNull();
-    expect(JSON.parse(String(prepared.init.body))).toEqual({
+    expect(await readPreparedBody(prepared.init.body)).toEqual({
       contents: [],
       generationConfig: {
         temperature: 0.4,
@@ -98,9 +105,9 @@ describe("api-key agy sdk support", () => {
     });
   });
 
-  it("preserves Request input method, headers, and body when routing through API-key auth", () => {
+  it("preserves Request input method, headers, and body when routing through API-key auth", async () => {
     const original = new Request(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key=old-url-key",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?key=old-url-key",
       {
         method: "POST",
         headers: {
@@ -111,7 +118,7 @@ describe("api-key agy sdk support", () => {
       },
     );
 
-    const prepared = prepareAgySdkGeminiRequest(
+    const prepared = await prepareAgySdkGeminiRequest(
       original,
       undefined,
       { label: "backup", apiKey: "test-key", projectId: "cloud-project" },
@@ -119,14 +126,22 @@ describe("api-key agy sdk support", () => {
 
     const headers = new Headers(prepared.init.headers);
     expect(prepared.init.method).toBe("POST");
-    expect(prepared.init.body).toBe(original.body);
+    expect(await readPreparedBody(prepared.init.body)).toEqual({
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      generationConfig: {
+        thinkingConfig: {
+          thinkingLevel: "low",
+          includeThoughts: true,
+        },
+      },
+    });
     expect(headers.get("x-request-id")).toBe("request-123");
     expect(headers.get("Authorization")).toBeNull();
     expect(headers.get("x-goog-api-key")).toBe("test-key");
   });
 
-  it("adds default Gemini 3 thinking config without dropping extra body options", () => {
-    const prepared = prepareAgySdkGeminiRequest(
+  it("adds default Gemini 3 thinking config without dropping extra body options", async () => {
+    const prepared = await prepareAgySdkGeminiRequest(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
       {
         method: "POST",
@@ -147,7 +162,7 @@ describe("api-key agy sdk support", () => {
       { label: "env", apiKey: "test-key" },
     );
 
-    expect(JSON.parse(String(prepared.init.body))).toEqual({
+    expect(await readPreparedBody(prepared.init.body)).toEqual({
       contents: [],
       cachedContent: "cachedContents/example",
       generationConfig: {
@@ -161,8 +176,8 @@ describe("api-key agy sdk support", () => {
     });
   });
 
-  it("keeps Gemini 3 tier suffix as thinking level while stripping it from the public API model", () => {
-    const prepared = prepareAgySdkGeminiRequest(
+  it("keeps Gemini 3 tier suffix as thinking level while stripping it from the public API model", async () => {
+    const prepared = await prepareAgySdkGeminiRequest(
       "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3-pro-high:generateContent",
       {
         method: "POST",
@@ -174,7 +189,7 @@ describe("api-key agy sdk support", () => {
     expect(String(prepared.request)).toBe(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:generateContent",
     );
-    expect(JSON.parse(String(prepared.init.body))).toEqual({
+    expect(await readPreparedBody(prepared.init.body)).toEqual({
       contents: [],
       generationConfig: {
         thinkingConfig: {
@@ -185,8 +200,8 @@ describe("api-key agy sdk support", () => {
     });
   });
 
-  it("preserves API-native preview model names for Gemini API requests", () => {
-    const prepared = prepareAgySdkGeminiRequest(
+  it("preserves API-native preview model names for Gemini API requests", async () => {
+    const prepared = await prepareAgySdkGeminiRequest(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent",
       {
         method: "POST",
@@ -204,6 +219,7 @@ describe("api-key agy sdk support", () => {
     expect(isAgySdkSupportedRequest("https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:generateContent")).toBe(true);
     expect(isAgySdkSupportedRequest("https://generativelanguage.googleapis.com/v1beta/models/claude-opus-4-6-thinking:generateContent")).toBe(false);
     expect(isAgySdkSupportedRequest("https://generativelanguage.googleapis.com/v1beta/models")).toBe(false);
+    expect(isAgySdkSupportedRequest("https://example.com/redirect?next=https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:generateContent")).toBe(false);
 
     const first = { label: "first", apiKey: "first" };
     const second = { label: "second", apiKey: "second" };

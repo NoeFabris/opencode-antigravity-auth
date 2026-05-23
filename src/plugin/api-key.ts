@@ -16,6 +16,12 @@ export interface GeminiApiModelsResponse {
   nextPageToken?: string;
 }
 
+interface PreparedAgySdkGeminiRequest {
+  request: RequestInfo;
+  init: RequestInit;
+  model?: string;
+}
+
 const rateLimitedUntilByKey = new Map<string, number>();
 let cursor = 0;
 
@@ -25,6 +31,15 @@ const GEMINI_MODELS_LIST_MAX_PAGES = 20;
 export function resetAgySdkCredentialStateForTests(): void {
   rateLimitedUntilByKey.clear();
   cursor = 0;
+}
+
+async function requestBodyText(request: Request): Promise<string | undefined> {
+  if (!request.body) return undefined;
+  try {
+    return await request.clone().text();
+  } catch {
+    return undefined;
+  }
 }
 
 function splitEnvList(value: string | undefined): string[] {
@@ -67,9 +82,15 @@ export function getAgySdkCredentials(
   }
 
   const envKeys = splitEnvList(process.env.OPENCODE_ANTIGRAVITY_API_KEYS);
-  const singleEnvKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  for (const apiKey of singleEnvKey ? [singleEnvKey, ...envKeys] : envKeys) {
-    credentials.push({ label: "environment", apiKey: apiKey.trim() });
+  const envCandidates = [
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_API_KEY,
+    ...envKeys,
+  ]
+    .map((apiKey) => apiKey?.trim())
+    .filter((apiKey): apiKey is string => Boolean(apiKey));
+  for (const apiKey of envCandidates) {
+    credentials.push({ label: "environment", apiKey });
   }
 
   return dedupeCredentials(credentials);
@@ -112,8 +133,14 @@ export function isApiKeyAuth(auth: unknown): auth is ApiKeyAuthDetails {
 }
 
 export function isAgySdkSupportedRequest(urlString: string): boolean {
-  if (!urlString.includes("generativelanguage.googleapis.com")) return false;
-  const model = extractGeminiModelFromUrl(urlString);
+  let url: URL;
+  try {
+    url = new URL(urlString);
+  } catch {
+    return false;
+  }
+  if (url.hostname !== "generativelanguage.googleapis.com") return false;
+  const model = extractGeminiModelFromUrl(url.toString());
   return !!model && model.toLowerCase().includes("gemini");
 }
 
@@ -230,11 +257,11 @@ function applyAgySdkGeminiBodyTransforms(payload: RequestPayload, model: string,
   delete payload.thinking;
 }
 
-export function prepareAgySdkGeminiRequest(
+export async function prepareAgySdkGeminiRequest(
   input: RequestInfo,
   init: RequestInit | undefined,
   credential: AgySdkCredential,
-): { request: RequestInfo; init: RequestInit; model?: string } {
+): Promise<PreparedAgySdkGeminiRequest> {
   const requestInput = typeof input === "string" ? undefined : input;
   const urlString = requestInput?.url ?? input.toString();
   const url = new URL(urlString);
@@ -254,7 +281,8 @@ export function prepareAgySdkGeminiRequest(
   headers.set("x-goog-api-key", credential.apiKey);
   headers.delete("x-goog-user-project");
 
-  const originalBody = init?.body ?? requestInput?.body ?? undefined;
+  const requestTextBody = init?.body === undefined && requestInput ? await requestBodyText(requestInput) : undefined;
+  const originalBody = init?.body ?? requestTextBody ?? requestInput?.body ?? undefined;
   let body = originalBody;
   if (typeof body === "string" && body.trim()) {
     try {
@@ -299,7 +327,7 @@ export async function fetchWithAgySdkCredential(
   credential: AgySdkCredential,
   fallbackRetryAfterMs: number,
 ): Promise<Response> {
-  const prepared = prepareAgySdkGeminiRequest(input, init, credential);
+  const prepared = await prepareAgySdkGeminiRequest(input, init, credential);
   const response = await fetch(prepared.request, prepared.init);
   if (response.status === 429 || response.status === 503 || response.status === 529) {
     markAgySdkCredentialRateLimited(credential, retryAfterMsFromResponse(response, fallbackRetryAfterMs));
