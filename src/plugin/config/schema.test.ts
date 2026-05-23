@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_CONFIG } from "./schema";
+import { AgySdkCloudProjectSchema, DEFAULT_CONFIG } from "./schema";
 
 describe("cli_first config", () => {
   it("includes cli_first default in DEFAULT_CONFIG", () => {
@@ -66,6 +66,11 @@ describe("agy_sdk config", () => {
     const agySdk = schema.properties?.agy_sdk;
     expect(agySdk).toBeDefined();
     expect(agySdk?.type).toBe("object");
+  });
+
+  it("rejects whitespace-only API keys", () => {
+    expect(AgySdkCloudProjectSchema.safeParse({ api_key: "   " }).success).toBe(false);
+    expect(AgySdkCloudProjectSchema.parse({ api_key: " key " }).api_key).toBe("key");
   });
 });
 

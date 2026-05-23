@@ -98,11 +98,26 @@ function addDescriptions(schema: Record<string, unknown>): void {
   }
 }
 
+function alignAgySdkDefaults(schema: Record<string, unknown>): void {
+  const props = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  const agySdk = props?.agy_sdk;
+  if (!agySdk) return;
+
+  delete agySdk.required;
+  const cloudProjects = agySdk.properties && (agySdk.properties as Record<string, Record<string, unknown>>).cloud_projects;
+  const cloudProject = (cloudProjects as { items?: Record<string, unknown> } | undefined)?.items;
+  if (Array.isArray(cloudProject?.required)) {
+    cloudProject.required = cloudProject.required.filter((field) => field !== "enabled");
+  }
+}
+
 const definitions = rawSchema.definitions as Record<string, Record<string, unknown>> | undefined;
 if (definitions?.AntigravityConfig) {
   addDescriptions(definitions.AntigravityConfig);
+  alignAgySdkDefaults(definitions.AntigravityConfig);
 } else {
   addDescriptions(rawSchema);
+  alignAgySdkDefaults(rawSchema);
 }
 
 mkdirSync(dirname(outputPath), { recursive: true });

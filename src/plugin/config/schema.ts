@@ -43,7 +43,7 @@ export type SchedulingMode = z.infer<typeof SchedulingModeSchema>;
 
 export const AgySdkCloudProjectSchema = z.object({
   label: z.string().optional(),
-  api_key: z.string().min(1),
+  api_key: z.string().trim().min(1, "api_key must not be empty"),
   project_id: z.string().optional(),
   enabled: z.boolean().default(true),
 });

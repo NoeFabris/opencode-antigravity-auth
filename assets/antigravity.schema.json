@@ -198,19 +198,12 @@
               }
             },
             "required": [
-              "api_key",
-              "enabled"
+              "api_key"
             ],
             "additionalProperties": false
           }
         }
       },
-      "required": [
-        "enabled",
-        "prefer_for_gemini",
-        "api_key_fallback",
-        "cloud_projects"
-      ],
       "additionalProperties": false
     },
     "model_discovery": {
