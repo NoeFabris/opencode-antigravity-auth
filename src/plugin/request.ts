@@ -782,16 +782,7 @@ export interface PrepareRequestOptions {
   fingerprint?: Fingerprint;
 }
 
-export function prepareAntigravityRequest(
-  input: RequestInfo,
-  init: RequestInit | undefined,
-  accessToken: string,
-  projectId: string,
-  endpointOverride?: string,
-  headerStyle: HeaderStyle = "antigravity",
-  forceThinkingRecovery = false,
-  options?: PrepareRequestOptions,
-): {
+interface PreparedAntigravityRequest {
   request: RequestInfo;
   init: RequestInit;
   streaming: boolean;
@@ -806,7 +797,86 @@ export function prepareAntigravityRequest(
   needsSignedThinkingWarmup?: boolean;
   headerStyle: HeaderStyle;
   thinkingRecoveryMessage?: string;
-} {
+}
+
+export function prepareAntigravityRequest(
+  input: string,
+  init: RequestInit | undefined,
+  accessToken: string,
+  projectId: string,
+  endpointOverride?: string,
+  headerStyle?: HeaderStyle,
+  forceThinkingRecovery?: boolean,
+  options?: PrepareRequestOptions,
+): PreparedAntigravityRequest;
+
+export function prepareAntigravityRequest(
+  input: Request,
+  init: RequestInit | undefined,
+  accessToken: string,
+  projectId: string,
+  endpointOverride?: string,
+  headerStyle?: HeaderStyle,
+  forceThinkingRecovery?: boolean,
+  options?: PrepareRequestOptions,
+): PreparedAntigravityRequest | Promise<PreparedAntigravityRequest>;
+
+export function prepareAntigravityRequest(
+  input: RequestInfo,
+  init: RequestInit | undefined,
+  accessToken: string,
+  projectId: string,
+  endpointOverride?: string,
+  headerStyle?: HeaderStyle,
+  forceThinkingRecovery?: boolean,
+  options?: PrepareRequestOptions,
+): PreparedAntigravityRequest | Promise<PreparedAntigravityRequest>;
+
+export function prepareAntigravityRequest(
+  input: RequestInfo,
+  init: RequestInit | undefined,
+  accessToken: string,
+  projectId: string,
+  endpointOverride?: string,
+  headerStyle: HeaderStyle = "antigravity",
+  forceThinkingRecovery = false,
+  options?: PrepareRequestOptions,
+): PreparedAntigravityRequest | Promise<PreparedAntigravityRequest> {
+  if (typeof input !== "string" && init?.body === undefined && input.body) {
+    const requestInput = input;
+    return requestInput.clone().text()
+      .then((body) => prepareAntigravityRequest(
+        requestInput.url,
+        {
+          method: requestInput.method,
+          headers: requestInput.headers,
+          signal: requestInput.signal,
+          body,
+        },
+        accessToken,
+        projectId,
+        endpointOverride,
+        headerStyle,
+        forceThinkingRecovery,
+        options,
+      ))
+      .catch(() => prepareAntigravityRequest(
+        requestInput.url,
+        {
+          method: requestInput.method,
+          headers: requestInput.headers,
+          signal: requestInput.signal,
+          body: requestInput.body,
+        },
+        accessToken,
+        projectId,
+        endpointOverride,
+        headerStyle,
+        forceThinkingRecovery,
+        options,
+      ));
+  }
+
   const requestUrl = requestInfoUrl(input);
   const requestInput = typeof input === "string" ? undefined : input;
   const baseInit: RequestInitWithDuplex = {

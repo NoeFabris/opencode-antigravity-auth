@@ -557,7 +557,7 @@ describe("request.ts", () => {
       expect(result.streaming).toBe(false);
     });
 
-    it("intercepts Request object inputs for generative language URLs", () => {
+    it("intercepts Request object inputs for generative language URLs", async () => {
       const request = new Request(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=secret",
         {
@@ -567,7 +567,7 @@ describe("request.ts", () => {
         },
       );
 
-      const result = prepareAntigravityRequest(
+      const result = await prepareAntigravityRequest(
         request,
         undefined,
         mockAccessToken,
@@ -578,6 +578,13 @@ describe("request.ts", () => {
       expect(result.request).toBe("https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent");
       expect(headers.get("Authorization")).toBe("Bearer test-token");
       expect(headers.get("x-goog-api-key")).toBeNull();
+      expect(result.init.method).toBe("POST");
+      expect(JSON.parse(String(result.init.body))).toMatchObject({
+        model: "gemini-pro",
+        request: {
+          contents: [],
+        },
+      });
     });
 
     it("detects streaming from generateStreamContent action", () => {

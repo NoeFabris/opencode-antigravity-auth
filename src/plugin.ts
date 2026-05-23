@@ -2124,7 +2124,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
 
             const runThinkingWarmup = async (
-              prepared: ReturnType<typeof prepareAntigravityRequest>,
+              prepared: Awaited<ReturnType<typeof prepareAntigravityRequest>>,
               projectId: string,
             ): Promise<void> => {
               if (!prepared.needsSignedThinkingWarmup || !prepared.sessionId) {
@@ -2283,7 +2283,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
               }
 
               try {
-                const prepared = prepareAntigravityRequest(
+                const prepared = await prepareAntigravityRequest(
                   input,
                   init,
                   accessToken,
