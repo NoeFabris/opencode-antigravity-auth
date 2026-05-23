@@ -587,6 +587,31 @@ describe("request.ts", () => {
       });
     });
 
+    it("merges Request headers with init headers while preserving init precedence", async () => {
+      const request = new Request(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "from-request",
+          },
+          body: JSON.stringify({ contents: [] }),
+        },
+      );
+
+      const result = await prepareAntigravityRequest(
+        request,
+        { headers: { "x-request-id": "from-init" } },
+        mockAccessToken,
+        mockProjectId,
+      );
+
+      const headers = new Headers(result.init.headers);
+      expect(headers.get("content-type")).toBe("application/json");
+      expect(headers.get("x-request-id")).toBe("from-init");
+    });
+
     it("detects streaming from generateStreamContent action", () => {
       const result = prepareAntigravityRequest(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:streamGenerateContent",

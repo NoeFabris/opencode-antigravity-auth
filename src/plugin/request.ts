@@ -752,6 +752,40 @@ interface RequestInitWithDuplex extends RequestInit {
   duplex?: "half";
 }
 
+function mergeRequestHeaders(requestHeaders: Headers | undefined, initHeaders: HeadersInit | undefined): Headers | undefined {
+  if (!requestHeaders && !initHeaders) return undefined;
+  const headers = new Headers(requestHeaders);
+  if (initHeaders) {
+    new Headers(initHeaders).forEach((value, key) => {
+      headers.set(key, value);
+    });
+  }
+  return headers;
+}
+
+function initFromRequest(request: Request | undefined, init: RequestInit | undefined, body?: BodyInit | null): RequestInitWithDuplex {
+  if (!request) return { ...init };
+  const merged: RequestInitWithDuplex = {
+    method: request.method,
+    body: body ?? request.body,
+    signal: request.signal,
+    redirect: request.redirect,
+    credentials: request.credentials,
+    cache: request.cache,
+    referrer: request.referrer,
+    referrerPolicy: request.referrerPolicy,
+    mode: request.mode,
+    integrity: request.integrity,
+    keepalive: request.keepalive,
+    ...init,
+    headers: mergeRequestHeaders(request.headers, init?.headers),
+  };
+  if (merged.body instanceof ReadableStream && merged.duplex === undefined) {
+    merged.duplex = "half";
+  }
+  return merged;
+}
+
 /**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
  */
@@ -847,12 +881,7 @@ export function prepareAntigravityRequest(
     return requestInput.clone().text()
       .then((body) => prepareAntigravityRequest(
         requestInput.url,
-        {
-          method: requestInput.method,
-          headers: requestInput.headers,
-          signal: requestInput.signal,
-          body,
-        },
+        initFromRequest(requestInput, init, body),
         accessToken,
         projectId,
         endpointOverride,
@@ -862,12 +891,7 @@ export function prepareAntigravityRequest(
       ))
       .catch(() => prepareAntigravityRequest(
         requestInput.url,
-        {
-          method: requestInput.method,
-          headers: requestInput.headers,
-          signal: requestInput.signal,
-          body: requestInput.body,
-        },
+        initFromRequest(requestInput, init),
         accessToken,
         projectId,
         endpointOverride,
@@ -879,16 +903,8 @@ export function prepareAntigravityRequest(
 
   const requestUrl = requestInfoUrl(input);
   const requestInput = typeof input === "string" ? undefined : input;
-  const baseInit: RequestInitWithDuplex = {
-    method: requestInput?.method,
-    body: requestInput?.body,
-    signal: requestInput?.signal,
-    ...init,
-  };
-  if (baseInit.body instanceof ReadableStream && baseInit.duplex === undefined) {
-    baseInit.duplex = "half";
-  }
-  const headers = new Headers(init?.headers ?? requestInput?.headers);
+  const baseInit = initFromRequest(requestInput, init);
+  const headers = new Headers(baseInit.headers);
   let resolvedProjectId = projectId?.trim() || "";
   let toolDebugMissing = 0;
   const toolDebugSummaries: string[] = [];
