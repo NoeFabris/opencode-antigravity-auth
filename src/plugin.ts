@@ -1615,23 +1615,33 @@ export const createAntigravityPlugin = (providerId: string) => async (
           return fallbackModels;
         }
 
+        let auth: AuthDetails | undefined;
         try {
-          const auth = cachedGetAuth ? await cachedGetAuth() : context.auth;
-          const [geminiModels, antigravityModels] = await Promise.all([
-            modelsFromAgySdkCredentials(config, auth),
-            modelsFromOAuthAuth(config, auth, client, providerId),
-          ]);
-
-          return normalizeProviderHookModels(
-            providerId,
-            provider,
-            mergeModelDefinitions(fallbackModels, geminiModels, antigravityModels),
-            fallbackModels,
-          );
+          auth = cachedGetAuth ? await cachedGetAuth() : context.auth;
         } catch (error) {
           log.debug("model-discovery-fallback", { error: error instanceof Error ? error.message : String(error) });
           return fallbackModels;
         }
+        const [geminiResult, antigravityResult] = await Promise.allSettled([
+          modelsFromAgySdkCredentials(config, auth),
+          modelsFromOAuthAuth(config, auth, client, providerId),
+        ]);
+
+        const geminiModels = geminiResult.status === "fulfilled" ? geminiResult.value : {};
+        const antigravityModels = antigravityResult.status === "fulfilled" ? antigravityResult.value : {};
+        if (geminiResult.status === "rejected" || antigravityResult.status === "rejected") {
+          log.debug("model-discovery-partial-fallback", {
+            geminiError: geminiResult.status === "rejected" ? String(geminiResult.reason) : undefined,
+            antigravityError: antigravityResult.status === "rejected" ? String(antigravityResult.reason) : undefined,
+          });
+        }
+
+        return normalizeProviderHookModels(
+          providerId,
+          provider,
+          mergeModelDefinitions(fallbackModels, geminiModels, antigravityModels),
+          fallbackModels,
+        );
       },
     },
     auth: {

@@ -94,6 +94,30 @@ describe("dynamic model discovery helpers", () => {
     expect(models["text-embedding-004"]).toBeUndefined();
   });
 
+  it("keeps Gemini models.list resource names distinct from shared base aliases", () => {
+    const models = modelsFromGeminiApi([
+      {
+        name: "models/gemini-2.5-flash-001",
+        baseModelId: "gemini-2.5-flash",
+        displayName: "Gemini 2.5 Flash 001",
+        inputTokenLimit: 1000,
+        outputTokenLimit: 2000,
+        supportedGenerationMethods: ["generateContent"],
+      },
+      {
+        name: "models/gemini-2.5-flash-002",
+        baseModelId: "gemini-2.5-flash",
+        displayName: "Gemini 2.5 Flash 002",
+        inputTokenLimit: 3000,
+        outputTokenLimit: 4000,
+        supportedGenerationMethods: ["generateContent"],
+      },
+    ]);
+
+    expect(models["gemini-2.5-flash-001"]?.limit).toEqual({ context: 1000, output: 2000 });
+    expect(models["gemini-2.5-flash-002"]?.limit).toEqual({ context: 3000, output: 4000 });
+  });
+
   it("converts Antigravity available models while preserving curated variants", () => {
     const models = modelsFromAntigravityAvailableModels({
       "gemini-3-flash": {

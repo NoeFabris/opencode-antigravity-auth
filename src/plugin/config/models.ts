@@ -199,7 +199,7 @@ export function modelsFromGeminiApi(models: GeminiApiModel[]): OpencodeModelDefi
 
   for (const model of models) {
     if (!supportsGeminiGeneration(model)) continue;
-    const modelId = model.baseModelId || modelIdFromGeminiName(model.name);
+    const modelId = modelIdFromGeminiName(model.name) || model.baseModelId;
     if (!modelId) continue;
 
     const discovered: OpencodeModelDefinition = {
