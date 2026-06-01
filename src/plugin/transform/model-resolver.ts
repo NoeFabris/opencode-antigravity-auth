@@ -48,6 +48,13 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-3-flash-medium": "gemini-3-flash",
   "gemini-3-flash-high": "gemini-3-flash",
 
+  // Gemini 3.5 Flash — Antigravity backend requires suffixed model name
+  "gemini-3.5-flash": "gemini-3.5-flash-low",
+  "gemini-3.5-flash-low": "gemini-3.5-flash-low",
+  "gemini-3.5-flash-minimal": "gemini-3.5-flash-low",
+  "gemini-3.5-flash-medium": "gemini-3.5-flash-low",
+  "gemini-3.5-flash-high": "gemini-3-flash-agent",
+
   // Claude proxy names (gemini- prefix for compatibility)
   "gemini-claude-opus-4-6-thinking-low": "claude-opus-4-6-thinking",
   "gemini-claude-opus-4-6-thinking-medium": "claude-opus-4-6-thinking",
@@ -187,6 +194,8 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   if (skipAlias) {
     if (isGemini3Pro && !tier && !isImageModel) {
       antigravityModel = `${modelWithoutQuota}-low`;
+    } else if (isGemini3Flash && modelWithoutQuota.includes("3.5")) {
+      antigravityModel = tier === "high" ? "gemini-3-flash-agent" : `${baseName}-low`;
     } else if (isGemini3Flash && tier) {
       antigravityModel = baseName;
     }
