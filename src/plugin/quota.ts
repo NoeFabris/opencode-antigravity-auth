@@ -147,9 +147,11 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): Quot
       remainingFraction !== undefined &&
       (existing?.remainingFraction === undefined || remainingFraction > existing.remainingFraction);
     const nextRemaining = useCurrentQuota ? remainingFraction : existing?.remainingFraction;
-    const nextResetTime = useCurrentQuota
-      ? resetTime
-      : existing?.resetTime ?? (resetTimestamp === null ? undefined : resetTime);
+    const existingResetTimestamp = parseResetTime(existing?.resetTime);
+    const nextResetTime =
+      resetTimestamp !== null && (existingResetTimestamp === null || resetTimestamp < existingResetTimestamp)
+        ? resetTime
+        : existing?.resetTime;
 
     groups[group] = {
       remainingFraction: nextRemaining,
