@@ -70,6 +70,7 @@ const TIER_REGEX = /-(minimal|low|medium|high)$/;
 const QUOTA_PREFIX_REGEX = /^antigravity-/i;
 const GEMINI_3_PRO_REGEX = /^gemini-3(?:\.\d+)?-pro/i;
 const GEMINI_3_FLASH_REGEX = /^gemini-3(?:\.\d+)?-flash/i;
+const GEMINI_3_5_FLASH_REGEX = /^gemini-3\.5-flash/i;
 
 // ANTIGRAVITY_ONLY_MODELS removed - all models now default to antigravity
 
@@ -194,7 +195,7 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   if (skipAlias) {
     if (isGemini3Pro && !tier && !isImageModel) {
       antigravityModel = `${modelWithoutQuota}-low`;
-    } else if (isGemini3Flash && modelWithoutQuota.includes("3.5")) {
+    } else if (isGemini3Flash && GEMINI_3_5_FLASH_REGEX.test(modelWithoutQuota)) {
       antigravityModel = tier === "high" ? "gemini-3-flash-agent" : `${baseName}-low`;
     } else if (isGemini3Flash && tier) {
       antigravityModel = baseName;
