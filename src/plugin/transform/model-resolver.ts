@@ -309,6 +309,28 @@ function budgetToGemini3Level(budget: number): "low" | "medium" | "high" {
 }
 
 /**
+ * Antigravity routes Gemini 3.5 Flash "high" thinking to a distinct backend
+ * model id (gemini-3-flash-agent); every other level stays on gemini-3.5-flash-low.
+ *
+ * The thinking level can arrive either via a model-name suffix (handled in
+ * resolveModelWithTier) OR via providerOptions/thinkingBudget, which is resolved
+ * later. Callers that learn the final level after model resolution must re-apply
+ * this so the backend model id matches the level.
+ *
+ * Idempotent: ids that aren't gemini-3.5-flash (including an already-resolved
+ * gemini-3-flash-agent) are returned unchanged.
+ */
+export function resolveGemini35FlashModelForLevel(
+  actualModel: string,
+  level: string | undefined,
+): string {
+  if (!GEMINI_3_5_FLASH_REGEX.test(actualModel)) {
+    return actualModel;
+  }
+  return level === "high" ? "gemini-3-flash-agent" : actualModel;
+}
+
+/**
  * Resolves model name for a specific headerStyle (quota fallback support).
  * Transforms model names when switching between gemini-cli and antigravity quotas.
  * 
@@ -402,6 +424,9 @@ export function resolveModelWithVariant(
     if (isAntigravityGemini3Pro) {
       const baseModel = base.actualModel.replace(/-(low|medium|high)$/, "");
       actualModel = `${baseModel}-${level}`;
+    } else {
+      // Gemini 3.5 Flash "high" needs the gemini-3-flash-agent backend id.
+      actualModel = resolveGemini35FlashModelForLevel(actualModel, level);
     }
 
     return {

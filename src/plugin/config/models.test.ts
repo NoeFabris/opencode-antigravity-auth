@@ -20,6 +20,7 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       "antigravity-gemini-3-flash",
       "antigravity-gemini-3-pro",
       "antigravity-gemini-3.1-pro",
+      "antigravity-gemini-3.5-flash",
       "gemini-2.5-flash",
       "gemini-2.5-pro",
       "gemini-3-flash-preview",

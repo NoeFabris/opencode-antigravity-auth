@@ -63,6 +63,7 @@ import {
   resolveModelWithTier,
   resolveModelWithVariant,
   resolveModelForHeaderStyle,
+  resolveGemini35FlashModelForLevel,
   isClaudeModel,
   isClaudeThinkingModel,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
@@ -939,6 +940,11 @@ export function prepareAntigravityRequest(
             tierThinkingLevel = undefined;
           }
         }
+
+        // Gemini 3.5 Flash "high" needs a distinct backend model id
+        // (gemini-3-flash-agent). The thinking level may have just been set from
+        // providerOptions above, so re-derive the model id from the final level.
+        effectiveModel = resolveGemini35FlashModelForLevel(effectiveModel, tierThinkingLevel);
 
         if (isClaude) {
           if (!requestPayload.toolConfig) {
