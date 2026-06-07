@@ -196,6 +196,7 @@ describe("resolveModelWithTier", () => {
       const result = resolveModelWithTier("antigravity-gemini-3.5-flash-high");
       expect(result.actualModel).toBe("gemini-3-flash-agent");
       expect(result.thinkingLevel).toBe("high");
+      expect(result.explicitQuota).toBe(true);
     });
   });
 });

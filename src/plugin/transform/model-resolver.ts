@@ -48,9 +48,10 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-3-flash-medium": "gemini-3-flash",
   "gemini-3-flash-high": "gemini-3-flash",
 
-  // Gemini 3.5 Flash — Antigravity backend requires suffixed model name
+  // Gemini 3.5 Flash — Antigravity backend requires suffixed model name.
+  // "gemini-3.5-flash-low" resolution is handled by the baseName fallback below
+  // (MODEL_ALIASES[modelWithoutQuota] || MODEL_ALIASES[baseName]).
   "gemini-3.5-flash": "gemini-3.5-flash-low",
-  "gemini-3.5-flash-low": "gemini-3.5-flash-low",
   "gemini-3.5-flash-minimal": "gemini-3.5-flash-low",
   "gemini-3.5-flash-medium": "gemini-3.5-flash-low",
   "gemini-3.5-flash-high": "gemini-3-flash-agent",
@@ -317,17 +318,21 @@ function budgetToGemini3Level(budget: number): "low" | "medium" | "high" {
  * later. Callers that learn the final level after model resolution must re-apply
  * this so the backend model id matches the level.
  *
- * Idempotent: ids that aren't gemini-3.5-flash (including an already-resolved
- * gemini-3-flash-agent) are returned unchanged.
+ * Recognizes both gemini-3.5-flash* variants and the already-resolved
+ * gemini-3-flash-agent id — so variant overrides can downgrade an agent
+ * reference back to gemini-3.5-flash-low when level ≠ "high".
  */
 export function resolveGemini35FlashModelForLevel(
   actualModel: string,
   level: string | undefined,
 ): string {
-  if (!GEMINI_3_5_FLASH_REGEX.test(actualModel)) {
+  const isGemini35Flash = GEMINI_3_5_FLASH_REGEX.test(actualModel);
+  const isGemini35Agent = actualModel === "gemini-3-flash-agent";
+  if (!isGemini35Flash && !isGemini35Agent) {
     return actualModel;
   }
-  return level === "high" ? "gemini-3-flash-agent" : actualModel;
+  if (level === "high") return "gemini-3-flash-agent";
+  return "gemini-3.5-flash-low";
 }
 
 /**
