@@ -1450,7 +1450,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
       }
 
       return {
-        apiKey: "",
+        apiKey: "antigravity-oauth",
         async fetch(input, init) {
           if (!isGenerativeLanguageRequest(input)) {
             return fetch(input, init);
@@ -3449,3 +3449,4 @@ export const __testExports = {
   resolveHeaderRoutingDecision,
   resolveQuotaFallbackHeaderStyle,
 };
+
