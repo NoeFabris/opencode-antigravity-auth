@@ -28,6 +28,14 @@ const MAX_QUOTA_ACCOUNTS = 10;
 
 export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash";
 
+export interface QuotaModelSummary {
+  modelId: string;
+  displayName?: string;
+  group: QuotaGroup;
+  remainingFraction?: number;
+  resetTime?: string;
+}
+
 export interface QuotaGroupSummary {
   remainingFraction?: number;
   resetTime?: string;
@@ -36,6 +44,7 @@ export interface QuotaGroupSummary {
 
 export interface QuotaSummary {
   groups: Partial<Record<QuotaGroup, QuotaGroupSummary>>;
+  models: QuotaModelSummary[];
   modelCount: number;
   error?: string;
 }
@@ -139,9 +148,10 @@ function classifyQuotaGroup(modelName: string, displayName?: string): QuotaGroup
 function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): QuotaSummary {
   const groups: Partial<Record<QuotaGroup, QuotaGroupSummary>> = {};
   if (!models) {
-    return { groups, modelCount: 0 };
+    return { groups, models: [], modelCount: 0 };
   }
 
+  const modelSummaries: QuotaModelSummary[] = [];
   let totalCount = 0;
   for (const [modelName, entry] of Object.entries(models)) {
     const group = classifyQuotaGroup(modelName, entry.displayName ?? entry.modelName);
@@ -156,6 +166,13 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): Quot
     const resetTimestamp = parseResetTime(resetTime);
 
     totalCount += 1;
+    modelSummaries.push({
+      modelId: modelName,
+      displayName: entry.displayName ?? entry.modelName,
+      group,
+      remainingFraction,
+      resetTime,
+    });
 
     const existing = groups[group];
     const nextCount = (existing?.modelCount ?? 0) + 1;
@@ -185,7 +202,9 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>): Quot
     };
   }
 
-  return { groups, modelCount: totalCount };
+  modelSummaries.sort((a, b) => (a.displayName ?? a.modelId).localeCompare(b.displayName ?? b.modelId));
+
+  return { groups, models: modelSummaries, modelCount: totalCount };
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
@@ -387,7 +406,7 @@ async function checkSingleAccountQuota(
 
   const quotaResult: QuotaSummary =
     antigravityResponse.models === undefined
-      ? { groups: {}, modelCount: 0, error: "Failed to fetch Antigravity quota" }
+      ? { groups: {}, models: [], modelCount: 0, error: "Failed to fetch Antigravity quota" }
       : aggregateQuota(antigravityResponse.models);
 
   const geminiCliQuotaResult = aggregateGeminiCliQuota(geminiCliResponse);

@@ -30,7 +30,20 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
   }
 }
 
-export type LoginMode = "add" | "fresh" | "manage" | "check" | "verify" | "verify-all" | "cancel";
+export type LoginMode = "add" | "fresh" | "manage" | "check" | "routing" | "verify" | "verify-all" | "cancel";
+
+export interface AccountRoutingEntry {
+  model: string;
+  normalizedModel: string;
+  email: string;
+  quotaModels?: Array<{ modelId: string; displayName?: string; remainingFraction?: number; resetTime?: string }>;
+  quotaError?: string;
+}
+
+export interface AccountRoutingInfo {
+  strict: boolean;
+  entries: AccountRoutingEntry[];
+}
 
 export interface ExistingAccountInfo {
   email?: string;
@@ -40,6 +53,8 @@ export interface ExistingAccountInfo {
   status?: AccountStatus;
   isCurrentAccount?: boolean;
   enabled?: boolean;
+  cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
+  cachedQuotaUpdatedAt?: number;
 }
 
 export interface LoginMenuResult {
@@ -52,7 +67,93 @@ export interface LoginMenuResult {
   deleteAll?: boolean;
 }
 
-async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
+export function showAccountRouting(accounts: ExistingAccountInfo[], routing?: AccountRoutingInfo): void {
+  console.log("\nAccount routing");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  if (!routing || routing.entries.length === 0) {
+    console.log("No model_account_affinity entries configured.\n");
+    return;
+  }
+
+  console.log(`Strict mode: ${routing.strict ? "enabled" : "disabled"}`);
+  console.log("");
+
+  for (const entry of routing.entries) {
+    const account = accounts.find((candidate) => candidate.email?.toLowerCase() === entry.email.toLowerCase());
+    const accountStatus = account
+      ? account.enabled === false
+        ? "disabled"
+        : account.status ?? "unknown"
+      : "not configured";
+    const accountLabel = account ? `${entry.email} (#${account.index + 1})` : entry.email;
+    const quotaGroup = getQuotaGroupForModel(entry.normalizedModel);
+    const quota = account?.cachedQuota?.[quotaGroup];
+
+    console.log(`Model:      ${entry.model}`);
+    console.log(`Normalized: ${entry.normalizedModel}`);
+    console.log(`Account:    ${accountLabel}`);
+    console.log(`Status:     ${accountStatus}`);
+    console.log(`Quota:      ${formatQuota(quota, account?.cachedQuotaUpdatedAt)}`);
+    if (entry.quotaError) {
+      console.log(`Quota API:  ${entry.quotaError}`);
+    }
+    if (entry.quotaModels && entry.quotaModels.length > 0) {
+      console.log("Model quota:");
+      for (const modelQuota of entry.quotaModels) {
+        const name = modelQuota.displayName ?? modelQuota.modelId;
+        console.log(`  ${name}`);
+        console.log(`  ${formatUsageBar(modelQuota.remainingFraction)}`);
+        console.log(`  ${formatQuotaAvailability(modelQuota.remainingFraction, modelQuota.resetTime)}`);
+      }
+    }
+    console.log("");
+  }
+}
+
+function getQuotaGroupForModel(model: string): "claude" | "gemini-flash" | "gemini-pro" {
+  const lower = model.toLowerCase();
+  if (lower.includes("claude")) return "claude";
+  if (lower.includes("flash")) return "gemini-flash";
+  return "gemini-pro";
+}
+
+function formatQuota(
+  quota: { remainingFraction?: number; resetTime?: string; modelCount: number } | undefined,
+  updatedAt: number | undefined,
+): string {
+  if (!quota) {
+    return "not checked yet";
+  }
+  const remaining = typeof quota.remainingFraction === "number"
+    ? `${Math.round(quota.remainingFraction * 100)}% remaining`
+    : "remaining unknown";
+  const reset = quota.resetTime ? `, resets ${quota.resetTime}` : "";
+  const updated = updatedAt ? `, checked ${new Date(updatedAt).toLocaleString()}` : "";
+  return `${remaining}${reset}${updated}`;
+}
+
+function formatUsageBar(remainingFraction: number | undefined): string {
+  if (typeof remainingFraction !== "number") {
+    return "░░░░░░░░░░░ ░░░░░░░░░░░ ░░░░░░░░░░░ ░░░░░░░░░░░ ░░░░░░░░░░░ ???";
+  }
+  const clamped = Math.max(0, Math.min(1, remainingFraction));
+  const filledSegments = Math.round(clamped * 5);
+  const segments = Array.from({ length: 5 }, (_, index) => index < filledSegments ? "███████████" : "░░░░░░░░░░░");
+  return `${segments.join(" ")} ${Math.round(clamped * 100)}%`;
+}
+
+function formatQuotaAvailability(remainingFraction: number | undefined, resetTime: string | undefined): string {
+  if (typeof remainingFraction !== "number") {
+    return resetTime ? `Quota unknown, resets ${resetTime}` : "Quota unknown";
+  }
+  if (remainingFraction <= 0) {
+    return resetTime ? `Quota exhausted, resets ${resetTime}` : "Quota exhausted";
+  }
+  return "Quota available";
+}
+
+async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[], routing?: AccountRoutingInfo): Promise<LoginMenuResult> {
   const rl = createInterface({ input, output });
   try {
     console.log(`\n${existingAccounts.length} account(s) saved:`);
@@ -63,7 +164,7 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
     console.log("");
 
     while (true) {
-      const answer = await rl.question("(a)dd new, (f)resh start, (c)heck quotas, (v)erify account, (va) verify all? [a/f/c/v/va]: ");
+      const answer = await rl.question("(a)dd new, (f)resh start, (c)heck quotas, (r)outing, (v)erify account, (va) verify all? [a/f/c/r/v/va]: ");
       const normalized = answer.trim().toLowerCase();
 
       if (normalized === "a" || normalized === "add") {
@@ -75,6 +176,9 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
       if (normalized === "c" || normalized === "check") {
         return { mode: "check" };
       }
+      if (normalized === "r" || normalized === "routing") {
+        return { mode: "routing" };
+      }
       if (normalized === "v" || normalized === "verify") {
         return { mode: "verify" };
       }
@@ -82,16 +186,16 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
         return { mode: "verify-all", verifyAll: true };
       }
 
-      console.log("Please enter 'a', 'f', 'c', 'v', or 'va'.");
+      console.log("Please enter 'a', 'f', 'c', 'r', 'v', or 'va'.");
     }
   } finally {
     rl.close();
   }
 }
 
-export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
+export async function promptLoginMode(existingAccounts: ExistingAccountInfo[], routing?: AccountRoutingInfo): Promise<LoginMenuResult> {
   if (!isTTY()) {
-    return promptLoginModeFallback(existingAccounts);
+    return promptLoginModeFallback(existingAccounts, routing);
   }
 
   const accounts: AccountInfo[] = existingAccounts.map(acc => ({
@@ -152,9 +256,23 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         continue;
       }
 
+      case "view-routing": {
+        return { mode: "routing" };
+      }
+
       case "cancel":
         return { mode: "cancel" };
     }
+  }
+}
+
+export async function promptContinue(): Promise<void> {
+  if (!isTTY()) return;
+  const rl = createInterface({ input, output });
+  try {
+    await rl.question("Press Enter to continue...");
+  } finally {
+    rl.close();
   }
 }
 

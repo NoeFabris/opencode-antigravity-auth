@@ -11,7 +11,7 @@ import {
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import { promptAddAnotherAccount, promptContinue, promptLoginMode, promptProjectId, showAccountRouting } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
   startAntigravityDebugRequest, 
@@ -2568,10 +2568,45 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     status,
                     isCurrentAccount: idx === (existingStorage.activeIndex ?? 0),
                     enabled: acc.enabled !== false,
+                    cachedQuota: acc.cachedQuota,
+                    cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
                   };
                 });
                 
-                menuResult = await promptLoginMode(existingAccounts);
+                const accountRouting = {
+                  strict: config.account_affinity_strict,
+                  entries: Object.entries(config.model_account_affinity).map(([configuredModel, email]) => ({
+                    model: configuredModel,
+                    normalizedModel: normalizeModelAccountAffinityKey(configuredModel),
+                    email,
+                  })),
+                };
+
+                menuResult = await promptLoginMode(existingAccounts, accountRouting);
+
+                if (menuResult.mode === "routing") {
+                  console.log("\nChecking account routing and quota...\n");
+                  const quotaResults = await checkAccountsQuota(existingStorage.accounts, client, providerId);
+                  const quotaByEmail = new Map(
+                    quotaResults
+                      .filter((result) => result.email)
+                      .map((result) => [result.email!.toLowerCase(), result]),
+                  );
+                  const routingWithQuota = {
+                    strict: config.account_affinity_strict,
+                    entries: accountRouting.entries.map((entry) => {
+                      const quotaResult = quotaByEmail.get(entry.email.toLowerCase());
+                      return {
+                        ...entry,
+                        quotaModels: quotaResult?.quota?.models,
+                        quotaError: quotaResult?.error ?? quotaResult?.quota?.error,
+                      };
+                    }),
+                  };
+                  showAccountRouting(existingAccounts, routingWithQuota);
+                  await promptContinue();
+                  continue;
+                }
 
                 if (menuResult.mode === "check") {
                   console.log("\n📊 Checking quotas for all accounts...\n");

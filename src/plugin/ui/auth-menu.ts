@@ -22,6 +22,7 @@ export type AuthMenuAction =
   | { type: 'verify' }
   | { type: 'verify-all' }
   | { type: 'configure-models' }
+  | { type: 'view-routing' }
   | { type: 'cancel' };
 
 export type AccountAction = 'back' | 'delete' | 'refresh' | 'toggle' | 'verify' | 'cancel';
@@ -58,6 +59,7 @@ export async function showAuthMenu(accounts: AccountInfo[]): Promise<AuthMenuAct
     { label: 'Check quotas', value: { type: 'check' }, color: 'cyan' },
     { label: 'Verify one account', value: { type: 'verify' }, color: 'cyan' },
     { label: 'Verify all accounts', value: { type: 'verify-all' }, color: 'cyan' },
+    { label: 'View account routing', value: { type: 'view-routing' }, color: 'cyan' },
     { label: 'Configure models in opencode.json', value: { type: 'configure-models' }, color: 'cyan' },
 
     { label: '', value: { type: 'cancel' }, separator: true },
