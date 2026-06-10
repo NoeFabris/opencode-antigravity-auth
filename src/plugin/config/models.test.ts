@@ -18,23 +18,18 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       "antigravity-claude-opus-4-6-thinking",
       "antigravity-claude-sonnet-4-6",
       "antigravity-gemini-3-flash",
-      "antigravity-gemini-3-pro",
       "antigravity-gemini-3.1-pro",
+      "antigravity-gemini-3.5-flash-low",
       "gemini-2.5-flash",
       "gemini-2.5-pro",
       "gemini-3-flash-preview",
-      "gemini-3-pro-preview",
       "gemini-3.1-pro-preview",
       "gemini-3.1-pro-preview-customtools",
+      "gemini-3.5-flash",
     ]);
   });
 
   it("defines Gemini 3 variants for Antigravity models", () => {
-    expect(getModel("antigravity-gemini-3-pro").variants).toEqual({
-      low: { thinkingLevel: "low" },
-      high: { thinkingLevel: "high" },
-    });
-
     expect(getModel("antigravity-gemini-3.1-pro").variants).toEqual({
       low: { thinkingLevel: "low" },
       high: { thinkingLevel: "high" },
@@ -53,5 +48,12 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       low: { thinkingConfig: { thinkingBudget: 8192 } },
       max: { thinkingConfig: { thinkingBudget: 32768 } },
     });
+  });
+
+  it("does not expose stale unavailable model IDs", () => {
+    expect(OPENCODE_MODEL_DEFINITIONS["antigravity-gemini-3-pro"]).toBeUndefined();
+    expect(OPENCODE_MODEL_DEFINITIONS["gemini-3-pro-preview"]).toBeUndefined();
+    expect(Object.keys(OPENCODE_MODEL_DEFINITIONS).some((name) => name.includes("claude-sonnet-4-5"))).toBe(false);
+    expect(Object.keys(OPENCODE_MODEL_DEFINITIONS).some((name) => name.includes("claude-opus-4-5"))).toBe(false);
   });
 });
