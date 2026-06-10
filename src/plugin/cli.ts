@@ -36,7 +36,13 @@ export interface AccountRoutingEntry {
   model: string;
   normalizedModel: string;
   email: string;
-  quotaModels?: Array<{ modelId: string; displayName?: string; remainingFraction?: number; resetTime?: string }>;
+  quotaModels?: Array<{
+    modelId: string;
+    displayName?: string;
+    group?: "claude" | "gemini-flash" | "gemini-pro";
+    remainingFraction?: number;
+    resetTime?: string;
+  }>;
   quotaError?: string;
 }
 
@@ -88,7 +94,7 @@ export function showAccountRouting(accounts: ExistingAccountInfo[], routing?: Ac
       : "not configured";
     const accountLabel = account ? `${entry.email} (#${account.index + 1})` : entry.email;
     const quotaGroup = getQuotaGroupForModel(entry.normalizedModel);
-    const quota = account?.cachedQuota?.[quotaGroup];
+    const quota = summarizeLiveQuota(entry.quotaModels, quotaGroup) ?? account?.cachedQuota?.[quotaGroup];
 
     console.log(`Model:      ${entry.model}`);
     console.log(`Normalized: ${entry.normalizedModel}`);
@@ -109,6 +115,22 @@ export function showAccountRouting(accounts: ExistingAccountInfo[], routing?: Ac
     }
     console.log("");
   }
+}
+
+function summarizeLiveQuota(
+  quotaModels: AccountRoutingEntry["quotaModels"],
+  quotaGroup: "claude" | "gemini-flash" | "gemini-pro",
+): { remainingFraction?: number; resetTime?: string; modelCount: number } | undefined {
+  const matchingModels = quotaModels?.filter((model) => model.group === quotaGroup) ?? [];
+  if (matchingModels.length === 0) {
+    return undefined;
+  }
+
+  return {
+    remainingFraction: Math.max(...matchingModels.map((model) => model.remainingFraction ?? 0)),
+    resetTime: matchingModels.find((model) => model.resetTime)?.resetTime,
+    modelCount: matchingModels.length,
+  };
 }
 
 function getQuotaGroupForModel(model: string): "claude" | "gemini-flash" | "gemini-pro" {
