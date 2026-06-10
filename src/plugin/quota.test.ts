@@ -15,15 +15,28 @@ vi.mock("./auth.ts", () => ({
       refreshToken: string
       projectId?: string
       managedProjectId?: string
-    }) => [refreshToken, projectId ?? "", managedProjectId ?? ""].join("|"),
+    }) => {
+      const parts: Record<string, string> = { r: refreshToken }
+      if (projectId) parts.p = projectId
+      if (managedProjectId) parts.m = managedProjectId
+      return JSON.stringify(parts)
+    },
   ),
   parseRefreshParts: vi.fn((refresh: string) => {
-    const [refreshToken = "", projectId = "", managedProjectId = ""] = refresh.split("|")
-    return {
-      refreshToken,
-      projectId: projectId || undefined,
-      managedProjectId: managedProjectId || undefined,
+    try {
+      const parsed = JSON.parse(refresh) as Record<string, string>
+      if (parsed && typeof parsed.r === "string") {
+        return {
+          refreshToken: parsed.r,
+          projectId: parsed.p || undefined,
+          managedProjectId: parsed.m || undefined,
+        }
+      }
+    } catch {
+      // fall through to legacy
     }
+    const [refreshToken = "", projectId = "", managedProjectId = ""] = refresh.split("|")
+    return { refreshToken, projectId: projectId || undefined, managedProjectId: managedProjectId || undefined }
   }),
 }))
 
@@ -38,6 +51,7 @@ vi.mock("./project.ts", () => ({
 vi.mock("./debug.ts", () => ({
   logQuotaFetch: vi.fn(),
   logQuotaStatus: vi.fn(),
+  logSubscriptionTier: vi.fn(),
 }))
 
 vi.mock("../constants.ts", () => ({
@@ -136,7 +150,14 @@ describe("checkAccountsQuota", () => {
 
   it("returns error for failed account without affecting successful ones", async () => {
     vi.mocked(ensureProjectContext).mockImplementation(async (auth) => {
-      const token = auth.refresh.split("|")[0] ?? ""
+      const token = (() => {
+        try {
+          const parsed = JSON.parse(auth.refresh) as Record<string, string>
+          return parsed.r ?? auth.refresh
+        } catch {
+          return auth.refresh.split("|")[0] ?? ""
+        }
+      })()
       if (token === "bad-token") {
         throw new Error("project context failed")
       }
@@ -221,8 +242,15 @@ describe("checkAccountsQuota", () => {
     const resolutionOrder: string[] = []
     const resolvers = new Map<string, () => void>()
 
-    vi.mocked(ensureProjectContext).mockImplementation(async (auth) => {
-      const email = auth.refresh.split("|")[0] ?? "unknown"
+      vi.mocked(ensureProjectContext).mockImplementation(async (auth) => {
+        const email = (() => {
+          try {
+            const parsed = JSON.parse(auth.refresh) as Record<string, string>
+            return parsed.r ?? auth.refresh
+          } catch {
+            return auth.refresh.split("|")[0] ?? "unknown"
+          }
+        })()
       await new Promise<void>((resolve) => resolvers.set(email, resolve))
       resolutionOrder.push(email)
       return {

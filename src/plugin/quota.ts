@@ -1,10 +1,12 @@
 import {
+  ANTIGRAVITY_ENDPOINT_FALLBACKS,
+  ANTIGRAVITY_LOAD_ENDPOINTS,
   ANTIGRAVITY_ENDPOINT_PROD,
   getAntigravityHeaders,
   ANTIGRAVITY_PROVIDER_ID,
 } from "../constants";
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./auth";
-import { logQuotaFetch, logQuotaStatus } from "./debug";
+import { logQuotaFetch, logQuotaStatus, logSubscriptionTier } from "./debug";
 import { ensureProjectContext } from "./project";
 import { refreshAccessToken } from "./token";
 import { getModelFamily } from "./transform/model-resolver";
@@ -12,6 +14,17 @@ import type { PluginClient, OAuthAuthDetails } from "./types";
 import type { AccountMetadataV3 } from "./storage";
 
 const FETCH_TIMEOUT_MS = 10000;
+
+/**
+ * Per-account wall-clock budget for the full quota check cycle:
+ * token refresh + project context + two API calls.
+ * Sized for slow networks with two sequential network roundtrips before the
+ * parallel fetch pair, plus FETCH_TIMEOUT_MS for each of the two parallel calls.
+ */
+const ACCOUNT_QUOTA_TIMEOUT_MS = 45_000;
+
+/** Hard cap on concurrent quota checks. Matches MAX_OAUTH_ACCOUNTS in plugin.ts. */
+const MAX_QUOTA_ACCOUNTS = 10;
 
 export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash";
 
@@ -59,6 +72,7 @@ export interface AccountQuotaResult {
   disabled?: boolean;
   quota?: QuotaSummary;
   geminiCliQuota?: GeminiCliQuotaSummary;
+  subscriptionTier?: SubscriptionTier;
   updatedAccount?: AccountMetadataV3;
 }
 
@@ -112,8 +126,10 @@ function classifyQuotaGroup(modelName: string, displayName?: string): QuotaGroup
   if (combined.includes("claude")) {
     return "claude";
   }
-  const isGemini3 = combined.includes("gemini-3") || combined.includes("gemini 3");
-  if (!isGemini3) {
+  // Gemini 3.x (but NOT 3.5 — 3.5 has separate logic below)
+  const isGemini3Not35 = /gemini-3(?!\.5)/i.test(combined);
+  const isGemini35 = /gemini-3\.5/i.test(combined);
+  if (!isGemini3Not35 && !isGemini35) {
     return null;
   }
   const family = getModelFamily(modelName);
@@ -186,68 +202,74 @@ async function fetchAvailableModels(
   accessToken: string,
   projectId: string,
 ): Promise<FetchAvailableModelsResponse> {
-  const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
-  const quotaUserAgent = getAntigravityHeaders()["User-Agent"] || "antigravity/windows/amd64";
-  const errors: string[] = [];
+  const quotaUserAgent = getAntigravityHeaders()["User-Agent"] || "antigravity/windows/amd64"
+  const errors: string[] = []
 
-  const body = projectId ? { project: projectId } : {};
-  const response = await fetchWithTimeout(`${endpoint}/v1internal:fetchAvailableModels`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "User-Agent": quotaUserAgent,
-    },
-    body: JSON.stringify(body),
-  });
+  const body = projectId ? { project: projectId } : {}
 
-  if (response.ok) {
-    return (await response.json()) as FetchAvailableModelsResponse;
+  for (const endpoint of ANTIGRAVITY_ENDPOINT_FALLBACKS) {
+    try {
+      const response = await fetchWithTimeout(`${endpoint}/v1internal:fetchAvailableModels`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "User-Agent": quotaUserAgent,
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (response.ok) {
+        return (await response.json()) as FetchAvailableModelsResponse
+      }
+
+      const message = await response.text().catch(() => "")
+      const snippet = message.trim().slice(0, 200)
+      errors.push(
+        `fetchAvailableModels ${response.status} at ${endpoint}${snippet ? `: ${snippet}` : ""}`,
+      )
+    } catch (error) {
+      errors.push(`fetchAvailableModels error at ${endpoint}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
-  const message = await response.text().catch(() => "");
-  const snippet = message.trim().slice(0, 200);
-  errors.push(
-    `fetchAvailableModels ${response.status} at ${endpoint}${snippet ? `: ${snippet}` : ""}`,
-  );
-
-  throw new Error(errors.join("; ") || "fetchAvailableModels failed");
+  throw new Error(errors.join("; ") || "fetchAvailableModels failed on all endpoints")
 }
 
 async function fetchGeminiCliQuota(
   accessToken: string,
   projectId: string,
 ): Promise<RetrieveUserQuotaResponse> {
-  const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
-  // Use Gemini CLI user-agent to get CLI quota buckets (not Antigravity buckets)
-  const platform = process.platform || "darwin";
-  const arch = process.arch || "arm64";
-  const geminiCliUserAgent = `GeminiCLI/1.0.0/gemini-2.5-pro (${platform}; ${arch})`;
+  const platform = process.platform || "darwin"
+  const arch = process.arch || "arm64"
+  const geminiCliUserAgent = `GeminiCLI/1.0.0/gemini-2.5-pro (${platform}; ${arch})`
 
-  const body = projectId ? { project: projectId } : {};
+  const body = projectId ? { project: projectId } : {}
   
-  try {
-    const response = await fetchWithTimeout(`${endpoint}/v1internal:retrieveUserQuota`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        "User-Agent": geminiCliUserAgent,
-      },
-      body: JSON.stringify(body),
-    });
+  for (const endpoint of ANTIGRAVITY_ENDPOINT_FALLBACKS) {
+    try {
+      const response = await fetchWithTimeout(`${endpoint}/v1internal:retrieveUserQuota`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "User-Agent": geminiCliUserAgent,
+        },
+        body: JSON.stringify(body),
+      })
 
-    if (response.ok) {
-      const data = (await response.json()) as RetrieveUserQuotaResponse;
-      return data;
+      if (response.ok) {
+        const data = (await response.json()) as RetrieveUserQuotaResponse
+        return data
+      }
+
+      logQuotaFetch("error", undefined, `geminiCliQuota non-OK: ${endpoint} status=${response.status}`)
+    } catch (error) {
+      logQuotaFetch("error", undefined, `geminiCliQuota error at ${endpoint}: ${error instanceof Error ? error.message : String(error)}`)
     }
-
-    // Non-OK response - return empty buckets
-    return { buckets: [] };
-  } catch {
-    // Network error or timeout - return empty buckets
-    return { buckets: [] };
   }
+
+  return { buckets: [] }
 }
 
 function aggregateGeminiCliQuota(response: RetrieveUserQuotaResponse): GeminiCliQuotaSummary {
@@ -263,10 +285,11 @@ function aggregateGeminiCliQuota(response: RetrieveUserQuotaResponse): GeminiCli
     }
     
     // Filter out models we don't care about for Gemini CLI quotas
-    // Only show gemini-3-* and gemini-2.5-pro models (the premium ones)
+    // Show gemini-3* (including dotted like gemini-3.1-pro-preview, gemini-3.5-flash)
+    // and gemini-2.5-pro (the premium legacy model)
     const modelId = bucket.modelId;
     const isRelevantModel = 
-      modelId.startsWith("gemini-3-") || 
+      modelId.startsWith("gemini-3") || 
       modelId === "gemini-2.5-pro";
     
     if (!isRelevantModel) {
@@ -307,89 +330,251 @@ function applyAccountUpdates(account: AccountMetadataV3, auth: OAuthAuthDetails)
   return changed ? updated : undefined;
 }
 
+function normalizeError(reason: unknown): string {
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === "string" && reason.length > 0) return reason;
+  try {
+    const serialized = JSON.stringify(reason);
+    if (serialized && serialized !== "{}") return serialized;
+  } catch {
+    // ignore — fall through to generic message
+  }
+  return "Unknown error";
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Quota check timed out after ${ms}ms (${label})`)),
+      ms,
+    );
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error: unknown) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+async function checkSingleAccountQuota(
+  account: AccountMetadataV3,
+  index: number,
+  client: PluginClient,
+  providerId: string,
+): Promise<AccountQuotaResult> {
+  const disabled = account.enabled === false;
+  const label = account.email ?? `account[${index}]`;
+  let auth = buildAuthFromAccount(account);
+
+  if (accessTokenExpired(auth)) {
+    const refreshed = await refreshAccessToken(auth, client, providerId);
+    if (!refreshed) {
+      throw new Error("Token refresh failed");
+    }
+    auth = refreshed;
+  }
+
+  const projectContext = await ensureProjectContext(auth);
+  auth = projectContext.auth;
+  const updatedAccount = applyAccountUpdates(account, auth);
+
+  const [antigravityResponse, geminiCliResponse, subscriptionInfo] = await Promise.all([
+    fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
+      .catch((): FetchAvailableModelsResponse => ({ models: undefined })),
+    fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
+    getSubscriptionTier(auth.access ?? "")
+      .catch((): SubscriptionInfo => ({ tier: "unknown", tierId: null, tierSource: null, projectId: null })),
+  ]);
+
+  const quotaResult: QuotaSummary =
+    antigravityResponse.models === undefined
+      ? { groups: {}, modelCount: 0, error: "Failed to fetch Antigravity quota" }
+      : aggregateQuota(antigravityResponse.models);
+
+  const geminiCliQuotaResult = aggregateGeminiCliQuota(geminiCliResponse);
+  if (geminiCliResponse.buckets === undefined || geminiCliResponse.buckets.length === 0) {
+    geminiCliQuotaResult.error =
+      geminiCliQuotaResult.models.length === 0 ? "No Gemini CLI quota available" : undefined;
+  }
+
+  for (const [family, groupQuota] of Object.entries(quotaResult.groups)) {
+    const remainingPercent = (groupQuota.remainingFraction ?? 0) * 100;
+    logQuotaStatus(account.email, index, remainingPercent, family);
+  }
+
+  logSubscriptionTier(account.email, subscriptionInfo.tier, subscriptionInfo.tierId)
+
+  return {
+    index,
+    email: account.email,
+    status: "ok",
+    disabled,
+    quota: quotaResult,
+    geminiCliQuota: geminiCliQuotaResult,
+    subscriptionTier: subscriptionInfo.tier,
+    updatedAccount,
+  };
+}
+
 export async function checkAccountsQuota(
   accounts: AccountMetadataV3[],
   client: PluginClient,
   providerId = ANTIGRAVITY_PROVIDER_ID,
 ): Promise<AccountQuotaResult[]> {
-  const results: AccountQuotaResult[] = [];
-  
-  logQuotaFetch("start", accounts.length);
+  // Snapshot the array immediately — index positions must stay stable
+  // across the async lifetime of this function.
+  const snapshot = accounts.slice(0, MAX_QUOTA_ACCOUNTS);
 
-  for (const [index, account] of accounts.entries()) {
-    const disabled = account.enabled === false;
+  logQuotaFetch("start", snapshot.length);
 
-    let auth = buildAuthFromAccount(account);
+  const settled = await Promise.allSettled(
+    snapshot.map((account, index) =>
+      withTimeout(
+        checkSingleAccountQuota(account, index, client, providerId),
+        ACCOUNT_QUOTA_TIMEOUT_MS,
+        account.email ?? `account[${index}]`,
+      ),
+    ),
+  );
 
+  const results: AccountQuotaResult[] = settled.map((outcome, index) => {
+    const account = snapshot[index]!;
+    if (outcome.status === "fulfilled") {
+      return outcome.value;
+    }
+    const errorMessage = normalizeError(outcome.reason);
+    logQuotaFetch(
+      "error",
+      undefined,
+      `account=${account.email ?? index} error=${errorMessage}`,
+    );
+    return {
+      index,
+      email: account.email,
+      status: "error" as const,
+      disabled: account.enabled === false,
+      error: errorMessage,
+    };
+  });
+
+  logQuotaFetch(
+    "complete",
+    snapshot.length,
+    `ok=${results.filter(r => r.status === "ok").length} errors=${results.filter(r => r.status === "error").length}`,
+  );
+  return results
+}
+
+// ============================================================================
+// SUBSCRIPTION TIER DETECTION (loadCodeAssist)
+// Based on: badrisnarayanan/antigravity-claude-proxy/src/cloudcode/model-api.js
+// ============================================================================
+
+export type SubscriptionTier = "free" | "pro" | "ultra" | "unknown"
+
+export interface SubscriptionInfo {
+  tier: SubscriptionTier
+  tierId: string | null
+  tierSource: string | null
+  projectId: string | null
+}
+
+function parseTierId(tierId: string): SubscriptionTier {
+  if (!tierId) return "unknown"
+  const lower = tierId.toLowerCase()
+
+  if (lower.includes("ultra")) return "ultra"
+  if (lower === "standard-tier") return "pro"
+  if (lower.includes("pro") || lower.includes("premium")) return "pro"
+  if (lower === "free-tier" || lower.includes("free")) return "free"
+  return "unknown"
+}
+
+interface LoadCodeAssistResponse {
+  paidTier?: { id?: string }
+  currentTier?: { id?: string }
+  allowedTiers?: Array<{ id?: string; isDefault?: boolean }>
+  cloudaicompanionProject?: string | { id?: string }
+}
+
+/**
+ * Detect the subscription tier for an account by calling loadCodeAssist.
+ *
+ * Priority: paidTier (Google One AI) > currentTier > allowedTiers default.
+ * Returns tier, tierId, tierSource, and the discovered projectId.
+ */
+export async function getSubscriptionTier(accessToken: string): Promise<SubscriptionInfo> {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    ...getAntigravityHeaders(),
+  }
+
+  const body = JSON.stringify({
+    metadata: {
+      ideType: "ANTIGRAVITY",
+      platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
+      pluginType: "GEMINI",
+    },
+    mode: 1,
+  })
+
+  for (const endpoint of ANTIGRAVITY_LOAD_ENDPOINTS) {
     try {
-      if (accessTokenExpired(auth)) {
-        const refreshed = await refreshAccessToken(auth, client, providerId);
-        if (!refreshed) {
-          throw new Error("Token refresh failed");
+      const response = await fetchWithTimeout(`${endpoint}/v1internal:loadCodeAssist`, {
+        method: "POST",
+        headers,
+        body,
+      })
+
+      if (!response.ok) {
+        logQuotaFetch("error", undefined, `loadCodeAssist ${response.status} at ${endpoint}`)
+        continue
+      }
+
+      const data = (await response.json()) as LoadCodeAssistResponse
+
+      let projectId: string | null = null
+      if (typeof data.cloudaicompanionProject === "string") {
+        projectId = data.cloudaicompanionProject
+      } else if (data.cloudaicompanionProject?.id) {
+        projectId = data.cloudaicompanionProject.id
+      }
+
+      let tier: SubscriptionTier = "unknown"
+      let tierId: string | null = null
+      let tierSource: string | null = null
+
+      // 1. paidTier — Google One AI subscription (most reliable)
+      if (data.paidTier?.id) {
+        tierId = data.paidTier.id
+        tier = parseTierId(tierId)
+        tierSource = "paidTier"
+      }
+
+      // 2. currentTier — fallback
+      if (tier === "unknown" && data.currentTier?.id) {
+        tierId = data.currentTier.id
+        tier = parseTierId(tierId)
+        tierSource = "currentTier"
+      }
+
+      // 3. allowedTiers — last resort (find default or first non-free)
+      if (tier === "unknown" && Array.isArray(data.allowedTiers) && data.allowedTiers.length > 0) {
+        const defaultTier = data.allowedTiers.find((t) => t?.isDefault) ?? data.allowedTiers[0]
+        if (defaultTier?.id) {
+          tierId = defaultTier.id
+          tier = parseTierId(tierId)
+          tierSource = "allowedTiers"
         }
-        auth = refreshed;
       }
 
-      const projectContext = await ensureProjectContext(auth);
-      auth = projectContext.auth;
-      const updatedAccount = applyAccountUpdates(account, auth);
-
-      let quotaResult: QuotaSummary;
-      let geminiCliQuotaResult: GeminiCliQuotaSummary;
-      
-      // Fetch both Antigravity and Gemini CLI quotas in parallel
-      const [antigravityResponse, geminiCliResponse] = await Promise.all([
-        fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
-          .catch((error): FetchAvailableModelsResponse => ({ models: undefined })),
-        fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
-      ]);
-
-      // Process Antigravity quota
-      if (antigravityResponse.models === undefined) {
-        quotaResult = {
-          groups: {},
-          modelCount: 0,
-          error: "Failed to fetch Antigravity quota",
-        };
-      } else {
-        quotaResult = aggregateQuota(antigravityResponse.models);
-      }
-
-      // Process Gemini CLI quota
-      geminiCliQuotaResult = aggregateGeminiCliQuota(geminiCliResponse);
-      if (geminiCliResponse.buckets === undefined || geminiCliResponse.buckets.length === 0) {
-        geminiCliQuotaResult.error = geminiCliQuotaResult.models.length === 0 
-          ? "No Gemini CLI quota available" 
-          : undefined;
-      }
-
-      results.push({
-        index,
-        email: account.email,
-        status: "ok",
-        disabled,
-        quota: quotaResult,
-        geminiCliQuota: geminiCliQuotaResult,
-        updatedAccount,
-      });
-      
-      // Log quota status for each family
-      for (const [family, groupQuota] of Object.entries(quotaResult.groups)) {
-        const remainingPercent = (groupQuota.remainingFraction ?? 0) * 100;
-        logQuotaStatus(account.email, index, remainingPercent, family);
-      }
+      logQuotaFetch("complete", undefined, `subscription tier=${tier} tierId=${tierId} source=${tierSource} projectId=${projectId}`)
+      return { tier, tierId, tierSource, projectId }
     } catch (error) {
-      results.push({
-        index,
-        email: account.email,
-        status: "error",
-        disabled,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      logQuotaFetch("error", undefined, `account=${account.email ?? index} error=${error instanceof Error ? error.message : String(error)}`);
+      logQuotaFetch("error", undefined, `loadCodeAssist error at ${endpoint}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
-  logQuotaFetch("complete", accounts.length, `ok=${results.filter(r => r.status === "ok").length} errors=${results.filter(r => r.status === "error").length}`);
-  return results;
+  logQuotaFetch("error", undefined, "loadCodeAssist failed on all endpoints — defaulting to unknown")
+  return { tier: "unknown", tierId: null, tierSource: null, projectId: null }
 }
