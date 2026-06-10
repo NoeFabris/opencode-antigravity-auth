@@ -38,4 +38,33 @@ describe("showAccountRouting", () => {
     expect(output).toContain("Quota:      80% remaining");
     expect(output).not.toContain("Quota:      10% remaining");
   });
+
+  it("summarizes live quota with the lowest remaining model in the group", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    showAccountRouting(
+      [{ index: 0, email: "user@example.com" }],
+      {
+        strict: true,
+        entries: [{
+          model: "antigravity-gemini-3.1-pro",
+          normalizedModel: "antigravity-gemini-3.1-pro",
+          email: "user@example.com",
+          quotaModels: [{
+            modelId: "gemini-3.1-pro-low",
+            group: "gemini-pro",
+            remainingFraction: 0.7,
+          }, {
+            modelId: "gemini-3.1-pro-high",
+            group: "gemini-pro",
+            remainingFraction: 0.2,
+          }],
+        }],
+      },
+    );
+
+    const output = log.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(output).toContain("Quota:      20% remaining");
+    expect(output).not.toContain("Quota:      70% remaining");
+  });
 });

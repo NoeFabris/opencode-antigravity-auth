@@ -125,9 +125,12 @@ function summarizeLiveQuota(
   if (matchingModels.length === 0) {
     return undefined;
   }
+  const remainingFractions = matchingModels
+    .map((model) => model.remainingFraction)
+    .filter((remainingFraction) => typeof remainingFraction === "number");
 
   return {
-    remainingFraction: Math.max(...matchingModels.map((model) => model.remainingFraction ?? 0)),
+    remainingFraction: remainingFractions.length > 0 ? Math.min(...remainingFractions) : undefined,
     resetTime: matchingModels.find((model) => model.resetTime)?.resetTime,
     modelCount: matchingModels.length,
   };
