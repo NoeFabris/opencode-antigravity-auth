@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason, resolveQuotaGroup } from "./accounts";
+import { AccountAffinityError, AccountManager, type ModelFamily, type HeaderStyle, parseRateLimitReason, calculateBackoffMs, type RateLimitReason, resolveQuotaGroup } from "./accounts";
 import type { AccountStorageV4 } from "./storage";
 import type { OAuthAuthDetails } from "./types";
 
@@ -644,6 +644,142 @@ describe("AccountManager", () => {
   });
 
   describe("account selection strategies", () => {
+    describe("model account affinity", () => {
+      it("selects the configured account by email before normal rotation", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "claude@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+            { email: "gemini@example.com", refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+
+        const selected = manager.getCurrentOrNextForFamily(
+          "gemini",
+          "antigravity-gemini-3.5-flash-low",
+          "hybrid",
+          "antigravity",
+          false,
+          100,
+          10 * 60 * 1000,
+          { email: "gemini@example.com", modelKey: "antigravity-gemini-3.5-flash-low" },
+        );
+
+        expect(selected?.email).toBe("gemini@example.com");
+      });
+
+      it("ignores disabled affinity account when strict is false", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "pinned@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0, enabled: false },
+            { email: "fallback@example.com", refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+
+        const selected = manager.getCurrentOrNextForFamily(
+          "claude",
+          "antigravity-claude-sonnet-4-6",
+          "sticky",
+          "antigravity",
+          false,
+          100,
+          10 * 60 * 1000,
+          { email: "pinned@example.com", modelKey: "antigravity-claude-sonnet-4-6" },
+        );
+
+        expect(selected?.email).toBe("fallback@example.com");
+      });
+
+      it("ignores cooling-down affinity account when strict is false", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "pinned@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+            { email: "fallback@example.com", refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const pinned = manager.getAccounts()[0]!;
+        manager.markAccountCoolingDown(pinned, 60000, "project-error");
+
+        const selected = manager.getCurrentOrNextForFamily(
+          "claude",
+          "antigravity-claude-sonnet-4-6",
+          "sticky",
+          "antigravity",
+          false,
+          100,
+          10 * 60 * 1000,
+          { email: "pinned@example.com", modelKey: "antigravity-claude-sonnet-4-6" },
+        );
+
+        expect(selected?.email).toBe("fallback@example.com");
+      });
+
+      it("ignores rate-limited affinity account when strict is false", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "pinned@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+            { email: "fallback@example.com", refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const pinned = manager.getAccounts()[0]!;
+        manager.markRateLimited(pinned, 60000, "claude");
+
+        const selected = manager.getCurrentOrNextForFamily(
+          "claude",
+          "antigravity-claude-sonnet-4-6",
+          "sticky",
+          "antigravity",
+          false,
+          100,
+          10 * 60 * 1000,
+          { email: "pinned@example.com", modelKey: "antigravity-claude-sonnet-4-6" },
+        );
+
+        expect(selected?.email).toBe("fallback@example.com");
+      });
+
+      it("throws a clear error for unavailable affinity account when strict is true", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { email: "pinned@example.com", refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+            { email: "fallback@example.com", refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 0 },
+          ],
+          activeIndex: 0,
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const pinned = manager.getAccounts()[0]!;
+        manager.markRateLimited(pinned, 60000, "claude");
+
+        expect(() => manager.getCurrentOrNextForFamily(
+          "claude",
+          "antigravity-claude-sonnet-4-6",
+          "sticky",
+          "antigravity",
+          false,
+          100,
+          10 * 60 * 1000,
+          { email: "pinned@example.com", modelKey: "antigravity-claude-sonnet-4-6", strict: true },
+        )).toThrow(AccountAffinityError);
+      });
+    });
+
     describe("sticky strategy (default)", () => {
       it("returns same account on consecutive calls", () => {
         const stored: AccountStorageV4 = {

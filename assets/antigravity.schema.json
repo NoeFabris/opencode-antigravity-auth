@@ -164,6 +164,22 @@
         "hybrid"
       ]
     },
+    "model_account_affinity": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "format": "email",
+        "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+      }
+    },
+    "account_affinity_strict": {
+      "default": false,
+      "type": "boolean"
+    },
     "pid_offset_enabled": {
       "default": false,
       "type": "boolean"

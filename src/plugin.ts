@@ -31,7 +31,7 @@ import {
   prepareAntigravityRequest,
   transformAntigravityResponse,
 } from "./plugin/request";
-import { resolveModelWithTier } from "./plugin/transform/model-resolver";
+import { normalizeModelAccountAffinityKey, resolveModelAccountAffinityEmail, resolveModelWithTier } from "./plugin/transform/model-resolver";
 import {
   isEmptyResponseBody,
   createSyntheticErrorResponse,
@@ -1561,6 +1561,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
               config.soft_quota_cache_ttl_minutes,
               config.quota_refresh_interval_minutes,
             );
+            const affinityModelKey = model ? normalizeModelAccountAffinityKey(model) : undefined;
+            const accountAffinity = affinityModelKey
+              ? {
+                email: resolveModelAccountAffinityEmail(model, config.model_account_affinity),
+                modelKey: affinityModelKey,
+                strict: config.account_affinity_strict,
+              }
+              : undefined;
 
             let account = accountManager.getCurrentOrNextForFamily(
               family, 
@@ -1570,6 +1578,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
               config.pid_offset_enabled,
               config.soft_quota_threshold_percent,
               softQuotaCacheTtlMs,
+              accountAffinity,
             );
 
             if (!account && allowQuotaFallback) {
@@ -1583,6 +1592,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 config.pid_offset_enabled,
                 config.soft_quota_threshold_percent,
                 softQuotaCacheTtlMs,
+                accountAffinity,
               );
               if (account) {
                 pushDebug(

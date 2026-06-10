@@ -155,6 +155,19 @@ export interface ManagedAccount {
   verificationUrl?: string;
 }
 
+export interface AccountAffinityOptions {
+  email?: string;
+  modelKey?: string;
+  strict?: boolean;
+}
+
+export class AccountAffinityError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "AccountAffinityError"
+  }
+}
+
 function nowMs(): number {
   return Date.now();
 }
@@ -211,6 +224,10 @@ function isRateLimitedForHeaderStyle(account: ManagedAccount, family: ModelFamil
   // Then check base family quota
   const baseKey = getQuotaKey(family, headerStyle);
   return isRateLimitedForQuotaKey(account, baseKey);
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
 function clearExpiredRateLimits(account: ManagedAccount): void {
@@ -511,8 +528,23 @@ export class AccountManager {
     pidOffsetEnabled: boolean = false,
     softQuotaThresholdPercent: number = 100,
     softQuotaCacheTtlMs: number = 10 * 60 * 1000,
+    affinity?: AccountAffinityOptions,
   ): ManagedAccount | null {
     const quotaKey = getQuotaKey(family, headerStyle, model);
+
+    const affinityAccount = this.getAffinityAccount(
+      family,
+      model,
+      headerStyle,
+      softQuotaThresholdPercent,
+      softQuotaCacheTtlMs,
+      affinity,
+    );
+    if (affinityAccount) {
+      this.markTouchedForQuota(affinityAccount, quotaKey);
+      this.currentAccountIndexByFamily[family] = affinityAccount.index;
+      return affinityAccount;
+    }
 
     if (strategy === 'round-robin') {
       const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs);
@@ -587,6 +619,55 @@ export class AccountManager {
       this.currentAccountIndexByFamily[family] = next.index;
     }
     return next;
+  }
+
+  private getAffinityAccount(
+    family: ModelFamily,
+    model: string | null | undefined,
+    headerStyle: HeaderStyle,
+    softQuotaThresholdPercent: number,
+    softQuotaCacheTtlMs: number,
+    affinity?: AccountAffinityOptions,
+  ): ManagedAccount | null {
+    const email = affinity?.email;
+    if (!email) {
+      return null;
+    }
+
+    const modelKey = affinity.modelKey ?? model ?? family;
+    const account = this.accounts.find((candidate) => {
+      return candidate.email !== undefined && normalizeEmail(candidate.email) === normalizeEmail(email);
+    });
+    const strict = affinity.strict === true;
+    const fail = (reason: string): null => {
+      if (strict) {
+        throw new AccountAffinityError(
+          `Account affinity: ${modelKey} is pinned to ${email}, but the account is ${reason}.`,
+        );
+      }
+      return null;
+    };
+
+    if (!account) {
+      return fail("not configured");
+    }
+
+    clearExpiredRateLimits(account);
+
+    if (account.enabled === false) {
+      return fail("disabled");
+    }
+    if (this.isAccountCoolingDown(account)) {
+      return fail("cooling down");
+    }
+    if (isRateLimitedForHeaderStyle(account, family, headerStyle, model)) {
+      return fail("rate-limited");
+    }
+    if (isOverSoftQuotaThreshold(account, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model)) {
+      return fail("over the soft quota threshold");
+    }
+
+    return account;
   }
 
   getNextForFamily(family: ModelFamily, model?: string | null, headerStyle: HeaderStyle = "antigravity", softQuotaThresholdPercent: number = 100, softQuotaCacheTtlMs: number = 10 * 60 * 1000): ManagedAccount | null {

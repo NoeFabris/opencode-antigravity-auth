@@ -293,6 +293,25 @@ export const AntigravityConfigSchema = z.object({
    * @default "hybrid"
    */
   account_selection_strategy: AccountSelectionStrategySchema.default('hybrid'),
+
+  /**
+   * Prefer a specific Google account email for a normalized model.
+   *
+   * Keys are model names or aliases. They are normalized before lookup, so
+   * `claude-sonnet-4-6` and `antigravity-claude-sonnet-4-6` match the same
+   * entry. Values must be account emails, not account indexes.
+   *
+   * @default {}
+   */
+  model_account_affinity: z.record(z.string(), z.string().email()).default({}),
+
+  /**
+   * Fail fast when a model's pinned account is unavailable instead of falling
+   * back to normal rotation.
+   *
+   * @default false
+   */
+  account_affinity_strict: z.boolean().default(false),
   
   /**
    * Enable PID-based account offset for multi-session distribution.
@@ -467,6 +486,8 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   quota_fallback: false,
   cli_first: false,
   account_selection_strategy: 'hybrid',
+  model_account_affinity: {},
+  account_affinity_strict: false,
   pid_offset_enabled: false,
   switch_on_first_rate_limit: true,
   scheduling_mode: 'cache_first',

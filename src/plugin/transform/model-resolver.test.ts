@@ -1,7 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { resolveModelWithTier, resolveModelWithVariant, resolveModelForHeaderStyle } from "./model-resolver";
+import { normalizeModelAccountAffinityKey, resolveModelAccountAffinityEmail, resolveModelWithTier, resolveModelWithVariant, resolveModelForHeaderStyle } from "./model-resolver";
 
 describe("resolveModelWithTier", () => {
+  describe("normalizeModelAccountAffinityKey", () => {
+    it("normalizes Claude aliases to the same Antigravity key", () => {
+      expect(normalizeModelAccountAffinityKey("claude-sonnet-4-6")).toBe("antigravity-claude-sonnet-4-6");
+      expect(normalizeModelAccountAffinityKey("antigravity-claude-sonnet-4-6")).toBe("antigravity-claude-sonnet-4-6");
+      expect(normalizeModelAccountAffinityKey("gemini-claude-sonnet-4-6")).toBe("antigravity-claude-sonnet-4-6");
+    });
+
+    it("normalizes Gemini 3.5 Flash tier aliases to the same Antigravity key", () => {
+      expect(normalizeModelAccountAffinityKey("gemini-3.5-flash")).toBe("antigravity-gemini-3.5-flash");
+      expect(normalizeModelAccountAffinityKey("gemini-3.5-flash-low")).toBe("antigravity-gemini-3.5-flash");
+      expect(normalizeModelAccountAffinityKey("antigravity-gemini-3.5-flash-low")).toBe("antigravity-gemini-3.5-flash");
+    });
+
+    it("resolves affinity email through normalized configured aliases", () => {
+      expect(resolveModelAccountAffinityEmail("claude-sonnet-4-6", {
+        "antigravity-claude-sonnet-4-6": "work@example.com",
+      })).toBe("work@example.com");
+      expect(resolveModelAccountAffinityEmail("antigravity-gemini-3.5-flash-low", {
+        "gemini-3.5-flash": "personal@example.com",
+      })).toBe("personal@example.com");
+    });
+  });
+
   describe("Gemini 3 flash models (Issue #109)", () => {
     it("antigravity-gemini-3-flash gets default thinkingLevel 'low'", () => {
       const result = resolveModelWithTier("antigravity-gemini-3-flash");

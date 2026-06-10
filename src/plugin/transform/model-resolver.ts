@@ -267,6 +267,31 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 }
 
 /**
+ * Normalizes user-facing model aliases into a stable Antigravity affinity key.
+ */
+export function normalizeModelAccountAffinityKey(requestedModel: string): string {
+  const resolved = resolveModelForHeaderStyle(requestedModel, "antigravity");
+  return `antigravity-${resolved.actualModel}`.toLowerCase();
+}
+
+export function resolveModelAccountAffinityEmail(
+  requestedModel: string | null | undefined,
+  affinity: Record<string, string>,
+): string | undefined {
+  if (!requestedModel) {
+    return undefined;
+  }
+
+  const requestedKey = normalizeModelAccountAffinityKey(requestedModel);
+  for (const [configuredModel, email] of Object.entries(affinity)) {
+    if (normalizeModelAccountAffinityKey(configuredModel) === requestedKey) {
+      return email;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Gets the model family for routing decisions.
  */
 export function getModelFamily(model: string): "claude" | "gemini-flash" | "gemini-pro" {

@@ -90,6 +90,76 @@ Useful when:
 
 ---
 
+## Pinning Models to Accounts
+
+Use `model_account_affinity` when you want specific models to prefer specific Google accounts.
+
+Configure it in `antigravity.json`:
+
+```json
+{
+  "model_account_affinity": {
+    "antigravity-claude-sonnet-4-6": "work@gmail.com",
+    "antigravity-gemini-3.5-flash-low": "personal@gmail.com"
+  },
+  "account_affinity_strict": false
+}
+```
+
+The value must be the Google account email, not an account index. Emails stay stable when accounts are removed or reordered.
+
+Model keys are normalized before lookup. These examples match the same affinity entry:
+
+```text
+claude-sonnet-4-6
+antigravity-claude-sonnet-4-6
+
+gemini-3.5-flash
+gemini-3.5-flash-low
+antigravity-gemini-3.5-flash-low
+```
+
+When `account_affinity_strict` is `false`, the pinned account is preferred but not mandatory. If that account is disabled, cooling down, rate-limited, or over the soft quota threshold, the plugin falls back to the normal account selection strategy.
+
+When `account_affinity_strict` is `true`, the request fails with a clear error if the pinned account is unavailable.
+
+Example error:
+
+```text
+Account affinity: antigravity-claude-sonnet-4-6 is pinned to work@gmail.com, but the account is rate-limited.
+```
+
+### SDD Agent Example
+
+OpenCode does not always expose the agent name to plugin `fetch()` calls, so the reliable approach is to give each SDD agent a distinct model and pin that model to an account.
+
+```json
+{
+  "agent": {
+    "sdd-design": {
+      "model": "google/antigravity-claude-sonnet-4-6"
+    },
+    "sdd-apply": {
+      "model": "google/antigravity-gemini-3.5-flash-low"
+    }
+  }
+}
+```
+
+Then configure Antigravity account affinity:
+
+```json
+{
+  "model_account_affinity": {
+    "antigravity-claude-sonnet-4-6": "work@gmail.com",
+    "antigravity-gemini-3.5-flash-low": "personal@gmail.com"
+  },
+  "account_affinity_strict": false
+}
+```
+
+---
+
 ## Adding Accounts
 
 When running `opencode auth login` with existing accounts:
