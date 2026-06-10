@@ -327,6 +327,8 @@ export class AccountManager {
   private lastToastTime = 0;
 
   private savePending = false;
+  private saveDirty = false;
+  private saveInProgress = false;
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private savePromiseResolvers: Array<() => void> = [];
 
@@ -442,6 +444,7 @@ export class AccountManager {
         // Update indices to include the new account
         this.currentAccountIndexByFamily.claude = Math.min(this.currentAccountIndexByFamily.claude, this.accounts.length - 1);
         this.currentAccountIndexByFamily.gemini = Math.min(this.currentAccountIndexByFamily.gemini, this.accounts.length - 1);
+        this.requestSaveToDisk();
       }
     }
 
@@ -466,6 +469,7 @@ export class AccountManager {
         this.cursor = 0;
         this.currentAccountIndexByFamily.claude = 0;
         this.currentAccountIndexByFamily.gemini = 0;
+        this.requestSaveToDisk();
       }
     }
   }
@@ -1107,17 +1111,17 @@ export class AccountManager {
   }
 
   requestSaveToDisk(): void {
-    if (this.savePending) {
+    this.saveDirty = true;
+
+    if (this.savePending || this.saveInProgress) {
       return;
     }
-    this.savePending = true;
-    this.saveTimeout = setTimeout(() => {
-      void this.executeSave();
-    }, 1000);
+
+    this.scheduleSave();
   }
 
   async flushSaveToDisk(): Promise<void> {
-    if (!this.savePending) {
+    if (!this.savePending && !this.saveInProgress) {
       return;
     }
     return new Promise<void>((resolve) => {
@@ -1125,19 +1129,37 @@ export class AccountManager {
     });
   }
 
+  private scheduleSave(): void {
+    this.savePending = true;
+    this.saveTimeout = setTimeout(() => {
+      void this.executeSave();
+    }, 1000);
+  }
+
   private async executeSave(): Promise<void> {
     this.savePending = false;
     this.saveTimeout = null;
+    this.saveDirty = false;
+    this.saveInProgress = true;
     
     try {
       await this.saveToDisk();
     } catch {
       // best-effort persistence; avoid unhandled rejection from timer-driven saves
     } finally {
-      const resolvers = this.savePromiseResolvers;
-      this.savePromiseResolvers = [];
-      for (const resolve of resolvers) {
-        resolve();
+      this.saveInProgress = false;
+
+      if (this.saveDirty) {
+        this.scheduleSave();
+        return;
+      }
+
+      if (!this.savePending) {
+        const resolvers = this.savePromiseResolvers;
+        this.savePromiseResolvers = [];
+        for (const resolve of resolvers) {
+          resolve();
+        }
       }
     }
   }

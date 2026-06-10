@@ -1412,9 +1412,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
       const accountManager = await AccountManager.loadFromDisk(auth);
       activeAccountManager = accountManager;
-      if (accountManager.getAccountCount() > 0) {
-        accountManager.requestSaveToDisk();
-      }
 
       // Initialize proactive token refresh queue (ported from LLM-API-Key-Proxy)
       let refreshQueue: ProactiveRefreshQueue | null = null;
@@ -2734,7 +2731,17 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     }
                   }
                   if (storageUpdated) {
-                    await saveAccounts(existingStorage);
+                    const hasUpdatedAccounts = results.some((result) => result.updatedAccount);
+                    if (activeAccountManager && !hasUpdatedAccounts) {
+                      for (const res of results) {
+                        if (res.quota?.groups) {
+                          activeAccountManager.updateQuotaCache(res.index, res.quota.groups);
+                        }
+                      }
+                      activeAccountManager.requestSaveToDisk();
+                    } else {
+                      await saveAccounts(existingStorage);
+                    }
                   }
                   console.log("");
                   continue;
@@ -2745,8 +2752,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     const acc = existingStorage.accounts[menuResult.toggleAccountIndex];
                     if (acc) {
                       acc.enabled = acc.enabled === false;
-                      await saveAccounts(existingStorage);
-                      activeAccountManager?.setAccountEnabled(menuResult.toggleAccountIndex, acc.enabled);
+                      if (!activeAccountManager?.setAccountEnabled(menuResult.toggleAccountIndex, acc.enabled)) {
+                        await saveAccounts(existingStorage);
+                      }
                       console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
                     }
                   }
@@ -2817,7 +2825,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     }
 
                     if (storageUpdated) {
-                      await saveAccounts(existingStorage);
+                      if (activeAccountManager) {
+                        activeAccountManager.requestSaveToDisk();
+                      } else {
+                        await saveAccounts(existingStorage);
+                      }
                     }
 
                     console.log(`\nVerification summary: ${okCount} ready, ${blockedCount} need verification, ${errorCount} errors.`);
@@ -2865,7 +2877,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   if (verification.status === "ok") {
                     const { changed, wasVerificationRequired } = clearStoredAccountVerificationRequired(account, true);
                     if (changed) {
-                      await saveAccounts(existingStorage);
+                      if (!activeAccountManager) {
+                        await saveAccounts(existingStorage);
+                      }
                     }
                     activeAccountManager?.clearAccountVerificationRequired(verifyAccountIndex, wasVerificationRequired);
 
@@ -2884,7 +2898,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       verification.verifyUrl,
                     );
                     if (changed) {
-                      await saveAccounts(existingStorage);
+                      if (!activeAccountManager) {
+                        await saveAccounts(existingStorage);
+                      }
                     }
                     activeAccountManager?.markAccountVerificationRequired(
                       verifyAccountIndex,

@@ -185,12 +185,12 @@ export class ProactiveRefreshQueue {
             this.state.refreshCount++;
             this.state.lastRefreshTime = Date.now();
 
-            // Persist the refreshed token
-            try {
-              await this.accountManager.saveToDisk();
-            } catch {
-              // Non-fatal - token is refreshed in memory
-            }
+            // Persist through the debounced path to avoid lock thrashing.
+            // Flush immediately so the refreshed token is durable before
+            // the next iteration or process exit. The debounce still
+            // coalesces writes, but flush blocks until save completes.
+            this.accountManager.requestSaveToDisk();
+            await this.accountManager.flushSaveToDisk();
           }
         } catch (error) {
           this.state.errorCount++;

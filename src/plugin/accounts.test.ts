@@ -1281,6 +1281,125 @@ describe("AccountManager", () => {
 
       saveSpy.mockRestore();
     });
+
+    it("schedules another save when state changes during an in-flight save", async () => {
+      vi.useFakeTimers();
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      let resolveFirstSave: (() => void) | undefined;
+      const saveSpy = vi.spyOn(manager, "saveToDisk")
+        .mockImplementationOnce(() => new Promise<void>((resolve) => {
+          resolveFirstSave = resolve;
+        }))
+        .mockResolvedValueOnce();
+
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      manager.requestSaveToDisk();
+      const flushPromise = manager.flushSaveToDisk();
+      resolveFirstSave?.();
+      await Promise.resolve();
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromise;
+
+      expect(saveSpy).toHaveBeenCalledTimes(2);
+
+      saveSpy.mockRestore();
+    });
+
+    it("flush resolves even when saveToDisk throws and dirty re-schedule is needed", async () => {
+      vi.useFakeTimers();
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      // First save throws, second succeeds
+      let calls = 0;
+      const saveSpy = vi.spyOn(manager, "saveToDisk")
+        .mockImplementation(() => {
+          calls++;
+          if (calls === 1) return Promise.reject(new Error("disk full"));
+          return Promise.resolve();
+        });
+
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      // First save threw, no dirty flag → flush should resolve immediately
+      const flushPromise = manager.flushSaveToDisk();
+      await flushPromise;
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      saveSpy.mockRestore();
+    });
+
+    it("flush resolves after re-scheduled save completes when dirty during error", async () => {
+      vi.useFakeTimers();
+
+      const stored: AccountStorageV4 = {
+        version: 4,
+        accounts: [
+          { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 0 },
+        ],
+        activeIndex: 0,
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      let rejectFirstSave: ((err: Error) => void) | undefined;
+      const saveSpy = vi.spyOn(manager, "saveToDisk")
+        .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+          rejectFirstSave = reject;
+        }))
+        .mockResolvedValueOnce();
+
+      manager.requestSaveToDisk();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      // Mark dirty while first save is in-flight
+      manager.requestSaveToDisk();
+      const flushPromise = manager.flushSaveToDisk();
+
+      // Reject the first save — executeSave's finally sees dirty=true,
+      // schedules a second save. The flush promise waits for it.
+      rejectFirstSave?.(new Error("disk full"));
+      await Promise.resolve();
+
+      // First save threw, re-scheduled. Flush should still be pending.
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      // Advance past the re-schedule debounce
+      await vi.advanceTimersByTimeAsync(1000);
+
+      // Second save succeeds, flush resolves
+      await flushPromise;
+
+      expect(saveSpy).toHaveBeenCalledTimes(2);
+
+      saveSpy.mockRestore();
+    });
   });
 
   describe("Rate Limit Reason Classification", () => {
