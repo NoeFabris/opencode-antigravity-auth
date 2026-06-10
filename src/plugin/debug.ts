@@ -522,3 +522,33 @@ export function logModelUsed(
     }
   });
 }
+
+/**
+ * Logs credit cost from ChatModelMetadata per generation call.
+ * credit_cost is the exact cost in AI credits consumed by this call.
+ * Based on proto: exa.codeium_common_pb.proto → ChatModelMetadata.credit_cost
+ */
+export function logCreditCost(
+  model: string,
+  creditCost: number,
+  totalCredits?: number,
+): void {
+  runWithDebugEnabled(() => {
+    const totalInfo = totalCredits !== undefined ? ` totalCredits=${totalCredits}` : ""
+    logDebug(`[Credit] model=${model} cost=${creditCost}${totalInfo}`)
+  })
+}
+
+/**
+ * Logs subscription tier for an account.
+ */
+export function logSubscriptionTier(
+  accountEmail: string | undefined,
+  tier: string,
+  tierId: string | null,
+): void {
+  runWithDebugEnabled(() => {
+    const emailInfo = accountEmail ? ` account=${accountEmail}` : ""
+    logDebug(`[Subscription] tier=${tier} tierId=${tierId}${emailInfo}`)
+  })
+}

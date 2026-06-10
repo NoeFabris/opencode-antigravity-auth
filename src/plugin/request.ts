@@ -25,6 +25,7 @@ import {
   logCacheStats,
   type AntigravityDebugContext,
 } from "./debug";
+import { trackUsage, logUsageSummary } from "./usage-tracker";
 import { createLogger } from "./logger";
 import {
   cleanJSONSchemaForAntigravity,
@@ -1811,6 +1812,23 @@ export async function transformAntigravityResponse(
       if (usage.candidatesTokenCount !== undefined) {
         headers.set("x-antigravity-candidates-token-count", String(usage.candidatesTokenCount));
       }
+    }
+
+    if (usage && effectiveModel) {
+      trackUsage(effectiveModel, {
+        inputTokens: usage.promptTokenCount ?? 0,
+        outputTokens: usage.candidatesTokenCount ?? 0,
+        thinkingOutputTokens: usage.thoughtsTokenCount ?? 0,
+        responseOutputTokens: 0,
+        cacheReadTokens: usage.cachedContentTokenCount ?? 0,
+        cacheWriteTokens: 0,
+      })
+      logUsageSummary(effectiveModel, {
+        inputTokens: usage.promptTokenCount ?? 0,
+        outputTokens: usage.candidatesTokenCount ?? 0,
+        thinkingOutputTokens: usage.thoughtsTokenCount ?? 0,
+        cacheReadTokens: usage.cachedContentTokenCount ?? 0,
+      })
     }
 
     logAntigravityDebugResponse(debugContext, response, {

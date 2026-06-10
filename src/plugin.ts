@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin/tool";
 import {
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
@@ -11,7 +11,7 @@ import {
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import { promptAddAnotherAccount, promptLoginMode, promptProjectId, promptContinue } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
   startAntigravityDebugRequest, 
@@ -40,11 +40,13 @@ import { EmptyResponseError } from "./plugin/errors";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { startOAuthListener, type OAuthListener } from "./plugin/server";
 import { clearAccounts, loadAccounts, saveAccounts, saveAccountsReplace } from "./plugin/storage";
-import { AccountManager, type ModelFamily, parseRateLimitReason, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
+import { AccountManager, type ModelFamily, calculateBackoffMs, computeSoftQuotaCacheTtlMs } from "./plugin/accounts";
+import { parseRateLimitResetMs, parseRateLimitReason } from "./plugin/rate-limit-parser";
 import { createAutoUpdateCheckerHook } from "./hooks/auto-update-checker";
 import { loadConfig, initRuntimeConfig, type AntigravityConfig } from "./plugin/config";
 import { createSessionRecoveryHook, getRecoverySuccessToast } from "./plugin/recovery";
 import { checkAccountsQuota } from "./plugin/quota";
+import { getTotalUsage } from "./plugin/usage-tracker";
 import { initDiskSignatureCache } from "./plugin/cache";
 import { createProactiveRefreshQueue, type ProactiveRefreshQueue } from "./plugin/refresh-queue";
 import { initLogger, createLogger } from "./plugin/logger";
@@ -753,7 +755,7 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
-async function persistAccountPool(
+export async function persistAccountPool(
   results: Array<Extract<AntigravityTokenExchangeResult, { type: "success" }>>,
   replaceAll: boolean = false,
 ): Promise<void> {
@@ -1052,6 +1054,7 @@ function formatWaitTime(ms: number): string {
 // Progressive rate limit retry delays
 const FIRST_RETRY_DELAY_MS = 1000;      // 1s - first 429 quick retry on same account
 const SWITCH_ACCOUNT_DELAY_MS = 5000;   // 5s - delay before switching to another account
+const MIN_BACKOFF_MS = 2000;           // 2s - minimum retry delay for parsed server reset times
 
 /**
  * Rate limit state tracking with time-window deduplication.
@@ -1450,7 +1453,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
       }
 
       return {
-        apiKey: "",
+        apiKey: "antigravity-oauth",
         async fetch(input, init) {
           if (!isGenerativeLanguageRequest(input)) {
             return fetch(input, init);
@@ -2036,14 +2039,30 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     tokenConsumed = false;
                   }
 
+                  // Get body text once for enhanced rate-limit parsing
+                  let bodyText = ""
+                  try {
+                    bodyText = await response.clone().text()
+                  } catch {
+                    // Ignore body read failures
+                  }
+
+                  // [Enhanced Parsing] Use server's exact reset time from error body
+                  const parsedResetMs = parseRateLimitResetMs(bodyText)
+
                   const defaultRetryMs = (config.default_retry_after_seconds ?? 60) * 1000;
                   const maxBackoffMs = (config.max_backoff_seconds ?? 60) * 1000;
                   const headerRetryMs = retryAfterMsFromResponse(response, defaultRetryMs);
                   const bodyInfo = await extractRetryInfoFromBody(response);
-                  const serverRetryMs = bodyInfo.retryDelayMs ?? headerRetryMs;
 
-                  // [Enhanced Parsing] Pass status to handling logic
-                  const rateLimitReason = parseRateLimitReason(bodyInfo.reason, bodyInfo.message, response.status);
+                  // Use parsed reset time if available, with MIN_BACKOFF_MS floor, else fallback to header/body
+                  const rawServerRetryMs = bodyInfo.retryDelayMs ?? headerRetryMs
+                  const serverRetryMs = parsedResetMs !== null
+                    ? Math.max(parsedResetMs, MIN_BACKOFF_MS)
+                    : rawServerRetryMs
+
+                  // [Enhanced Parsing] Classify rate limit reason from raw body text
+                  const rateLimitReason = parseRateLimitReason(bodyText, response.status);
 
                   // STRATEGY 1: CAPACITY / SERVER ERROR (Transient)
                   // Goal: Wait and Retry SAME Account. DO NOT LOCK.
@@ -2571,8 +2590,11 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   for (const res of results) {
                     const label = res.email || `Account ${res.index + 1}`;
                     const disabledStr = res.disabled ? " (disabled)" : "";
+                    const tierLabel = res.subscriptionTier && res.subscriptionTier !== "unknown"
+                      ? ` [${res.subscriptionTier.charAt(0).toUpperCase() + res.subscriptionTier.slice(1)}]`
+                      : "";
                     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                    console.log(`  ${label}${disabledStr}`);
+                    console.log(`  ${label}${disabledStr}${tierLabel}`);
                     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
                     
                     if (res.status === "error") {
@@ -2692,6 +2714,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     await saveAccounts(existingStorage);
                   }
                   console.log("");
+                  await promptContinue();
                   continue;
                 }
 
@@ -2705,7 +2728,23 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
                     }
                   }
+                  await promptContinue();
                   continue;
+                }
+
+                if (menuResult.mode === "usage") {
+                  const total = getTotalUsage()
+                  console.log("\n📊 Session Token Usage")
+                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━")
+                  console.log(`  Input tokens:     ${total.inputTokens.toLocaleString()}`)
+                  console.log(`  Output tokens:    ${total.outputTokens.toLocaleString()}`)
+                  console.log(`  Thinking tokens:  ${total.thinkingOutputTokens.toLocaleString()}`)
+                  console.log(`  Cache read:       ${total.cacheReadTokens.toLocaleString()}`)
+                  console.log(`  Cache write:      ${total.cacheWriteTokens.toLocaleString()}`)
+                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━")
+                  console.log("")
+                  await promptContinue()
+                  continue
                 }
 
                 if (menuResult.mode === "verify" || menuResult.mode === "verify-all") {
@@ -2714,6 +2753,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   if (verifyAll) {
                     if (existingStorage.accounts.length === 0) {
                       console.log("\nNo accounts available to verify.\n");
+                      await promptContinue();
                       continue;
                     }
 
@@ -2793,6 +2833,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       console.log("");
                     }
 
+                    await promptContinue();
                     continue;
                   }
 
@@ -2803,12 +2844,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                   if (verifyAccountIndex === undefined) {
                     console.log("\nVerification cancelled.\n");
+                    await promptContinue();
                     continue;
                   }
 
                   const account = existingStorage.accounts[verifyAccountIndex];
                   if (!account) {
                     console.log(`\nAccount ${verifyAccountIndex + 1} not found.\n`);
+                    await promptContinue();
                     continue;
                   }
 
@@ -2829,6 +2872,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     } else {
                       console.log(`✓ ${label} is ready for requests.\n`);
                     }
+                    await promptContinue();
                     continue;
                   }
 
@@ -2866,10 +2910,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     } else {
                       console.log("No verification URL was returned. Try re-authenticating this account.\n");
                     }
+                    await promptContinue();
                     continue;
                   }
 
                   console.log(`✗ ${label}: ${verification.message}\n`);
+                  await promptContinue();
                   continue;
                 }
 

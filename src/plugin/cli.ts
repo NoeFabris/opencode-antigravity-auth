@@ -8,12 +8,23 @@ import {
   type AccountStatus,
 } from "./ui/auth-menu";
 import { updateOpencodeConfig } from "./config/updater";
+import { getTotalUsage, getUsageHistory, logUsageSummary, type ModelUsageStats } from "./usage-tracker";
 
 export async function promptProjectId(): Promise<string> {
   const rl = createInterface({ input, output });
   try {
     const answer = await rl.question("Project ID (leave blank to use your default project): ");
     return answer.trim();
+  } finally {
+    rl.close();
+  }
+}
+
+export async function promptContinue(): Promise<void> {
+  if (!isTTY()) return;
+  const rl = createInterface({ input, output });
+  try {
+    await rl.question("Press Enter to return to menu...");
   } finally {
     rl.close();
   }
@@ -30,7 +41,7 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
   }
 }
 
-export type LoginMode = "add" | "fresh" | "manage" | "check" | "verify" | "verify-all" | "cancel";
+export type LoginMode = "add" | "fresh" | "manage" | "check" | "verify" | "verify-all" | "usage" | "cancel";
 
 export interface ExistingAccountInfo {
   email?: string;
@@ -149,7 +160,29 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         } else {
           console.log(`\n✗ Failed to configure models: ${result.error}\n`);
         }
+        await promptContinue();
         continue;
+      }
+
+      case "usage": {
+        const total = getTotalUsage()
+        console.log("")
+        console.log("📊 Session Token Usage")
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━")
+        console.log(`  Input tokens:     ${total.inputTokens.toLocaleString()}`)
+        console.log(`  Output tokens:    ${total.outputTokens.toLocaleString()}`)
+        console.log(`  Thinking tokens:  ${total.thinkingOutputTokens.toLocaleString()}`)
+        console.log(`  Cache read:       ${total.cacheReadTokens.toLocaleString()}`)
+        console.log(`  Cache write:      ${total.cacheWriteTokens.toLocaleString()}`)
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━")
+        const history = getUsageHistory()
+        const keys = Object.keys(history)
+        const lastHourKey = keys.length > 0 ? keys[keys.length - 1] : null
+        const lastHourRequests = lastHourKey && history[lastHourKey] ? (history[lastHourKey]!._total ?? 0) : 0
+        console.log(`  Hourly requests:  ${lastHourRequests} (last hour)`)
+        console.log("")
+        await promptContinue()
+        continue
       }
 
       case "cancel":
