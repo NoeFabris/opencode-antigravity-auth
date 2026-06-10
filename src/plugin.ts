@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin/tool";
 import {
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
@@ -11,7 +11,7 @@ import {
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
 import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
-import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
+import { promptAddAnotherAccount, promptLoginMode, promptProjectId, promptContinue } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
   startAntigravityDebugRequest, 
@@ -1450,7 +1450,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
       }
 
       return {
-        apiKey: "",
+        apiKey: "antigravity-oauth",
         async fetch(input, init) {
           if (!isGenerativeLanguageRequest(input)) {
             return fetch(input, init);
@@ -2692,6 +2692,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     await saveAccounts(existingStorage);
                   }
                   console.log("");
+                  await promptContinue();
                   continue;
                 }
 
@@ -2705,6 +2706,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       console.log(`\nAccount ${acc.email || menuResult.toggleAccountIndex + 1} ${acc.enabled ? 'enabled' : 'disabled'}.\n`);
                     }
                   }
+                  await promptContinue();
                   continue;
                 }
 
@@ -2714,6 +2716,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   if (verifyAll) {
                     if (existingStorage.accounts.length === 0) {
                       console.log("\nNo accounts available to verify.\n");
+                      await promptContinue();
                       continue;
                     }
 
@@ -2793,6 +2796,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                       console.log("");
                     }
 
+                    await promptContinue();
                     continue;
                   }
 
@@ -2803,12 +2807,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                   if (verifyAccountIndex === undefined) {
                     console.log("\nVerification cancelled.\n");
+                    await promptContinue();
                     continue;
                   }
 
                   const account = existingStorage.accounts[verifyAccountIndex];
                   if (!account) {
                     console.log(`\nAccount ${verifyAccountIndex + 1} not found.\n`);
+                    await promptContinue();
                     continue;
                   }
 
@@ -2829,6 +2835,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     } else {
                       console.log(`✓ ${label} is ready for requests.\n`);
                     }
+                    await promptContinue();
                     continue;
                   }
 
@@ -2866,10 +2873,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     } else {
                       console.log("No verification URL was returned. Try re-authenticating this account.\n");
                     }
+                    await promptContinue();
                     continue;
                   }
 
                   console.log(`✗ ${label}: ${verification.message}\n`);
+                  await promptContinue();
                   continue;
                 }
 

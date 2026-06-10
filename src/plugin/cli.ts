@@ -19,6 +19,16 @@ export async function promptProjectId(): Promise<string> {
   }
 }
 
+export async function promptContinue(): Promise<void> {
+  if (!isTTY()) return;
+  const rl = createInterface({ input, output });
+  try {
+    await rl.question("Press Enter to return to menu...");
+  } finally {
+    rl.close();
+  }
+}
+
 export async function promptAddAnotherAccount(currentCount: number): Promise<boolean> {
   const rl = createInterface({ input, output });
   try {
@@ -149,6 +159,7 @@ export async function promptLoginMode(existingAccounts: ExistingAccountInfo[]): 
         } else {
           console.log(`\n✗ Failed to configure models: ${result.error}\n`);
         }
+        await promptContinue();
         continue;
       }
 
