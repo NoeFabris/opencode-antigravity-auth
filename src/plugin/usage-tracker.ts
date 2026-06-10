@@ -49,6 +49,16 @@ function createEmptyStats(): ModelUsageStats {
   }
 }
 
+const HISTORY_RETENTION_HOURS = 168 // 7 days
+
+function pruneHistory(): void {
+  const keys = Object.keys(history).sort()
+  while (keys.length > HISTORY_RETENTION_HOURS) {
+    const oldest = keys.shift()
+    if (oldest) delete history[oldest]
+  }
+}
+
 function getFamily(modelId: string): string {
   const lower = (modelId || "").toLowerCase()
   if (lower.includes("claude")) return "claude"
@@ -74,6 +84,7 @@ export function trackUsage(modelId: string, usage: Partial<ModelUsageStats>): vo
 
   if (!history[key]) {
     history[key] = { _total: 0 }
+    pruneHistory()
   }
 
   const hourData = history[key]!
@@ -90,13 +101,15 @@ export function trackUsage(modelId: string, usage: Partial<ModelUsageStats>): vo
   fb._subtotal = (fb._subtotal || 0) + 1
   hourData._total = (hourData._total || 0) + 1
 
-  // Accumulate totals
-  if (usage.inputTokens) totalStats.inputTokens += usage.inputTokens
-  if (usage.outputTokens) totalStats.outputTokens += usage.outputTokens
-  if (usage.thinkingOutputTokens) totalStats.thinkingOutputTokens += usage.thinkingOutputTokens
-  if (usage.responseOutputTokens) totalStats.responseOutputTokens += usage.responseOutputTokens
-  if (usage.cacheReadTokens) totalStats.cacheReadTokens += usage.cacheReadTokens
-  if (usage.cacheWriteTokens) totalStats.cacheWriteTokens += usage.cacheWriteTokens
+  // Accumulate totals — guard against NaN/negative values
+  const addSafe = (value: number | undefined): number =>
+    (Number.isFinite(value) && value! >= 0) ? value! : 0
+  totalStats.inputTokens += addSafe(usage.inputTokens)
+  totalStats.outputTokens += addSafe(usage.outputTokens)
+  totalStats.thinkingOutputTokens += addSafe(usage.thinkingOutputTokens)
+  totalStats.responseOutputTokens += addSafe(usage.responseOutputTokens)
+  totalStats.cacheReadTokens += addSafe(usage.cacheReadTokens)
+  totalStats.cacheWriteTokens += addSafe(usage.cacheWriteTokens)
 
   log.debug(`Usage: ${modelId} input=${usage.inputTokens ?? 0} output=${usage.outputTokens ?? 0} thinking=${usage.thinkingOutputTokens ?? 0} cache_read=${usage.cacheReadTokens ?? 0}`)
 }
@@ -115,7 +128,18 @@ export function getUsageHistory(): UsageHistory {
   const sortedKeys = Object.keys(history).sort()
   const sorted: UsageHistory = {}
   for (const key of sortedKeys) {
-    sorted[key] = history[key]!
+    const original = history[key]!
+    const clone: HourlyBucket = { _total: original._total }
+    for (const fam of Object.keys(original)) {
+      const fb = original[fam]
+      if (fam === "_total") continue
+      if (typeof fb === "object" && fb !== null) {
+        clone[fam] = { ...fb, _subtotal: fb._subtotal }
+      } else {
+        clone[fam] = fb
+      }
+    }
+    sorted[key] = clone
   }
   return sorted
 }
