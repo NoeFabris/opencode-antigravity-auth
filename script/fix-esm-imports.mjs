@@ -21,8 +21,7 @@ const failedLookups = new Set()
 function resolveSpecifier(filePath, specifier) {
   if (hasExtension(specifier)) return specifier
 
-  const normalizedFilePath = filePath.replace(/\\/g, "/")
-  const targetPath = path.posix.resolve(path.posix.dirname(normalizedFilePath), specifier)
+  const targetPath = path.resolve(path.dirname(filePath), specifier)
 
   const jsPath = `${targetPath}.js`
   if (!failedLookups.has(jsPath)) {
@@ -36,13 +35,13 @@ function resolveSpecifier(filePath, specifier) {
     failedLookups.add(mjsPath)
   }
 
-  const indexJsPath = path.posix.join(targetPath, "index.js")
+  const indexJsPath = path.join(targetPath, "index.js")
   if (!failedLookups.has(indexJsPath)) {
     if (existsSync(indexJsPath)) return `${specifier}/index.js`
     failedLookups.add(indexJsPath)
   }
 
-  const indexMjsPath = path.posix.join(targetPath, "index.mjs")
+  const indexMjsPath = path.join(targetPath, "index.mjs")
   if (!failedLookups.has(indexMjsPath)) {
     if (existsSync(indexMjsPath)) return `${specifier}/index.mjs`
     failedLookups.add(indexMjsPath)
