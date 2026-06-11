@@ -293,10 +293,11 @@ function maskHeaders(headers?: HeadersInit | Headers): Record<string, string> {
     return {};
   }
 
+  const REDACTED_HEADERS = new Set(["authorization", "x-goog-api-key"]);
   const result: Record<string, string> = {};
   const parsed = headers instanceof Headers ? headers : new Headers(headers);
   parsed.forEach((value, key) => {
-    if (key.toLowerCase() === "authorization") {
+    if (REDACTED_HEADERS.has(key.toLowerCase())) {
       result[key] = "[redacted]";
     } else {
       result[key] = value;
@@ -548,5 +549,124 @@ export function logSubscriptionTier(
   runWithDebugEnabled(() => {
     const emailInfo = accountEmail ? ` account=${accountEmail}` : ""
     logDebug(`[Subscription] tier=${tier} tierId=${tierId}${emailInfo}`)
+  })
+}
+
+// =============================================================================
+// Rotation / Fallback Observability
+//
+// All public debug log helpers below self-gate via runWithDebugEnabled().
+// Callers may invoke them unconditionally — they are no-ops when debug is off.
+// =============================================================================
+
+/**
+ * Logs an account rotation decision (selection, switch, or failure).
+ *
+ * @param event - "selected" | "switched" | "skipped" | "exhausted"
+ * @param accountIndex - 0-based index of the account involved (-1 = all)
+ * @param accountEmail - Redacted account identifier (email or undefined)
+ * @param totalAccounts - Total number of enabled accounts in the pool
+ * @param reason - Human-readable reason for the event
+ * @param extra - Optional extra key=value pairs appended verbatim
+ */
+export function logAccountRotation(
+  event: "selected" | "switched" | "skipped" | "exhausted",
+  accountIndex: number,
+  accountEmail: string | undefined,
+  totalAccounts: number,
+  reason: string,
+  extra?: string,
+): void {
+  runWithDebugEnabled(() => {
+    const accountLabel = formatAccountLabel(accountEmail, accountIndex)
+    const indexLabel = accountIndex >= 0 ? `${accountIndex + 1}/${totalAccounts}` : `-/${totalAccounts}`
+    const extraInfo = extra ? ` ${extra}` : ""
+    logDebug(`[Rotation/${event.toUpperCase()}] ${accountLabel} (${indexLabel}) reason=${reason}${extraInfo}`)
+  })
+}
+
+/**
+ * Logs a header pool switch (antigravity ↔ gemini-cli).
+ *
+ * @param accountIndex - 0-based index of the account
+ * @param accountEmail - Account identifier
+ * @param from - Previous header style
+ * @param to - New header style
+ * @param reason - Why the switch happened
+ */
+export function logHeaderPoolSwitch(
+  accountIndex: number,
+  accountEmail: string | undefined,
+  from: string,
+  to: string,
+  reason: string,
+): void {
+  runWithDebugEnabled(() => {
+    const accountLabel = formatAccountLabel(accountEmail, accountIndex)
+    logDebug(`[HeaderPool] ${accountLabel} from=${from} to=${to} reason=${reason}`)
+  })
+}
+
+/**
+ * Logs a fingerprint regeneration event.
+ *
+ * @param event - "regenerated"
+ * @param accountIndex - 0-based index of the account
+ * @param accountEmail - Account identifier
+ * @param reason - Why the fingerprint was regenerated
+ * @param deviceIdPrefix - First 8 chars of new device ID (safe partial, not full UUID)
+ */
+export function logFingerprintEvent(
+  event: "regenerated",
+  accountIndex: number,
+  accountEmail: string | undefined,
+  reason: string,
+  deviceIdPrefix?: string,
+): void {
+  runWithDebugEnabled(() => {
+    const accountLabel = formatAccountLabel(accountEmail, accountIndex)
+    const deviceInfo = deviceIdPrefix ? ` newDeviceId=${deviceIdPrefix}...` : ""
+    logDebug(`[Fingerprint/${event.toUpperCase()}] ${accountLabel} reason=${reason}${deviceInfo}`)
+  })
+}
+
+/**
+ * Logs a token refresh event.
+ *
+ * @param event - "started" | "success" | "failed"
+ * @param accountIndex - 0-based index of the account
+ * @param accountEmail - Account identifier
+ * @param reason - Why refresh was triggered or what failed
+ */
+export function logTokenRefresh(
+  event: "started" | "success" | "failed",
+  accountIndex: number,
+  accountEmail: string | undefined,
+  reason?: string,
+): void {
+  runWithDebugEnabled(() => {
+    const accountLabel = formatAccountLabel(accountEmail, accountIndex)
+    const reasonInfo = reason ? ` reason=${reason}` : ""
+    logDebug(`[TokenRefresh/${event.toUpperCase()}] ${accountLabel}${reasonInfo}`)
+  })
+}
+
+/**
+ * Logs a model fallback event (e.g. Claude → Gemini due to quota/error).
+ *
+ * @param requestedModel - The model originally requested by the caller
+ * @param effectiveModel - The model actually used after fallback
+ * @param reason - Why the fallback occurred
+ * @param accountIndex - Optional account index for context
+ */
+export function logModelFallback(
+  requestedModel: string,
+  effectiveModel: string,
+  reason: string,
+  accountIndex?: number,
+): void {
+  runWithDebugEnabled(() => {
+    const accountInfo = accountIndex !== undefined ? ` account=${accountIndex + 1}` : ""
+    logDebug(`[ModelFallback] requested=${requestedModel} effective=${effectiveModel} reason=${reason}${accountInfo}`)
   })
 }

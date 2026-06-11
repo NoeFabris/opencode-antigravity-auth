@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Documented debug observability signals for account rotation, Gemini quota pool switches, token refresh, model fallback, fingerprint lifecycle, and recovery diagnostics.
+- Documented Gemini 3.5 Flash experimental model mapping and Gemini 3 Flash `minimal` / Gemini 3.5 Flash `extra-low` thinking tiers.
+- Added documentation for `verificationRequired` account circuit breaker behavior and jittered retry/backoff safeguards.
+
+### Changed
+
+- Hardened quota/recovery diagnostics by logging previously silent fallback failures while preserving secret redaction for `authorization` and `x-goog-api-key` headers.
+- Gemini fallback handling now fails fast when every enabled account requires Google verification, instead of retrying accounts that cannot currently succeed.
+
 ## [1.6.0] - 2026-02-20
 
 ### Fixed

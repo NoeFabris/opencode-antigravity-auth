@@ -83,10 +83,17 @@ Or select an account from the list and choose "Enable/Disable account".
 - Still appear in quota checks (marked `[disabled]`)
 - Can be re-enabled at any time
 
+**Accounts requiring Google verification:**
+- Are excluded from automatic rotation until verification is cleared
+- Fail fast when every enabled account requires verification
+- Should be recovered from `opencode auth login` account management after completing the Google verification flow
+
 Useful when:
 - An account is temporarily banned or rate-limited for an extended period
 - You want to reserve certain accounts for specific use cases
 - Testing with a subset of accounts
+
+If all enabled accounts are marked as requiring verification, the plugin stops retrying and returns a clear error instead of waiting for rate-limit resets that cannot help.
 
 ---
 

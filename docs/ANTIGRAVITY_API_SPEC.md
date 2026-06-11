@@ -82,7 +82,21 @@ Accept: text/event-stream
 | Claude Opus 4.6 Thinking | `claude-opus-4-6-thinking` | Anthropic | ✅ Verified |
 | Gemini 3 Pro High | `gemini-3-pro-high` | Google | ✅ Verified |
 | Gemini 3 Pro Low | `gemini-3-pro-low` | Google | ✅ Verified |
+| Gemini 3 Flash | `gemini-3-flash` | Google | ✅ Verified |
+| Gemini 3.5 Flash | `gemini-3.5-flash` | Google | Experimental / rollout-dependent |
 | GPT-OSS 120B Medium | `gpt-oss-120b-medium` | Other | ✅ Verified |
+
+### Thinking Tiers
+
+Gemini 3 family models use `thinkingLevel` string tiers rather than numeric budgets.
+
+| Model family | Supported tiers |
+|--------------|-----------------|
+| Gemini 3 Pro / 3.1 Pro | `low`, `high` |
+| Gemini 3 Flash | `minimal`, `low`, `medium`, `high` |
+| Gemini 3.5 Flash | `extra-low`, `low` |
+
+Tier suffixes are stripped from user-facing aliases before the upstream model ID is sent. For example, `antigravity-gemini-3.5-flash-extra-low` resolves to upstream model `gemini-3.5-flash` with `thinkingLevel: "extra-low"`.
 
 ---
 

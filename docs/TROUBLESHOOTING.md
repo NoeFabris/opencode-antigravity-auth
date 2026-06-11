@@ -450,6 +450,27 @@ Enable debug logging:
 
 Logs are in `~/.config/opencode/antigravity-logs/`.
 
+Use debug logs when diagnosing quota, fallback, or recovery issues. The most useful signals are:
+
+| Symptom | Log evidence to check |
+|---------|-----------------------|
+| Account rotates too often | Account rotation events and rate-limit reasons |
+| Gemini fallback is not obvious | Header pool switch events between Antigravity and Gemini CLI |
+| Model changed unexpectedly | Model fallback events with source, target, reason, and attempt |
+| Auth suddenly fails | Token refresh events and 401/403 response status |
+| Session recovers after a tool error | Recovery warnings and synthetic recovery actions |
+| Account needs manual action | Verification-required account state and related 403 details |
+
+Debug logs redact `authorization` and `x-goog-api-key` headers. Do not paste raw account files or refresh tokens into bug reports.
+
+When opening an issue, include:
+
+- Plugin version and OpenCode version
+- Model name and variant
+- Whether `debug` or `debug_tui` was enabled
+- Relevant redacted log lines around the first failure
+- Whether multiple accounts or `cli_first` were enabled
+
 ---
 
 ## E2E Testing

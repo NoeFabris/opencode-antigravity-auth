@@ -67,7 +67,7 @@ vi.mock("../constants.ts", () => ({
 import { accessTokenExpired } from "./auth.ts"
 import { refreshAccessToken } from "./token.ts"
 import { ensureProjectContext } from "./project.ts"
-import { checkAccountsQuota } from "./quota.ts"
+import { checkAccountsQuota, getSubscriptionTier } from "./quota.ts"
 
 // --- helpers ---
 
@@ -322,5 +322,186 @@ describe("checkAccountsQuota", () => {
     // Only first 10 processed — guard against runaway parallelism
     expect(results).toHaveLength(10)
     expect(results.every((r) => r.status === "ok")).toBe(true)
+  })
+})
+
+// ============================================================================
+// getSubscriptionTier — API contract and fallback tests
+// ============================================================================
+
+describe("getSubscriptionTier", () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it("sends the correct request: no mode field, nodejs UA, metadata-only body", async () => {
+    const captured: { url: string; init: RequestInit }[] = []
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        captured.push({ url, init })
+        return {
+          ok: true,
+          json: async () => ({
+            currentTier: { id: "standard-tier" },
+          }),
+          text: async () => "",
+        }
+      }),
+    )
+
+    await getSubscriptionTier("test-token")
+
+    expect(captured).toHaveLength(1)
+    const req = captured[0]!
+
+    // URL must target loadCodeAssist
+    expect(req.url).toContain("/v1internal:loadCodeAssist")
+
+    // Headers: nodejs UA, no Electron/Mozilla UA
+    const headers = req.init.headers as Record<string, string>
+    expect(headers["User-Agent"]).toBe("google-api-nodejs-client/9.15.1")
+    expect(headers["User-Agent"]).not.toMatch(/Mozilla|Electron/i)
+
+    // Body must NOT contain "mode"
+    const body = JSON.parse(req.init.body as string) as Record<string, unknown>
+    expect(body).not.toHaveProperty("mode")
+    expect(body).toHaveProperty("metadata")
+    const metadata = body["metadata"] as Record<string, string>
+    expect(metadata["ideType"]).toBe("ANTIGRAVITY")
+    expect(metadata["pluginType"]).toBe("GEMINI")
+  })
+
+  it("resolves tier from paidTier.id (highest priority)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          paidTier: { id: "ultra-tier" },
+          currentTier: { id: "standard-tier" },
+          allowedTiers: [{ id: "free-tier", isDefault: true }],
+        }),
+        text: async () => "",
+      })),
+    )
+
+    const result = await getSubscriptionTier("tok")
+
+    expect(result.tier).toBe("ultra")
+    expect(result.tierId).toBe("ultra-tier")
+    expect(result.tierSource).toBe("paidTier")
+  })
+
+  it("falls back to currentTier when paidTier is absent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          currentTier: { id: "standard-tier" },
+          allowedTiers: [{ id: "free-tier", isDefault: true }],
+        }),
+        text: async () => "",
+      })),
+    )
+
+    const result = await getSubscriptionTier("tok")
+
+    expect(result.tier).toBe("pro")
+    expect(result.tierSource).toBe("currentTier")
+  })
+
+  it("falls back to allowedTiers default when paidTier and currentTier are absent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          allowedTiers: [
+            { id: "free-tier", isDefault: false },
+            { id: "pro-tier", isDefault: true },
+          ],
+        }),
+        text: async () => "",
+      })),
+    )
+
+    const result = await getSubscriptionTier("tok")
+
+    expect(result.tier).toBe("pro")
+    expect(result.tierSource).toBe("allowedTiers")
+  })
+
+  it("returns unknown tier on HTTP 400 without throwing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({}),
+        text: async () => "INVALID_ARGUMENT",
+      })),
+    )
+
+    const result = await getSubscriptionTier("tok")
+
+    expect(result.tier).toBe("unknown")
+    expect(result.tierId).toBeNull()
+    expect(result.tierSource).toBeNull()
+    expect(result.projectId).toBeNull()
+  })
+
+  it("returns unknown when all endpoints are exhausted", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network failure")
+      }),
+    )
+
+    const result = await getSubscriptionTier("tok")
+
+    expect(result.tier).toBe("unknown")
+    expect(result.tierId).toBeNull()
+  })
+
+  it("extracts projectId from cloudaicompanionProject string", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          cloudaicompanionProject: "my-companion-project",
+          currentTier: { id: "pro-premium" },
+        }),
+        text: async () => "",
+      })),
+    )
+
+    const result = await getSubscriptionTier("tok")
+
+    expect(result.projectId).toBe("my-companion-project")
+    expect(result.tier).toBe("pro")
+  })
+
+  it("extracts projectId from cloudaicompanionProject object shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          cloudaicompanionProject: { id: "object-project-id" },
+          currentTier: { id: "free-tier" },
+        }),
+        text: async () => "",
+      })),
+    )
+
+    const result = await getSubscriptionTier("tok")
+
+    expect(result.projectId).toBe("object-project-id")
+    expect(result.tier).toBe("free")
   })
 })

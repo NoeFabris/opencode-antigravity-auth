@@ -105,6 +105,26 @@ Settings that control plugin behavior.
 
 Logs are written to `~/.config/opencode/antigravity-logs/` (or `log_dir` if set).
 
+`debug` and `debug_tui` are independent:
+
+| Option | Sink | Use when |
+|--------|------|----------|
+| `debug` | File logs | You need durable logs for bug reports or later analysis |
+| `debug_tui` | OpenCode TUI log panel | You want live feedback while a session is running |
+
+Debug logs include operational events for quota and recovery diagnosis:
+
+| Event area | What to look for |
+|------------|------------------|
+| Account rotation | Selected account index, strategy, and switch reason |
+| Header pool switch | Gemini Antigravity/Gemini CLI pool transitions |
+| Token refresh | Refresh start/success/failure status without token values |
+| Model fallback | Source model, target model, reason, and attempt count |
+| Fingerprint changes | Regeneration/restoration events with non-secret fingerprint hints |
+| Recovery | Synthetic recovery actions and failed recovery side effects |
+
+Sensitive headers such as `authorization` and `x-goog-api-key` are redacted before logging.
+
 ---
 
 ## Recommended Configs

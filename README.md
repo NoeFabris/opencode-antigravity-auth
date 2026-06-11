@@ -115,6 +115,7 @@ opencode run "Hello" --model=google/antigravity-claude-opus-4-6-thinking --varia
 | `antigravity-gemini-3-pro` | low, high | Gemini 3 Pro with thinking |
 | `antigravity-gemini-3.1-pro` | low, high | Gemini 3.1 Pro with thinking (rollout-dependent) |
 | `antigravity-gemini-3-flash` | minimal, low, medium, high | Gemini 3 Flash with thinking |
+| `antigravity-gemini-3.5-flash` | extra-low, low | Gemini 3.5 Flash experimental catalog |
 | `antigravity-claude-sonnet-4-6` | — | Claude Sonnet 4.6 |
 | `antigravity-claude-opus-4-6-thinking` | low, max | Claude Opus 4.6 with extended thinking |
 
@@ -637,6 +638,10 @@ Control how the plugin handles rate limits:
 | `debug` | `false` | Enable debug file logging (`~/.config/opencode/antigravity-logs/`) |
 | `debug_tui` | `false` | Show debug logs in the TUI log panel (independent from `debug`) |
 | `auto_update` | `true` | Auto-update plugin |
+
+Debug logs include account rotation, quota pool switches, token refresh, model fallback, fingerprint lifecycle, and recovery events. Sensitive headers such as `authorization` and `x-goog-api-key` are redacted before logging.
+
+Accounts that Google marks as requiring verification are skipped by rotation. If every enabled account needs verification, the request fails fast with a clear error; run `opencode auth login`, open account management, and complete/clear verification before retrying.
 
 For all options, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 

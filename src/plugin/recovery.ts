@@ -13,6 +13,9 @@ import type { AntigravityConfig } from "./config";
 import { createLogger } from "./logger";
 import { logToast } from "./debug";
 import type { PluginClient } from "./types";
+
+const log = createLogger("recovery");
+
 import {
   readParts,
   findMessagesWithThinkingBlocks,
@@ -182,7 +185,8 @@ async function recoverToolResultMissing(
     });
 
     return true;
-  } catch {
+  } catch (e) {
+    log.warn("Failed to append synthetic tool result during recovery", { error: String(e) });
     return false;
   }
 }
@@ -281,7 +285,8 @@ async function resumeSession(
       query: { directory },
     });
     return true;
-  } catch {
+  } catch (e) {
+    log.warn("Failed to resume session automatically", { error: String(e) });
     return false;
   }
 }
@@ -409,7 +414,6 @@ export function createSessionRecoveryHook(
     // In that case, we need to fetch messages and find the latest assistant with error
     let assistantMsgID = info.id;
     let msgs: MessageData[] | undefined;
-    const log = createLogger("session-recovery");
 
     log.debug("Recovery attempt started", {
       errorType,
@@ -423,7 +427,7 @@ export function createSessionRecoveryHook(
     }
 
     // Abort current request
-    await client.session.abort({ path: { id: sessionID } }).catch(() => {});
+    await client.session.abort({ path: { id: sessionID } }).catch((e) => log.warn("Failed to abort session during recovery", { error: String(e) }));
 
     // Fetch messages - needed to find the failed message
     const messagesResp = await client.session.messages({
@@ -472,7 +476,7 @@ export function createSessionRecoveryHook(
             variant: "warning",
           },
         })
-        .catch(() => {});
+        .catch((e) => log.warn("Failed to show toast", { error: String(e) }));
 
       // Perform recovery based on error type
       let success = false;

@@ -190,12 +190,38 @@ Claude rejects unsupported JSON Schema features. The plugin uses an **allowlist 
 2. **Per-model-family** - Claude/Gemini rate limits tracked separately
 3. **Dual quota (Gemini)** - Antigravity + Gemini CLI headers
 4. **Automatic failover** - On 429, switch to next available account
+5. **Verification circuit breaker** - Accounts marked `verificationRequired` are skipped; if every enabled account requires verification, the request fails fast instead of looping
+6. **Jittered retries** - Retry and switch delays include bounded jitter to avoid synchronized retry storms across parallel sessions
 
 ### Account Storage
 
 Location: `~/.config/opencode/antigravity-accounts.json`
 
 Contains OAuth refresh tokens - treat as sensitive.
+
+---
+
+## Observability
+
+The plugin has two debug sinks:
+
+| Sink | Controlled by | Purpose |
+|------|---------------|---------|
+| File logs | `debug` or `OPENCODE_ANTIGRAVITY_DEBUG` | Durable traces for bug reports and offline diagnosis |
+| TUI logs | `debug_tui` or `OPENCODE_ANTIGRAVITY_DEBUG_TUI` | Live feedback inside OpenCode |
+
+Critical runtime paths emit structured operational signals:
+
+| Path | Signals |
+|------|---------|
+| Account selection | Account index, strategy, and rotation reason |
+| Gemini quota routing | Header pool switch between Antigravity and Gemini CLI |
+| Token refresh | Refresh lifecycle without secret token values |
+| Model resolution | Fallback source, target, reason, and attempt count |
+| Fingerprint lifecycle | Regeneration/restoration without credential data |
+| Session recovery | Failed recovery side effects and synthetic recovery actions |
+
+Header logging masks `authorization` and `x-goog-api-key` before writing to either sink.
 
 ---
 

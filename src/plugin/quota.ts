@@ -12,6 +12,9 @@ import { refreshAccessToken } from "./token";
 import { getModelFamily } from "./transform/model-resolver";
 import type { PluginClient, OAuthAuthDetails } from "./types";
 import type { AccountMetadataV3 } from "./storage";
+import { createLogger } from "./logger";
+
+const log = createLogger("quota");
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -398,10 +401,16 @@ async function checkSingleAccountQuota(
 
   const [antigravityResponse, geminiCliResponse, subscriptionInfo] = await Promise.all([
     fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
-      .catch((): FetchAvailableModelsResponse => ({ models: undefined })),
+      .catch((e): FetchAvailableModelsResponse => {
+        log.warn("fetchAvailableModels failed during background refresh", { error: String(e) });
+        return { models: undefined };
+      }),
     fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
     getSubscriptionTier(auth.access ?? "")
-      .catch((): SubscriptionInfo => ({ tier: "unknown", tierId: null, tierSource: null, projectId: null })),
+      .catch((e): SubscriptionInfo => {
+        log.warn("getSubscriptionTier failed", { error: String(e) });
+        return { tier: "unknown", tierId: null, tierSource: null, projectId: null };
+      }),
   ]);
 
   const quotaResult: QuotaSummary =
@@ -525,7 +534,9 @@ export async function getSubscriptionTier(accessToken: string): Promise<Subscrip
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
-    ...getAntigravityHeaders(),
+    "User-Agent": "google-api-nodejs-client/9.15.1",
+    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
   }
 
   const body = JSON.stringify({
@@ -534,7 +545,6 @@ export async function getSubscriptionTier(accessToken: string): Promise<Subscrip
       platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
       pluginType: "GEMINI",
     },
-    mode: 1,
   })
 
   for (const endpoint of ANTIGRAVITY_LOAD_ENDPOINTS) {

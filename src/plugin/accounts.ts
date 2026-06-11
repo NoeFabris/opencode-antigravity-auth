@@ -609,6 +609,14 @@ export class AccountManager {
     const current = this.getCurrentAccountForFamily(family);
     if (current) {
       clearExpiredRateLimits(current);
+      if (current.verificationRequired === true) {
+        const next = this.getNextForFamily(family, model, headerStyle, softQuotaThresholdPercent, softQuotaCacheTtlMs);
+        if (next) {
+          this.markTouchedForQuota(next, quotaKey);
+          this.currentAccountIndexByFamily[family] = next.index;
+        }
+        return next;
+      }
       const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
       const isOverThreshold = isOverSoftQuotaThreshold(current, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
       if (!isLimitedForRequestedStyle && !isOverThreshold && !this.isAccountCoolingDown(current)) {
@@ -664,6 +672,9 @@ export class AccountManager {
     if (this.isAccountCoolingDown(account)) {
       return fail("cooling down");
     }
+    if (account.verificationRequired === true) {
+      return fail("needs verification");
+    }
     if (isRateLimitedForHeaderStyle(account, family, headerStyle, model)) {
       return fail("rate-limited");
     }
@@ -678,6 +689,7 @@ export class AccountManager {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
       return a.enabled !== false && 
+             a.verificationRequired !== true &&
              !isRateLimitedForHeaderStyle(a, family, headerStyle, model) && 
              !isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model) &&
              !this.isAccountCoolingDown(a);

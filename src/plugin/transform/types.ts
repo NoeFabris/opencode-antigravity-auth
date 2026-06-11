@@ -2,7 +2,7 @@ import type { HeaderStyle } from "../../constants";
 
 export type ModelFamily = "claude" | "gemini-flash" | "gemini-pro";
 
-export type ThinkingTier = "low" | "medium" | "high";
+export type ThinkingTier = "minimal" | "extra-low" | "low" | "medium" | "high";
 
 /**
  * Context for request transformation.

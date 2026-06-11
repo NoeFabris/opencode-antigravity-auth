@@ -24,10 +24,11 @@ export const THINKING_TIER_BUDGETS = {
 
 /**
  * Gemini 3 uses thinkingLevel strings instead of numeric budgets.
- * Flash supports: minimal, low, medium, high
+ * Flash supports: minimal, extra-low, low, medium, high
+ * 3.5 Flash catalog: extra-low, low (medium/high unavailable)
  * Pro supports: low, high (no minimal/medium)
  */
-export const GEMINI_3_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const;
+export const GEMINI_3_THINKING_LEVELS = ["minimal", "extra-low", "low", "medium", "high"] as const;
 
 /**
  * Model aliases - maps user-friendly names to API model names.
@@ -47,6 +48,9 @@ export const MODEL_ALIASES: Record<string, string> = {
   "gemini-3-flash-low": "gemini-3-flash",
   "gemini-3-flash-medium": "gemini-3-flash",
   "gemini-3-flash-high": "gemini-3-flash",
+  // Gemini 3.5 Flash experimental variants (catalog: extra-low, low only)
+  "gemini-3.5-flash-low": "gemini-3.5-flash",
+  "gemini-3.5-flash-extra-low": "gemini-3.5-flash",
 
   // Claude proxy names (gemini- prefix for compatibility)
   "gemini-claude-opus-4-6-thinking-low": "claude-opus-4-6-thinking",
@@ -59,7 +63,7 @@ export const MODEL_ALIASES: Record<string, string> = {
   // Reference: Antigravity-Manager/src-tauri/src/proxy/common/model_mapping.rs
 };
 
-const TIER_REGEX = /-(minimal|low|medium|high)$/;
+const TIER_REGEX = /-(extra-low|minimal|low|medium|high)$/;
 const QUOTA_PREFIX_REGEX = /^antigravity-/i;
 const GEMINI_3_PRO_REGEX = /^gemini-3(?:\.\d+)?-pro/i;
 const GEMINI_3_FLASH_REGEX = /^gemini-3(?:\.\d+)?-flash/i;
@@ -254,7 +258,9 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
 
   const budgetFamily = getBudgetFamily(resolvedModel);
   const budgets = THINKING_TIER_BUDGETS[budgetFamily];
-  const thinkingBudget = budgets[tier];
+  const thinkingBudget = (tier === "low" || tier === "medium" || tier === "high")
+    ? budgets[tier]
+    : undefined;
 
   return {
     actualModel: resolvedModel,
@@ -350,7 +356,7 @@ export function resolveModelForHeaderStyle(
       .replace(/^antigravity-/i, "");
     
     const isGemini3Pro = isGemini3ProModel(transformedModel);
-    const hasTierSuffix = /-(low|medium|high)$/i.test(transformedModel);
+    const hasTierSuffix = /-(extra-low|low|medium|high)$/i.test(transformedModel);
     const isImageModel = IMAGE_GENERATION_MODELS.test(transformedModel);
     
     // Don't add tier suffix to image models - they don't support thinking
@@ -365,7 +371,7 @@ export function resolveModelForHeaderStyle(
   if (headerStyle === "gemini-cli") {
     let transformedModel = requestedModel
       .replace(/^antigravity-/i, "")
-      .replace(/-(low|medium|high)$/i, "");
+      .replace(/-(extra-low|low|medium|high)$/i, "");
 
     const hasPreviewSuffix = /-preview($|-)/i.test(transformedModel);
     if (!hasPreviewSuffix) {
@@ -415,7 +421,7 @@ export function resolveModelWithVariant(
 
     let actualModel = base.actualModel;
     if (isAntigravityGemini3Pro) {
-      const baseModel = base.actualModel.replace(/-(low|medium|high)$/, "");
+      const baseModel = base.actualModel.replace(/-(extra-low|low|medium|high)$/, "");
       actualModel = `${baseModel}-${level}`;
     }
 
