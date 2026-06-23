@@ -1181,6 +1181,7 @@ describe("AccountManager", () => {
       it("parses QUOTA_EXHAUSTED from reason field", () => {
         expect(parseRateLimitReason("QUOTA_EXHAUSTED", undefined)).toBe("QUOTA_EXHAUSTED");
         expect(parseRateLimitReason("quota_exhausted", undefined)).toBe("QUOTA_EXHAUSTED");
+        expect(parseRateLimitReason("INSUFFICIENT_G1_CREDITS_BALANCE", undefined)).toBe("QUOTA_EXHAUSTED");
       });
 
       it("parses RATE_LIMIT_EXCEEDED from reason field", () => {
@@ -1195,6 +1196,13 @@ describe("AccountManager", () => {
         expect(parseRateLimitReason(undefined, "Rate limit exceeded per minute")).toBe("RATE_LIMIT_EXCEEDED");
         expect(parseRateLimitReason(undefined, "Too many requests")).toBe("RATE_LIMIT_EXCEEDED");
         expect(parseRateLimitReason(undefined, "Quota exhausted for today")).toBe("QUOTA_EXHAUSTED");
+        expect(
+          parseRateLimitReason(
+            undefined,
+            '{"reason":"INSUFFICIENT_G1_CREDITS_BALANCE","message":"Resource has been exhausted (e.g. check quota)."}',
+            429,
+          ),
+        ).toBe("QUOTA_EXHAUSTED");
       });
 
       it("returns UNKNOWN when no pattern matches", () => {
