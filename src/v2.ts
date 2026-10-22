@@ -72,6 +72,7 @@ function oauthCredential(auth: OAuthAuthDetails, metadata?: Credential.OAuth["me
   }
 }
 
+/** Recognizes Antigravity grants and V1 OAuth imports bound to this account pool. */
 function isAntigravityCredential(value: Credential.Value | undefined, accounts: readonly AccountMetadataV3[] = [], boundID?: unknown): value is Credential.OAuth {
   if (value?.type !== "oauth" || !value.refresh) return false
   if (value.methodID === METHOD_ID) return true
@@ -205,6 +206,7 @@ export const AntigravityV2Plugin = Plugin.define({
     let observedIdentity: string | undefined
     let loading: Promise<LoaderResult | undefined> | undefined
     let usesAntigravityOAuth = false
+    let modelReloadPending = false
     let connectionEvents: Promise<void> | undefined
     let modelAccessRefresh = Promise.resolve()
 
@@ -262,6 +264,7 @@ export const AntigravityV2Plugin = Plugin.define({
       } : undefined)
     }
     const currentAuth = async () => (await resolveAuth())?.auth
+    /** Reconciles credential ownership and retries catalog reloads until one succeeds. */
     const refreshModelAccess = (reload: boolean) => {
       // Read changes in order, including switches during the initial resolution.
       modelAccessRefresh = modelAccessRefresh.then(async () => {
@@ -271,9 +274,13 @@ export const AntigravityV2Plugin = Plugin.define({
           const stored = value?.type === "oauth" && value.methodID === "oauth" ? await loadAccounts() : undefined
           const boundID = connection?.type === "credential" ? await ctx.storage.get(`connection-account:${connection.id}`) : undefined
           const next = isAntigravityCredential(value, stored?.accounts, boundID)
-          if (disposed || next === usesAntigravityOAuth) return
+          if (disposed || (next === usesAntigravityOAuth && !modelReloadPending)) return
           usesAntigravityOAuth = next
-          if (reload) await ctx.model.reload()
+          if (reload) {
+            modelReloadPending = true
+            await ctx.model.reload()
+            modelReloadPending = false
+          }
         } catch (error) {
           if (!disposed) log.warn("Could not update Google model authentication", { error: String(error) })
         }

@@ -322,6 +322,20 @@ describe("OpenCode V2 adapter", () => {
     expect(adapter.emit({ type, id: "event-after-cleanup", created: Date.now(), data: {} } as V2Event)).toBe(false)
   })
 
+  it.each([true, false])("retries a failed model reload on the next credential event (initial OAuth=%s)", async initiallyOAuth => {
+    const key = { type: "key", key: "real-key" } as const
+    const adapter = await host({ value: initiallyOAuth ? credential() : key })
+    vi.mocked(adapter.ctx.model.reload).mockRejectedValueOnce(new Error("Temporary catalog reload failure"))
+    adapter.setCredential(initiallyOAuth ? key : credential())
+    adapter.emit({ type: "credential.updated", id: "event-first", created: Date.now(), data: {} } as V2Event)
+    await vi.waitFor(() => expect(adapter.ctx.model.reload).toHaveBeenCalledTimes(1))
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(!initiallyOAuth)
+
+    adapter.emit({ type: "credential.updated", id: "event-retry", created: Date.now(), data: {} } as V2Event)
+    await vi.waitFor(() => expect(adapter.ctx.model.reload).toHaveBeenCalledTimes(2))
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(initiallyOAuth)
+  })
+
   it("keeps native selection when an unrelated account is disabled before inference", async () => {
     mockNetwork()
     state.storage!.accounts.push({ ...pool().accounts[0]!, email: "second@example.test", refreshToken: "second" })
