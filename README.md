@@ -19,7 +19,7 @@ Add to `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-antigravity-auth@2.1.0"]
+  "plugins": ["opencode-antigravity-auth@2.1.1"]
 }
 ```
 
@@ -41,7 +41,7 @@ opencode run --model=google/antigravity-gemini-3.8-flash-high "Hello"
 opencode run --model=google/antigravity-claude-opus-4-6-thinking#max "Hello"
 ```
 
-Models are discovered from your enabled accounts and cached for an hour. Availability depends on your Google plan. Disabled and internal models are excluded; native Google API-key models keep their own transport.
+Models are discovered from your enabled accounts and cached for an hour. Availability depends on your Google plan. Select an `antigravity-*` model for Google OAuth. Native Google API-key models are hidden while Antigravity OAuth is selected and return when you switch to an API-key connection.
 
 Inside OpenCode, open **`/antigravity`** (or **`/ag`**) to:
 

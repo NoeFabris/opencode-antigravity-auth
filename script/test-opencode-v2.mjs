@@ -74,6 +74,15 @@ try {
   const version = await run(["--version"])
   if (!/\bv?2\./.test(version.output)) throw new Error(`Expected OpenCode V2, got ${version.output.trim()}`)
   console.log(`Runtime: ${version.output.trim()}; auth: ${authMode}`)
+  const catalog = await run(["models", "--standalone"])
+  const modelIDs = catalog.output.split("\n").map(line => line.trim()).filter(line => line.startsWith("google/"))
+  if (!modelIDs.some(id => id.startsWith("google/antigravity-"))) throw new Error("Antigravity models are missing from the picker")
+  if (authMode !== "pool" && modelIDs.some(id => !id.startsWith("google/antigravity-"))) {
+    throw new Error("Antigravity OAuth exposes native Google models that require an API key")
+  }
+  console.log("PASS Google model catalog matches the active authentication method")
+  // Keep the inference evidence below limited to its four independent runs.
+  writeFileSync(logPath, "")
   const tests = [
     { model: "google/antigravity-gemini-3-flash#high", tool: false },
     { model: "google/antigravity-claude-opus-4-6-thinking#max", tool: false },

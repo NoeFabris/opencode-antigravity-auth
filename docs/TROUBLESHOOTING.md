@@ -23,6 +23,21 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 
 ## Quick Fixes
 
+### "API key not valid" after connecting Google OAuth in OpenCode V2
+
+Select a `google/antigravity-*` model. Ordinary Google model IDs use the native
+Gemini API, which requires an API key; the Antigravity OAuth connection uses your
+Google account's Antigravity access instead. Refresh the available catalog from
+`/antigravity` to see the models available to your enabled accounts:
+
+```bash
+opencode models
+opencode run --model=google/antigravity-gemini-3.8-flash-high "Hello"
+```
+
+The plugin hides native Google API-key models while Antigravity OAuth is selected.
+Switch to a Google API-key connection to use the native catalog.
+
 ### Auth problems
 Delete the accounts file and re-authenticate:
 ```bash

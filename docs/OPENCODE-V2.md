@@ -79,7 +79,8 @@ the menu itself does not refresh saved credentials.
 
 Quota details show one account at a time. Both Antigravity and Gemini CLI quotas
 are displayed when available. In V2, `antigravity-*` inference uses Antigravity
-OAuth; ordinary Gemini IDs retain OpenCode's native transport.
+OAuth. Native Google API-key models are hidden while an Antigravity OAuth
+connection is selected. Switching to an API-key connection restores those models.
 
 ## Runtime changes
 
@@ -132,6 +133,7 @@ The V2 runtime test runs the actual CLI in temporary config, data, state, and
 cache directories with synthetic accounts and controlled Google responses. It
 checks both model families, streaming, thinking variants, tool execution and
 tool-result round trips, the daily endpoint, Hub identity, and API key stripping.
+It also checks that Antigravity OAuth hides native Google API-key models.
 It never reads the user's account files. Pass a built package directory as the
 script's argument to verify an unpacked npm archive. The default test includes
 the migrated V1 credential shape. Set `OPENCODE_V2_TEST_AUTH=pool` for pool-only

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { EventEmitter, on } from "node:events"
 import { createRequire } from "node:module"
 import { pathToFileURL } from "node:url"
 import { Credential, Integration, Model, Provider, type Plugin } from "@opencode/plugin"
-import type { ConnectionInfo } from "@opencode/client"
+import type { ConnectionInfo, V2Event } from "@opencode/client"
 import type { AISDKHooks } from "@opencode/plugin/promise/aisdk"
 import type { IntegrationMethodRegistration } from "@opencode/plugin/promise/integration"
 import type { ModelEditor } from "@opencode/plugin/promise/model"
@@ -127,9 +128,11 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   ])
   const record = { provider, models }
   const storage = new Map<string, unknown>()
+  const events = new EventEmitter<{ event: [V2Event] }>()
   if (options.catalog) storage.set("model-catalog", { version: 3, identity: accountPoolIdentity(state.storage?.accounts ?? []), updatedAt: Date.now(), models: options.catalog, accounts: options.catalogAccounts ?? {} })
   let method: OAuthMethod | undefined
   let sdkHook: ((event: AISDKHooks["sdk"]) => Promise<void> | void) | undefined
+  let modelTransform: ((editor: ModelEditor) => void) | undefined
   let tool: ToolInfo | undefined
   let accountHandlers: RpcHandlers<typeof AntigravityAccountsRpc> | undefined
   const disposals: ReturnType<typeof vi.fn>[] = []
@@ -163,6 +166,11 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
     location: { directory: "/tmp/antigravity-v2-test" },
     storage: { get: vi.fn(async (key: string) => storage.get(key)), set: vi.fn(async (key: string, value: unknown) => { storage.set(key, value) }), remove: vi.fn(async (key: string) => { storage.delete(key) }) },
     credential: { activate: vi.fn(async ({ credentialID }: { credentialID: string }) => { connectionID = credentialID }) },
+    event: {
+      async *subscribe(options?: { signal?: AbortSignal }) {
+        for await (const [event] of on(events, "event", options)) yield event as V2Event
+      },
+    },
     rpc: { register: async (_definition: typeof AntigravityAccountsRpc, handlers: RpcHandlers<typeof AntigravityAccountsRpc>) => {
       accountHandlers = handlers
       return registration()
@@ -181,7 +189,13 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
     },
     provider: { reload: vi.fn(async () => undefined), transform: async (callback: (editor: ProviderEditor) => void) => { callback(providerEditor); return registration() } },
     model: {
+      reload: vi.fn(async () => {
+        // Core rebuilds from source definitions before applying transforms.
+        models.set("gemini-native-only", Model.Info.default(Provider.ID.google, Model.ID.make("gemini-native-only")) as DeepMutable<Model.Info>)
+        modelTransform?.(modelEditor)
+      }),
       transform: async (callback: (editor: ModelEditor) => void) => {
+        modelTransform = callback
         if (options.legacyOverride) models.set("antigravity-gemini-3-pro", { ...Model.Info.default(Provider.ID.google, Model.ID.make("antigravity-gemini-3-pro")), package: "@opencode/ai/providers/google" } as DeepMutable<Model.Info>)
         if (options.nativeOverride) for (const model of models.values()) model.package = "@opencode/google"
         callback(modelEditor)
@@ -208,6 +222,7 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   const hook = sdkHook
   return {
     models, provider, method, tool, cleanup, disposals, accountHandlers, storage, ctx,
+    emit: (event: V2Event) => events.emit("event", event),
     setCredential: (next: Credential.Value, id?: string) => { value = next; connectionID = id },
     disconnect: () => { connected = false },
     async sdk(id = "antigravity-gemini-3-flash", settings: Record<string, unknown> = {}) {
@@ -263,6 +278,50 @@ afterEach(async () => {
 })
 
 describe("OpenCode V2 adapter", () => {
+  it.each(["antigravity", "oauth"])("hides native API-key models when using %s OAuth", async methodID => {
+    const adapter = await host({ value: { ...credential(), methodID: Integration.MethodID.make(methodID) } })
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
+    expect(adapter.models.get("antigravity-gemini-3-flash")?.enabled).toBe(true)
+  })
+
+  it("preserves native models for another plugin's OAuth connection", async () => {
+    const adapter = await host({ value: { ...credential(), methodID: Integration.MethodID.make("other-google-oauth") } })
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(true)
+  })
+
+  it("preserves native models for an unrelated migrated OAuth credential", async () => {
+    const adapter = await host({ value: { ...credential("unrelated|project"), methodID: Integration.MethodID.make("oauth") } })
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(true)
+  })
+
+  it("keeps native API-key models hidden when the Antigravity pool is disabled", async () => {
+    state.storage!.accounts[0]!.enabled = false
+    const adapter = await host()
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
+  })
+
+  it("updates native model availability when switching between OAuth and an API key", async () => {
+    const adapter = await host()
+    adapter.setCredential({ type: "key", key: "real-key" }, "native-key")
+    adapter.emit({ type: "credential.switched", id: "event-key", created: Date.now(), data: { integrationID: "google", credentialID: "native-key" } } as V2Event)
+    await vi.waitFor(() => expect(adapter.ctx.model.reload).toHaveBeenCalledTimes(1))
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(true)
+
+    adapter.setCredential(credential(), "native-oauth")
+    adapter.emit({ type: "credential.switched", id: "event-oauth", created: Date.now(), data: { integrationID: "google", credentialID: "native-oauth" } } as V2Event)
+    await vi.waitFor(() => expect(adapter.ctx.model.reload).toHaveBeenCalledTimes(2))
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
+  })
+
+  it.each(["credential.updated", "integration.updated"] as const)("updates the model catalog after %s and stops listening on cleanup", async type => {
+    const adapter = await host({ value: { type: "key", key: "real-key" } })
+    adapter.setCredential(credential())
+    adapter.emit({ type, id: "event-update", created: Date.now(), data: {} } as V2Event)
+    await vi.waitFor(() => expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false))
+    await adapter.cleanup()
+    expect(adapter.emit({ type, id: "event-after-cleanup", created: Date.now(), data: {} } as V2Event)).toBe(false)
+  })
+
   it("keeps native selection when an unrelated account is disabled before inference", async () => {
     mockNetwork()
     state.storage!.accounts.push({ ...pool().accounts[0]!, email: "second@example.test", refreshToken: "second" })
@@ -321,7 +380,7 @@ describe("OpenCode V2 adapter", () => {
   it("disables retired models from legacy config instead of exposing a native Google route", async () => {
     const adapter = await host({ catalog: { "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", maxTokens: 1048576, maxOutputTokens: 65536 } }, legacyOverride: true })
     expect(adapter.models.get("antigravity-gemini-3-pro")?.enabled).toBe(false)
-    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(true)
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
     await expect(adapter.sdk("antigravity-gemini-3-pro")).rejects.toThrow("unavailable to the enabled Antigravity accounts")
   })
 
@@ -362,6 +421,7 @@ describe("OpenCode V2 adapter", () => {
     const adapter = await host({ value: { type: "key", key: "real-key" } })
     expect(adapter.provider.package).toBe("@opencode/google")
     expect(adapter.models.get("gemini-native-only")?.package).toBeUndefined()
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(true)
     expect(adapter.models.get("antigravity-gemini-3-flash")?.package).toBe(googleSDKPackage)
     expect(adapter.models.has("gemini-2.5-flash")).toBe(false)
     const { sdk } = await adapter.sdk("gemini-native-only", { apiKey: "real-key", baseURL: "https://custom.example.test" })

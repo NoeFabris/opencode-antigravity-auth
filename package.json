@@ -1,6 +1,6 @@
 {
     "name": "opencode-antigravity-auth",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "description": "Google Antigravity OAuth for OpenCode, with account rotation, live models, and quota management",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",

@@ -15,7 +15,7 @@ import { createLogger } from "./plugin/logger.ts"
 import { ensureProjectContext } from "./plugin/project.ts"
 import { executeSearch, type SearchArgs } from "./plugin/search.ts"
 import { startOAuthListener, type OAuthListener } from "./plugin/server.ts"
-import { loadAccounts, matchesAccountToken, saveAccountCredentials, updateAccountCredentials, updateAccounts } from "./plugin/storage.ts"
+import { loadAccounts, matchesAccountToken, saveAccountCredentials, updateAccountCredentials, updateAccounts, type AccountMetadataV3 } from "./plugin/storage.ts"
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token.ts"
 import { resolveModelWithTier } from "./plugin/transform/model-resolver.ts"
 import type { AuthDetails, LoaderResult, OAuthAuthDetails, PluginClient } from "./plugin/types.ts"
@@ -72,8 +72,12 @@ function oauthCredential(auth: OAuthAuthDetails, metadata?: Credential.OAuth["me
   }
 }
 
-function isAntigravityCredential(value: Credential.Value | undefined): value is Credential.OAuth {
-  return value?.type === "oauth" && value.methodID === METHOD_ID && !!value.refresh
+function isAntigravityCredential(value: Credential.Value | undefined, accounts: readonly AccountMetadataV3[] = [], boundID?: unknown): value is Credential.OAuth {
+  if (value?.type !== "oauth" || !value.refresh) return false
+  if (value.methodID === METHOD_ID) return true
+  // V1 migration imports generic OAuth credentials; the pool establishes ownership.
+  return value.methodID === "oauth" && (typeof boundID === "string"
+    || accounts.some(account => matchesAccountToken(account, parseRefreshParts(value.refresh).refreshToken)))
 }
 
 /** OpenCode 2.1's source transforms and AI SDK 3 transport adapter. */
@@ -200,6 +204,9 @@ export const AntigravityV2Plugin = Plugin.define({
     let generation = 0
     let observedIdentity: string | undefined
     let loading: Promise<LoaderResult | undefined> | undefined
+    let usesAntigravityOAuth = false
+    let connectionEvents: Promise<void> | undefined
+    let modelAccessRefresh = Promise.resolve()
 
     type ResolvedAuth = { auth: OAuthAuthDetails; identity: string; select: boolean; accountID?: string }
     const observeAuth = (resolved: ResolvedAuth | undefined) => {
@@ -224,10 +231,7 @@ export const AntigravityV2Plugin = Plugin.define({
         const stored = await loadAccounts()
         const bindingKey = connection.type === "credential" ? `connection-account:${connection.id}` : undefined
         const boundID = bindingKey ? await ctx.storage.get(bindingKey) : undefined
-        const migrated = value?.type === "oauth" && value.methodID === "oauth"
-          && (typeof boundID === "string" || stored?.accounts.some((account) => matchesAccountToken(account, parseRefreshParts(value.refresh).refreshToken)))
-        if (!isAntigravityCredential(value) && !migrated) return observeAuth(undefined)
-        if (value?.type !== "oauth") return observeAuth(undefined)
+        if (!isAntigravityCredential(value, stored?.accounts, boundID)) return observeAuth(undefined)
         // V1 credentials are imported with a generic method ID. Only matching
         // this plugin's existing pool establishes their Antigravity ownership.
         const metadataID = value.metadata?.antigravityAccountId
@@ -258,6 +262,24 @@ export const AntigravityV2Plugin = Plugin.define({
       } : undefined)
     }
     const currentAuth = async () => (await resolveAuth())?.auth
+    const refreshModelAccess = (reload: boolean) => {
+      // Read changes in order, including switches during the initial resolution.
+      modelAccessRefresh = modelAccessRefresh.then(async () => {
+        try {
+          const connection = await ctx.integration.connection.active(PROVIDER_ID)
+          const value = connection ? await ctx.integration.connection.resolve(connection) : undefined
+          const stored = value?.type === "oauth" && value.methodID === "oauth" ? await loadAccounts() : undefined
+          const boundID = connection?.type === "credential" ? await ctx.storage.get(`connection-account:${connection.id}`) : undefined
+          const next = isAntigravityCredential(value, stored?.accounts, boundID)
+          if (disposed || next === usesAntigravityOAuth) return
+          usesAntigravityOAuth = next
+          if (reload) await ctx.model.reload()
+        } catch (error) {
+          if (!disposed) log.warn("Could not update Google model authentication", { error: String(error) })
+        }
+      })
+      return modelAccessRefresh
+    }
     const invalidateLoader = (abortRequests = true) => {
       generation += 1
       if (abortRequests) {
@@ -380,6 +402,7 @@ export const AntigravityV2Plugin = Plugin.define({
         lifetime.abort(new Error("Antigravity plugin disposed"))
         await Promise.allSettled([...listeners].map((listener) => listener.close()))
         await Promise.allSettled([...credentialOperations])
+        await connectionEvents
         await Promise.allSettled([...discoveries])
         await Promise.allSettled([...catalogWrites])
         await Promise.allSettled(registrations.reverse().map((registration) => registration.dispose()))
@@ -489,6 +512,18 @@ export const AntigravityV2Plugin = Plugin.define({
         })
       }))
 
+      connectionEvents = (async () => {
+        for await (const event of ctx.event.subscribe({ signal: lifetime.signal })) {
+          if (event.type === "credential.updated" || event.type === "integration.updated"
+            || (event.type === "credential.switched" && event.data.integrationID === PROVIDER_ID)) {
+            await refreshModelAccess(true)
+          }
+        }
+      })().catch(error => {
+        if (!disposed) log.warn("Google connection event stream stopped", { error: String(error) })
+      })
+      await refreshModelAccess(false)
+
       registrations.push(await ctx.provider.transform((editor) => {
         // Keep the native Google provider and every unrelated model intact.
         // Only a missing provider (e.g. a minimal host) needs a source template.
@@ -519,7 +554,12 @@ export const AntigravityV2Plugin = Plugin.define({
       registrations.push(await ctx.model.transform((editor) => {
         for (const model of editor.list(PROVIDER_ID)) {
           const id = String(model.id)
-          if (!ownsModel(id)) continue
+          if (!ownsModel(id)) {
+            // Core uses OAuth access tokens as API keys on the native Google
+            // route. Only the Antigravity catalog can use this connection.
+            if (usesAntigravityOAuth) editor.update(PROVIDER_ID, id, target => { target.enabled = false })
+            continue
+          }
           if (accountCatalogLoaded && !modelDefinitions[id]) {
             // Configured models are raw overrides. Removing an override can
             // reveal its native Google route; disable it explicitly instead.

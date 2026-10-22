@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1] - 2026-10-22
+
+### Fixed
+
+- **#598** - Hide native Google API-key models while Antigravity OAuth is selected,
+  preventing OAuth access tokens from being sent as invalid API keys. The native
+  catalog returns when switching to a Google API-key connection.
+
 ## [2.1.0] - 2026-10-21
 
 ### Added
