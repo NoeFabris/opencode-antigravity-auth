@@ -88,4 +88,9 @@ describe("formatAccountQuota", () => {
     expect(formatAccountQuota({ remainingFraction: 0.4 }, now)).toBe("40%")
     expect(formatAccountQuota(undefined, now)).toBe("no quota data")
   })
+
+  it("drops the countdown once the cached reset time has passed", () => {
+    expect(formatAccountQuota({ remainingFraction: 0.3, resetTime: "2026-10-23T23:00:00Z" }, now)).toBe("30%")
+    expect(formatAccountQuota({ remainingFraction: 0.3, resetTime: "2026-10-24T00:00:20Z" }, now)).toBe("30% · resets in 1m")
+  })
 })

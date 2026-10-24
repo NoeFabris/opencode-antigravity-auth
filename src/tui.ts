@@ -7,9 +7,9 @@ export function formatAccountQuota(quota: AccountQuota | undefined, now = Date.n
   if (!quota) return "no quota data"
   const percent = `${Math.round(quota.remainingFraction * 100)}%`
   const reset = quota.resetTime ? Date.parse(quota.resetTime) : Number.NaN
-  // A full quota has nothing to reset.
-  if (quota.remainingFraction >= 1 || Number.isNaN(reset)) return percent
-  const minutes = Math.max(0, Math.round((reset - now) / 60_000))
+  // A full quota has nothing to reset, and an elapsed reset has no countdown left.
+  if (quota.remainingFraction >= 1 || Number.isNaN(reset) || reset <= now) return percent
+  const minutes = Math.max(1, Math.round((reset - now) / 60_000))
   const days = Math.floor(minutes / 1440)
   const hours = Math.floor((minutes % 1440) / 60)
   const until = days > 0 ? `${days}d ${hours}h` : hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`
