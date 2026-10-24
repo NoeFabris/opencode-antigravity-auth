@@ -1,7 +1,9 @@
 # Multi-Account Setup
 
-For **OpenCode V2**, open `/antigravity` (or `/ag`) to see accounts, check quotas,
-add accounts, select one, enable/disable, re-authenticate, or delete an account.
+For **OpenCode V2**, open `/antigravity` (or `/ag`) to see accounts with their
+last known quota and reset time, and pick one to switch to it. From the same menu
+you can check quotas, add accounts, and enable/disable, re-authenticate, or delete
+an account (**Manage an account…**).
 Disabled accounts are skipped during routine quota checks. Quota details open
 per account, and **Refresh available models** reloads Google's selectable model
 list. The `antigravity-*` models use the Antigravity quota pool; ordinary Google

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import type { Plugin } from "@opencode/plugin"
-import { AntigravityAccountsRpc, type AccountSummary } from "./account-rpc.ts"
+import { AntigravityAccountsRpc, type AccountQuota, type AccountSummary } from "./account-rpc.ts"
 import { parseRefreshParts } from "./auth.ts"
 import { checkAccountsQuota } from "./quota.ts"
 import { accountTokenHash, loadAccounts, matchesAccountToken, saveAccountCredentials, updateAccountCredentials, updateAccounts, type AccountMetadataV3 } from "./storage.ts"
@@ -11,6 +11,17 @@ export const accountPoolIdentity = (accounts: AccountMetadataV3[]) => createHash
   .update(accounts.filter(account => account.enabled !== false).map(accountID).sort().join(":")).digest("hex")
 export const accountCredentialsIdentity = (accounts: AccountMetadataV3[]) => createHash("sha256")
   .update(accounts.filter(account => account.enabled !== false).map(account => account.refreshToken).sort().join("\0")).digest("hex")
+
+/** The lowest cached quota group, read from the last quota check without any network call. */
+export function lowestCachedQuota(account: Pick<AccountMetadataV3, "cachedQuota" | "cachedQuotaUpdatedAt">): AccountQuota | undefined {
+  let lowest: AccountQuota | undefined
+  for (const group of Object.values(account.cachedQuota ?? {})) {
+    if (group.remainingFraction === undefined) continue
+    if (lowest && lowest.remainingFraction <= group.remainingFraction) continue
+    lowest = { remainingFraction: group.remainingFraction, resetTime: group.resetTime, updatedAt: account.cachedQuotaUpdatedAt }
+  }
+  return lowest
+}
 
 export async function loadManagedAccounts() {
   const storage = await loadAccounts()
@@ -39,6 +50,7 @@ export async function registerAccountManagement(
       id: accountID(account), email: account.email ?? `Account ${index + 1}`,
       enabled: account.enabled !== false, current: index === storage.activeIndex,
       verificationRequired: account.verificationRequired === true, lastUsed: account.lastUsed ?? 0,
+      quota: lowestCachedQuota(account),
     }))
   }
 

@@ -68,6 +68,21 @@ describe("account management", () => {
     expect(JSON.stringify(accounts)).not.toContain("secret")
   })
 
+  it("lists each account's lowest cached quota group without checking quotas", async () => {
+    vi.mocked(checkAccountsQuota).mockClear()
+    state.storage!.accounts[0]!.cachedQuota = {
+      "claude": { remainingFraction: 0.81, resetTime: "2026-10-30T23:35:51Z", modelCount: 2 },
+      "gemini-pro": { remainingFraction: 1, resetTime: "2026-10-31T01:04:14Z", modelCount: 1 },
+      "gemini-flash": { modelCount: 11 },
+    }
+    state.storage!.accounts[0]!.cachedQuotaUpdatedAt = 123
+    const { handlers } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect(accounts[0]?.quota).toEqual({ remainingFraction: 0.81, resetTime: "2026-10-30T23:35:51Z", updatedAt: 123 })
+    expect(accounts[1]?.quota).toBeUndefined()
+    expect(checkAccountsQuota).not.toHaveBeenCalled()
+  })
+
   it("flushes the manager before disabling an account and moves selection to an enabled account", async () => {
     const { handlers, beforeWrite } = await host()
     const id = accountID(state.storage!.accounts[1]!)

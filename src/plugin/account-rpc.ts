@@ -1,6 +1,13 @@
 import { Rpc } from "@opencode/plugin/rpc"
 import { z } from "zod"
 
+/** The account's most-used cached quota group: the one that runs out first. */
+export const AccountQuota = z.object({
+  remainingFraction: z.number(),
+  resetTime: z.string().optional(),
+  updatedAt: z.number().optional(),
+})
+
 export const AccountSummary = z.object({
   id: z.string(),
   email: z.string(),
@@ -8,6 +15,7 @@ export const AccountSummary = z.object({
   current: z.boolean(),
   verificationRequired: z.boolean(),
   lastUsed: z.number(),
+  quota: AccountQuota.optional(),
 })
 
 export const AntigravityAccountsRpc = Rpc.define({
@@ -28,4 +36,5 @@ export const AntigravityAccountsRpc = Rpc.define({
   events: {},
 })
 
+export type AccountQuota = z.infer<typeof AccountQuota>
 export type AccountSummary = z.infer<typeof AccountSummary>

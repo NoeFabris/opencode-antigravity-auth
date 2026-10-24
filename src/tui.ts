@@ -1,6 +1,23 @@
 import type { Plugin } from "@opencode/plugin/tui"
 import type { LocationRef, OpenCodeClient } from "@opencode/client"
-import { AntigravityAccountsRpc, type AccountSummary } from "./plugin/account-rpc.ts"
+import { AntigravityAccountsRpc, type AccountQuota, type AccountSummary } from "./plugin/account-rpc.ts"
+
+/** Formats cached quota for the account list, e.g. "81% · resets in 2h 54m". */
+export function formatAccountQuota(quota: AccountQuota | undefined, now = Date.now()) {
+  if (!quota) return "no quota data"
+  const percent = `${Math.round(quota.remainingFraction * 100)}%`
+  const reset = quota.resetTime ? Date.parse(quota.resetTime) : Number.NaN
+  // A full quota has nothing to reset.
+  if (quota.remainingFraction >= 1 || Number.isNaN(reset)) return percent
+  const minutes = Math.max(0, Math.round((reset - now) / 60_000))
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  const until = days > 0 ? `${days}d ${hours}h` : hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`
+  return `${percent} · resets in ${until}`
+}
+
+const accountTitle = (account: AccountSummary) =>
+  `${account.email}${account.current ? " [current]" : ""}${account.enabled ? "" : " [disabled]"}${account.verificationRequired ? " [needs verification]" : ""}`
 
 // This plugin uses host dialogs and renders no JSX. Keep its public declarations
 // independent of the SDK's optional Solid/OpenTUI rendering dependencies.
@@ -92,6 +109,15 @@ export const AntigravityTuiPlugin = {
       ctx.ui.toast.show({ message: result.message, variant: "success" })
     }
 
+    async function manage(accounts: ReadonlyArray<AccountSummary>) {
+      const selected = await ctx.ui.dialog.select({
+        title: "Manage account",
+        options: accounts.map(account => ({ title: accountTitle(account), value: account.id })),
+      })
+      const account = accounts.find(item => item.id === selected)
+      if (account) await accountMenu(account)
+    }
+
     async function menu() {
       try {
         while (true) {
@@ -102,10 +128,13 @@ export const AntigravityTuiPlugin = {
               { title: "Add account", value: "add", category: "Actions" },
               { title: "Check quotas / verify enabled accounts", value: "quotas", category: "Actions" },
               { title: "Refresh available models", value: "models", category: "Actions" },
+              { title: "Manage an account…", value: "manage", category: "Actions" },
               ...accounts.map(account => ({
-                title: `${account.email}${account.current ? " [current]" : ""}${account.enabled ? "" : " [disabled]"}${account.verificationRequired ? " [needs verification]" : ""}`,
+                title: accountTitle(account),
                 value: account.id,
+                description: formatAccountQuota(account.quota),
                 category: "Accounts",
+                disabled: !account.enabled,
               })),
               { title: "Close", value: "close", category: "Actions" },
             ],
@@ -116,9 +145,16 @@ export const AntigravityTuiPlugin = {
           else if (action === "models") {
             const { count } = await rpc.models({}, location())
             ctx.ui.toast.show({ message: `${count} available models loaded`, variant: "success" })
-          } else {
+          } else if (action === "manage") await manage(accounts)
+          else {
+            // Picking an account switches to it, like the model picker.
             const account = accounts.find(item => item.id === action)
-            if (account) await accountMenu(account)
+            if (!account?.enabled) continue
+            if (!account.current) {
+              const result = await rpc.update({ id: account.id, action: "select" }, location())
+              ctx.ui.toast.show({ message: `${result.message}: ${account.email}`, variant: "success" })
+            }
+            return
           }
         }
       } catch (error) {
