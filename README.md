@@ -45,9 +45,11 @@ Models are discovered from your enabled accounts and cached for an hour. Availab
 
 Inside OpenCode, open **`/antigravity`** (or **`/ag`**) to:
 
-- See logged-in accounts and the current selection.
+- See logged-in accounts, the current selection, and each account's last known quota and reset time.
+- Pick an account to switch to it.
 - Check Antigravity and Gemini CLI quotas and reset times.
-- Add, select, enable, disable, re-authenticate, or delete an account.
+- Add an account.
+- Enable, disable, re-authenticate, or delete an account (**Manage an account…**).
 - Refresh the model list.
 
 Accounts are stored in `~/.config/opencode/antigravity-accounts.json`. Back up this file before moving machines; it contains credentials. Disabling an account excludes it from rotation and routine quota checks.
