@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Plugin } from "@opencode/plugin"
 import type { RpcHandlers } from "@opencode/plugin/promise/rpc"
-import { AntigravityAccountsRpc } from "./account-rpc.ts"
+import { AccountSummary, AntigravityAccountsRpc } from "./account-rpc.ts"
 import { accountID, registerAccountManagement } from "./account-management.ts"
-import type { AccountStorageV4 } from "./storage.ts"
+import type { AccountMetadataV3, AccountStorageV4 } from "./storage.ts"
 import type { PluginClient } from "./types.ts"
 import { checkAccountsQuota } from "./quota.ts"
 
@@ -26,6 +26,7 @@ vi.mock("./storage.ts", async importOriginal => ({
 }))
 
 beforeEach(() => {
+  vi.clearAllMocks()
   state.beforeUpdate = undefined
   state.storage = {
     version: 4, activeIndex: 1, activeIndexByFamily: { claude: 1, gemini: 2 },
@@ -42,18 +43,18 @@ async function host(rotate = false) {
       return { dispose: async () => undefined, events: { emit: async () => undefined } }
     } },
     integration: {
-      get: async () => ({ data: { connections: [{ type: "credential", id: "native-first", method: "oauth" }] } }),
-      connection: { active: async () => undefined, resolve: async () => {
+      get: vi.fn(async () => ({ data: { connections: [{ type: "credential", id: "native-first", method: "oauth" }] } })),
+      connection: { active: async () => undefined, resolve: vi.fn(async () => {
         if (rotate) state.storage!.accounts[0]!.refreshToken = "rotated-secret"
         return { type: "oauth", refresh: `${rotate ? "rotated-secret" : "first-secret"}|project` }
-      } },
+      }) },
     },
     storage: { get: vi.fn(async () => undefined), set: vi.fn(async () => undefined), remove: vi.fn(async () => undefined) },
     credential: { activate: vi.fn(async () => undefined) },
   } as unknown as Plugin.Context
   await registerAccountManagement(ctx, {} as PluginClient, beforeWrite, async () => 7)
   if (!handlers) throw new Error("Account RPC was not registered")
-  return { handlers, beforeWrite }
+  return { handlers, beforeWrite, ctx }
 }
 
 const callContext = { signal: new AbortController().signal, error: () => { throw new Error("Unexpected RPC error") } }
@@ -66,6 +67,54 @@ describe("account management", () => {
     expect(await handlers.connections({ id: accounts[0]!.id }, callContext)).toEqual({ ids: ["native-first"] })
     expect(accounts[1]?.current).toBe(true)
     expect(JSON.stringify(accounts)).not.toContain("secret")
+  })
+
+  it("lists the lowest cached quota with that group's reset time without making live requests", async () => {
+    const cachedQuota = {
+      claude: { remainingFraction: 0.81, resetTime: "2026-10-27T14:54:00Z", modelCount: 2 },
+      "gemini-pro": { remainingFraction: 0.95, resetTime: "2026-10-27T13:00:00Z", modelCount: 1 },
+      "gemini-flash": { remainingFraction: 1, modelCount: 1 },
+    }
+    state.storage!.accounts[0]!.cachedQuota = cachedQuota
+    state.storage!.accounts[0]!.cachedQuotaUpdatedAt = 123
+    const { handlers, ctx, beforeWrite } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect(AccountSummary.parse(accounts[0]).quota).toEqual({ remainingFraction: 0.81, resetTime: "2026-10-27T14:54:00Z", updatedAt: 123 })
+    expect(accounts[1]?.quota).toBeUndefined()
+    expect(state.storage!.accounts[0]!.cachedQuota).toEqual(cachedQuota)
+    expect(checkAccountsQuota).not.toHaveBeenCalled()
+    expect(ctx.integration.get).not.toHaveBeenCalled()
+    expect(ctx.integration.connection.resolve).not.toHaveBeenCalled()
+    expect(beforeWrite).not.toHaveBeenCalled()
+    expect(JSON.stringify(accounts)).not.toContain("secret")
+  })
+
+  it("keeps an exhausted group's quota and ignores unknown fractions", async () => {
+    state.storage!.accounts[0]!.cachedQuota = {
+      claude: { modelCount: 1 },
+      "gemini-pro": { remainingFraction: 1, modelCount: 1 },
+      "gemini-flash": { remainingFraction: 0, resetTime: "2026-11-03T09:00:00Z", modelCount: 1 },
+    }
+    const { handlers } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect(AccountSummary.parse(accounts[0]).quota).toEqual({ remainingFraction: 0, resetTime: "2026-11-03T09:00:00Z" })
+  })
+
+  const missingQuotaCases: Array<{ name: string; cachedQuota: AccountMetadataV3["cachedQuota"] }> = [
+    { name: "absent", cachedQuota: undefined },
+    { name: "empty", cachedQuota: {} },
+    { name: "unknown", cachedQuota: { claude: { modelCount: 1, resetTime: "2026-10-27T14:54:00Z" } } },
+    { name: "invalid", cachedQuota: {
+      claude: { remainingFraction: NaN, modelCount: 1 },
+      "gemini-pro": { remainingFraction: -0.1, modelCount: 1 },
+      "gemini-flash": { remainingFraction: 1.1, modelCount: 1 },
+    } },
+  ]
+  it.each(missingQuotaCases)("omits the quota summary when cached data is $name", async ({ cachedQuota }) => {
+    state.storage!.accounts[0]!.cachedQuota = cachedQuota
+    const { handlers } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect(accounts[0]?.quota).toBeUndefined()
   })
 
   it("flushes the manager before disabling an account and moves selection to an enabled account", async () => {

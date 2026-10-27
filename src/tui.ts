@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin/tui"
 import type { LocationRef, OpenCodeClient } from "@opencode/client"
 import { AntigravityAccountsRpc, type AccountSummary } from "./plugin/account-rpc.ts"
+import { formatQuotaDescription } from "./plugin/ui/quota.ts"
 
 // This plugin uses host dialogs and renders no JSX. Keep its public declarations
 // independent of the SDK's optional Solid/OpenTUI rendering dependencies.
@@ -96,17 +97,20 @@ export const AntigravityTuiPlugin = {
       try {
         while (true) {
           const accounts = await rpc.list({}, location())
+          const accountOptions = accounts.map(account => ({
+            title: `${account.email}${account.current ? " [current]" : ""}${account.enabled ? "" : " [disabled]"}${account.verificationRequired ? " [needs verification]" : ""}`,
+            value: account.id,
+            description: formatQuotaDescription(account.quota),
+            category: "Accounts",
+          }))
           const action = await ctx.ui.dialog.select({
             title: "Google accounts (Antigravity)",
             options: [
               { title: "Add account", value: "add", category: "Actions" },
               { title: "Check quotas / verify enabled accounts", value: "quotas", category: "Actions" },
               { title: "Refresh available models", value: "models", category: "Actions" },
-              ...accounts.map(account => ({
-                title: `${account.email}${account.current ? " [current]" : ""}${account.enabled ? "" : " [disabled]"}${account.verificationRequired ? " [needs verification]" : ""}`,
-                value: account.id,
-                category: "Accounts",
-              })),
+              { title: "Manage account…", value: "manage", category: "Actions" },
+              ...accountOptions,
               { title: "Close", value: "close", category: "Actions" },
             ],
           })
@@ -116,9 +120,19 @@ export const AntigravityTuiPlugin = {
           else if (action === "models") {
             const { count } = await rpc.models({}, location())
             ctx.ui.toast.show({ message: `${count} available models loaded`, variant: "success" })
+          } else if (action === "manage") {
+            const id = await ctx.ui.dialog.select({ title: "Manage Antigravity account", options: accountOptions })
+            const account = accounts.find(item => item.id === id)
+            if (account) await accountMenu(account)
           } else {
             const account = accounts.find(item => item.id === action)
-            if (account) await accountMenu(account)
+            if (!account) continue
+            if (!account.enabled) await accountMenu(account)
+            else {
+              const result = await rpc.update({ id: account.id, action: "select" }, location())
+              ctx.ui.toast.show({ message: result.message, variant: "success" })
+              return
+            }
           }
         }
       } catch (error) {

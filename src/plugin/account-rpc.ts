@@ -8,6 +8,11 @@ export const AccountSummary = z.object({
   current: z.boolean(),
   verificationRequired: z.boolean(),
   lastUsed: z.number(),
+  quota: z.object({
+    remainingFraction: z.number().min(0).max(1),
+    resetTime: z.string().optional(),
+    updatedAt: z.number().optional(),
+  }).optional(),
 })
 
 export const AntigravityAccountsRpc = Rpc.define({

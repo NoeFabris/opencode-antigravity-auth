@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.2] - 2026-10-27
+
+### Added
+
+- **#600** - Show each account's lowest cached quota and relative reset time in
+  `/antigravity`, without making live quota requests. Select an enabled account
+  directly from its row; **Manage account…** keeps verification, enable/disable,
+  re-authentication, and deletion available.
+
 ## [2.1.1] - 2026-10-22
 
 ### Fixed

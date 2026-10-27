@@ -19,7 +19,7 @@ Add to `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-antigravity-auth@2.1.1"]
+  "plugins": ["opencode-antigravity-auth@2.1.2"]
 }
 ```
 
@@ -45,10 +45,13 @@ Models are discovered from your enabled accounts and cached for an hour. Availab
 
 Inside OpenCode, open **`/antigravity`** (or **`/ag`**) to:
 
-- See logged-in accounts and the current selection.
+- See logged-in accounts, the current selection, and cached quota percentages and reset times.
+- Switch to an enabled account by selecting its row.
 - Check Antigravity and Gemini CLI quotas and reset times.
-- Add, select, enable, disable, re-authenticate, or delete an account.
+- Add an account, or use **Manage account…** to verify, enable, disable, re-authenticate, or delete one.
 - Refresh the model list.
+
+The account list shows the lowest cached quota across Claude, Gemini Pro, and Gemini Flash. Choose **Check quotas / verify enabled accounts** to refresh the saved quota data.
 
 Accounts are stored in `~/.config/opencode/antigravity-accounts.json`. Back up this file before moving machines; it contains credentials. Disabling an account excludes it from rotation and routine quota checks.
 

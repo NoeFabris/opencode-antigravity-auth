@@ -22,6 +22,18 @@ export async function loadManagedAccounts() {
   return storage
 }
 
+function summarizeCachedQuota(account: AccountMetadataV3): AccountSummary["quota"] {
+  let quota: AccountSummary["quota"]
+  for (const group of Object.values(account.cachedQuota ?? {})) {
+    const remainingFraction = group.remainingFraction
+    if (remainingFraction === undefined || !Number.isFinite(remainingFraction) || remainingFraction < 0 || remainingFraction > 1) continue
+    if (!quota || remainingFraction < quota.remainingFraction) {
+      quota = { remainingFraction, resetTime: group.resetTime, updatedAt: account.cachedQuotaUpdatedAt }
+    }
+  }
+  return quota
+}
+
 export async function registerAccountManagement(
   ctx: Plugin.Context,
   client: PluginClient,
@@ -39,6 +51,7 @@ export async function registerAccountManagement(
       id: accountID(account), email: account.email ?? `Account ${index + 1}`,
       enabled: account.enabled !== false, current: index === storage.activeIndex,
       verificationRequired: account.verificationRequired === true, lastUsed: account.lastUsed ?? 0,
+      quota: summarizeCachedQuota(account),
     }))
   }
 

@@ -2,6 +2,11 @@
 
 For **OpenCode V2**, open `/antigravity` (or `/ag`) to see accounts, check quotas,
 add accounts, select one, enable/disable, re-authenticate, or delete an account.
+Each row shows the lowest cached quota across Claude, Gemini Pro, and Gemini
+Flash, with its reset time when below 100%. Opening the list makes no quota
+requests; use **Check quotas / verify enabled accounts** to refresh the cache.
+Select an enabled account's row to switch to it immediately. Use **Manage account…**
+for the per-account actions; selecting a disabled account also opens those actions.
 Disabled accounts are skipped during routine quota checks. Quota details open
 per account, and **Refresh available models** reloads Google's selectable model
 list. The `antigravity-*` models use the Antigravity quota pool; ordinary Google
