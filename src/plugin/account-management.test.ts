@@ -71,7 +71,7 @@ describe("account management", () => {
 
   it("lists the lowest cached quota with that group's reset time without making live requests", async () => {
     const cachedQuota = {
-      claude: { remainingFraction: 0.81, resetTime: "2026-10-27T14:54:00Z", modelCount: 2 },
+      claude: { remainingFraction: 0.81, resetTime: "2026-10-27T13:00:00Z", remainingFractionResetTime: "2026-10-27T14:54:00Z", modelCount: 2 },
       "gemini-pro": { remainingFraction: 0.95, resetTime: "2026-10-27T13:00:00Z", modelCount: 1 },
       "gemini-flash": { remainingFraction: 1, modelCount: 1 },
     }
@@ -98,6 +98,37 @@ describe("account management", () => {
     const { handlers } = await host()
     const accounts = await handlers.list({}, callContext)
     expect(AccountSummary.parse(accounts[0]).quota).toEqual({ remainingFraction: 0, resetTime: "2026-11-03T09:00:00Z" })
+  })
+
+  it("skips malformed saved groups and still lists valid quota data and other accounts", async () => {
+    state.storage!.accounts[0]!.cachedQuota = JSON.parse('{"claude":null,"invalid":7,"text":"bad","flag":false,"array":[],"gemini-pro":{"remainingFraction":0.4,"modelCount":1}}')
+    const { handlers } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect(accounts).toHaveLength(3)
+    expect(AccountSummary.parse(accounts[0]).quota).toEqual({ remainingFraction: 0.4 })
+    expect(accounts[1]?.quota).toBeUndefined()
+  })
+
+  it("omits ambiguous reset times from older multi-model caches", async () => {
+    state.storage!.accounts[0]!.cachedQuota = {
+      claude: { remainingFraction: 0.2, resetTime: "2026-10-27T13:00:00Z", modelCount: 2 },
+    }
+    const { handlers } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect(AccountSummary.parse(accounts[0]).quota).toEqual({ remainingFraction: 0.2 })
+  })
+
+  it("persists the minimum quota's reset from a quota check for subsequent list calls", async () => {
+    const groups = {
+      claude: { remainingFraction: 0.2, resetTime: "2026-10-27T13:00:00Z", remainingFractionResetTime: "2026-10-27T17:00:00Z", modelCount: 2 },
+    }
+    vi.mocked(checkAccountsQuota).mockResolvedValueOnce([{ index: 0, status: "ok", quota: { groups, modelCount: 2 } }])
+    const { handlers } = await host()
+    const [account] = await handlers.list({}, callContext)
+    await handlers.quotas({ id: account!.id }, callContext)
+    expect(state.storage?.accounts[0]?.cachedQuota).toEqual(groups)
+    const accounts = await handlers.list({}, callContext)
+    expect(AccountSummary.parse(accounts[0]).quota).toMatchObject({ remainingFraction: 0.2, resetTime: "2026-10-27T17:00:00Z" })
   })
 
   const missingQuotaCases: Array<{ name: string; cachedQuota: AccountMetadataV3["cachedQuota"] }> = [

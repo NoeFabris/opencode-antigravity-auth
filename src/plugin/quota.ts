@@ -20,6 +20,8 @@ export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash";
 export interface QuotaGroupSummary {
   remainingFraction?: number;
   resetTime?: string;
+  /** Reset belonging to the model that supplies remainingFraction. */
+  remainingFractionResetTime?: string;
   modelCount: number;
 }
 
@@ -179,6 +181,13 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>, selec
           ? remainingFraction
           : Math.min(existing.remainingFraction, remainingFraction);
 
+    let remainingFractionResetTime = existing?.remainingFractionResetTime
+    if (remainingFraction !== undefined && (existing?.remainingFraction === undefined || remainingFraction < existing.remainingFraction)) {
+      remainingFractionResetTime = resetTimestamp === null ? undefined : resetTime
+    } else if (remainingFraction !== undefined && remainingFraction === existing?.remainingFraction && !remainingFractionResetTime && resetTimestamp !== null) {
+      remainingFractionResetTime = resetTime
+    }
+
     let nextResetTime = existing?.resetTime;
     if (resetTimestamp !== null) {
       if (!existing?.resetTime) {
@@ -194,6 +203,7 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>, selec
     groups[group] = {
       remainingFraction: nextRemaining,
       resetTime: nextResetTime,
+      remainingFractionResetTime,
       modelCount: nextCount,
     };
   }

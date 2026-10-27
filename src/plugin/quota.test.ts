@@ -111,4 +111,45 @@ describe("checkAccountsQuota", () => {
     ])
     expect(result?.geminiCliQuota?.models[1]).toMatchObject({ remainingFraction: 0.42, resetTime: "2026-10-22T00:00:00Z" })
   })
+
+  it.each([false, true])("keeps the lowest quota's reset separate from the earliest group reset (reverse: %s)", async reverse => {
+    const entries = [
+      ["claude-opus-4-6-thinking", { quotaInfo: { remainingFraction: 0.2, resetTime: "2026-10-27T17:00:00Z" } }],
+      ["claude-sonnet-4-6", { quotaInfo: { remainingFraction: 0.8, resetTime: "2026-10-27T13:00:00Z" } }],
+    ]
+    const models = Object.fromEntries(reverse ? entries.reverse() : entries)
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      return jsonResponse(String(input).endsWith(":fetchAvailableModels") ? { models } : { buckets: [] })
+    }))
+    const [result] = await checkAccountsQuota([account], {} as PluginClient)
+    expect(result?.quota?.groups.claude).toEqual({
+      remainingFraction: 0.2,
+      resetTime: "2026-10-27T13:00:00Z",
+      remainingFractionResetTime: "2026-10-27T17:00:00Z",
+      modelCount: 2,
+    })
+  })
+
+  it("clears the associated reset when a lower quota has no reset time", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      return jsonResponse(String(input).endsWith(":fetchAvailableModels") ? { models: {
+        "claude-sonnet-4-6": { quotaInfo: { remainingFraction: 0.8, resetTime: "2026-10-27T13:00:00Z" } },
+        "claude-opus-4-6-thinking": { quotaInfo: { remainingFraction: 0.2 } },
+      } } : { buckets: [] })
+    }))
+    const [result] = await checkAccountsQuota([account], {} as PluginClient)
+    expect(result?.quota?.groups.claude).toMatchObject({ remainingFraction: 0.2, resetTime: "2026-10-27T13:00:00Z" })
+    expect(result?.quota?.groups.claude?.remainingFractionResetTime).toBeUndefined()
+  })
+
+  it("uses a known reset when models have the same minimum quota", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      return jsonResponse(String(input).endsWith(":fetchAvailableModels") ? { models: {
+        "claude-sonnet-4-6": { quotaInfo: { remainingFraction: 0.2 } },
+        "claude-opus-4-6-thinking": { quotaInfo: { remainingFraction: 0.2, resetTime: "2026-10-27T17:00:00Z" } },
+      } } : { buckets: [] })
+    }))
+    const [result] = await checkAccountsQuota([account], {} as PluginClient)
+    expect(result?.quota?.groups.claude).toMatchObject({ remainingFraction: 0.2, remainingFractionResetTime: "2026-10-27T17:00:00Z" })
+  })
 })

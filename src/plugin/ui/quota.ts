@@ -1,5 +1,6 @@
 import type { AccountSummary } from "../account-rpc.ts"
 
+/** Format a cached quota and reset countdown for an account menu row. */
 export function formatQuotaDescription(quota: AccountSummary["quota"], now = Date.now()): string {
   if (!quota) return "no quota data"
   const percent = Math.round(quota.remainingFraction * 100)
