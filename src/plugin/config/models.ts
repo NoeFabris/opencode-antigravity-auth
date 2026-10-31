@@ -81,6 +81,76 @@ export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
       max: { thinkingConfig: { thinkingBudget: 32768 } },
     },
   },
+  "antigravity-gemini-3.5-flash-lite": {
+    name: "Gemini 3.5 Flash Lite (Antigravity)",
+    limit: { context: 1048576, output: 65535 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gemini-3.8-flash-low": {
+    name: "Gemini 3.8 Flash (Low) (Antigravity)",
+    limit: { context: 1048576, output: 65536 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gemini-3.8-flash-medium": {
+    name: "Gemini 3.8 Flash (Medium) (Antigravity)",
+    limit: { context: 1048576, output: 65536 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gemini-3.8-flash-high": {
+    name: "Gemini 3.8 Flash (High) (Antigravity)",
+    limit: { context: 1048576, output: 65536 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gemini-4-argon-low": {
+    name: "Gemini 4 Argon (Low) (Antigravity)",
+    limit: { context: 1048576, output: 65536 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gemini-4-argon-medium": {
+    name: "Gemini 4 Argon (Medium) (Antigravity)",
+    limit: { context: 1048576, output: 65536 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gemini-4-argon-high": {
+    name: "Gemini 4 Argon (High) (Antigravity)",
+    limit: { context: 1048576, output: 65536 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-claude-opus-5-5-low": {
+    name: "Claude Opus 5.5 (Low) (Antigravity)",
+    limit: { context: 1000000, output: 128000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-claude-opus-5-5-medium": {
+    name: "Claude Opus 5.5 (Medium) (Antigravity)",
+    limit: { context: 1000000, output: 128000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-claude-opus-5-5-high": {
+    name: "Claude Opus 5.5 (High) (Antigravity)",
+    limit: { context: 1000000, output: 128000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-claude-sonnet-5-5-low": {
+    name: "Claude Sonnet 5.5 (Low) (Antigravity)",
+    limit: { context: 1000000, output: 128000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-claude-sonnet-5-5-medium": {
+    name: "Claude Sonnet 5.5 (Medium) (Antigravity)",
+    limit: { context: 1000000, output: 128000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-claude-sonnet-5-5-high": {
+    name: "Claude Sonnet 5.5 (High) (Antigravity)",
+    limit: { context: 1000000, output: 128000 },
+    modalities: DEFAULT_MODALITIES,
+  },
+  "antigravity-gpt-oss-120b-medium": {
+    name: "GPT-OSS 120B (Medium) (Antigravity)",
+    limit: { context: 131072, output: 32768 },
+    modalities: { input: ["text"], output: ["text"] },
+  },
   "gemini-2.5-flash": {
     name: "Gemini 2.5 Flash (Gemini CLI)",
     limit: { context: 1048576, output: 65536 },

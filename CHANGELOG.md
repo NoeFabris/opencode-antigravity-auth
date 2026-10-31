@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Register the current Antigravity chat inventory as built-in definitions:
+  Gemini 4 Argon, Gemini 3.8 Flash, Gemini 3.5 Flash Lite, Claude Opus 5.5,
+  Claude Sonnet 5.5 (low/medium/high tiers), and GPT-OSS 120B Medium. Every
+  Antigravity definition now also serves as a fallback model, so these stay
+  selectable when live catalog discovery has not completed yet.
+
+### Fixed
+
+- Discovered models reuse the static definitions' input modalities, keeping
+  text-only models such as GPT-OSS 120B from being advertised as image-capable.
+
 ## [2.1.2] - 2026-10-27
 
 ### Added
