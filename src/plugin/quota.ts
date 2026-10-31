@@ -15,7 +15,7 @@ import type { AccountMetadataV3 } from "./storage";
 
 const FETCH_TIMEOUT_MS = 10000;
 
-export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash";
+export type QuotaGroup = "claude" | "gemini-pro" | "gemini-flash" | "argon";
 
 export interface QuotaGroupSummary {
   remainingFraction?: number;
@@ -124,13 +124,21 @@ function parseResetTime(resetTime?: string): number | null {
   return timestamp;
 }
 
-function classifyQuotaGroup(modelName: string, displayName?: string): QuotaGroup | null {
+export function classifyQuotaGroup(modelName: string, displayName?: string): QuotaGroup | null {
   const combined = `${modelName} ${displayName ?? ""}`.toLowerCase();
   if (combined.includes("claude")) {
     return "claude";
   }
   if (!combined.includes("gemini")) {
     return null;
+  }
+  // Gemini 4 (Argon) is billed against its own weekly bucket
+  // (`gemini-argon-wtu-weekly`): two 32k-token calls moved it ~1% while the
+  // `gemini-weekly` and `gemini-5h` buckets stayed byte-identical. Reporting it
+  // under `gemini-pro` makes the minimum-based aggregate announce an exhausted
+  // Pro quota when only Argon is spent.
+  if (combined.includes("argon")) {
+    return "argon";
   }
   const family = getModelFamily(modelName);
   return family === "gemini-flash" ? "gemini-flash" : "gemini-pro";

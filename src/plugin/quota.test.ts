@@ -53,6 +53,16 @@ describe("checkAccountsQuota", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it("classifies Gemini 4 Argon as its own quota group", async () => {
+    const { classifyQuotaGroup } = await import("./quota")
+
+    expect(classifyQuotaGroup("gemini-4-argon-high", "Gemini 4 Argon")).toBe("argon")
+    expect(classifyQuotaGroup("gemini-4-argon-low")).toBe("argon")
+    expect(classifyQuotaGroup("gemini-3.8-flash-high")).toBe("gemini-flash")
+    expect(classifyQuotaGroup("gemini-3-pro")).toBe("gemini-pro")
+    expect(classifyQuotaGroup("claude-sonnet-5-5-high")).toBe("claude")
+  })
+
   it("reads Antigravity quota from the daily host with the Hub User-Agent", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input)
@@ -79,7 +89,8 @@ describe("checkAccountsQuota", () => {
     expect(result?.status).toBe("ok")
     expect(result?.quota?.groups.claude?.remainingFraction).toBe(0.5)
     expect(result?.quota?.groups["gemini-flash"]?.remainingFraction).toBe(0.25)
-    expect(result?.quota?.groups["gemini-pro"]?.remainingFraction).toBe(0.75)
+    expect(result?.quota?.groups.argon?.remainingFraction).toBe(0.75)
+    expect(result?.quota?.groups["gemini-pro"]).toBeUndefined()
     expect(result?.quota?.models?.["gemini-4-argon-high"]?.maxTokens).toBe(1048576)
 
     const modelsCalls = fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/v1internal:fetchAvailableModels"))
