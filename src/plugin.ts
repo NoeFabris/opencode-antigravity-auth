@@ -2740,6 +2740,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                         { name: "Claude", data: groups.claude },
                         { name: "Gemini 3 Pro", data: groups["gemini-pro"] },
                         { name: "Gemini 3 Flash", data: groups["gemini-flash"] },
+                        { name: "Gemini 4 Argon", data: groups.argon },
                       ].filter(g => g.data);
                       
                       groupEntries.forEach((g, idx) => {
