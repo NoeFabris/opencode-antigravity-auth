@@ -1908,6 +1908,8 @@ describe("resolveQuotaGroup", () => {
     // Argon has its own weekly bucket; it must not read the Gemini Pro one.
     expect(resolveQuotaGroup("gemini", "gemini-4-argon-high")).toBe("argon");
     expect(resolveQuotaGroup("gemini", "gemini-4-argon-low")).toBe("argon");
+    // An id that carries "argon" without being a Gemini model keeps its family.
+    expect(resolveQuotaGroup("claude", "claude-argon-experiment")).toBe("claude");
   });
 
   it("falls back to claude for claude family when no model", () => {
