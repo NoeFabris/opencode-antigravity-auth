@@ -24,6 +24,9 @@ describe("OpenCode V2 models", () => {
     expect(OPENCODE_V2_MODEL_DEFINITIONS["antigravity-claude-sonnet-5-5-medium"]).toMatchObject({
       limit: { context: 1000000, output: 128000 },
     })
+    expect(OPENCODE_V2_MODEL_DEFINITIONS["antigravity-gpt-oss-120b-medium"]?.capabilities).toMatchObject({
+      tools: true, input: ["text"], output: ["text"],
+    })
     expect(Object.keys(OPENCODE_V2_MODEL_DEFINITIONS).sort()).toEqual(
       Object.keys(OPENCODE_MODEL_DEFINITIONS).filter(id => id.startsWith("antigravity-")).sort(),
     )

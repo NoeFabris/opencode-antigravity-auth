@@ -43,6 +43,13 @@ export const OPENCODE_V2_MODEL_DEFINITIONS = Object.fromEntries(
 )
 export type V2ModelDefinitions = typeof OPENCODE_V2_MODEL_DEFINITIONS
 
+/**
+ * Builds OpenCode V2 model definitions from the account-specific catalog.
+ *
+ * Filters the catalog down to selectable chat models (gemini-, claude-, and
+ * gpt-oss- prefixed IDs) and falls back to each model's known static definition
+ * for name, limit, and modalities when the catalog omits them.
+ */
 export function buildAccountModelDefinitions(models: Record<string, AvailableModel>): V2ModelDefinitions {
   const definitions: V2ModelDefinitions = {}
   for (const [id, model] of Object.entries(models)) {
