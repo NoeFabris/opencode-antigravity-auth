@@ -58,6 +58,8 @@ describe("checkAccountsQuota", () => {
 
     expect(classifyQuotaGroup("gemini-4-argon-high", "Gemini 4 Argon")).toBe("argon")
     expect(classifyQuotaGroup("gemini-4-argon-low")).toBe("argon")
+    // The display name must not decide the group.
+    expect(classifyQuotaGroup("gemini-3.8-flash-high", "Argon helper")).toBe("gemini-flash")
     expect(classifyQuotaGroup("gemini-3.8-flash-high")).toBe("gemini-flash")
     expect(classifyQuotaGroup("gemini-3-pro")).toBe("gemini-pro")
     expect(classifyQuotaGroup("claude-sonnet-5-5-high")).toBe("claude")

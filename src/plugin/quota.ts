@@ -136,8 +136,10 @@ export function classifyQuotaGroup(modelName: string, displayName?: string): Quo
   // (`gemini-argon-wtu-weekly`): two 32k-token calls moved it ~1% while the
   // `gemini-weekly` and `gemini-5h` buckets stayed byte-identical. Reporting it
   // under `gemini-pro` makes the minimum-based aggregate announce an exhausted
-  // Pro quota when only Argon is spent.
-  if (combined.includes("argon")) {
+  // Pro quota when only Argon is spent. Decided on the model id only, so a
+  // display name that mentions Argon cannot move an unrelated model.
+  const id = modelName.toLowerCase();
+  if (id.includes("gemini") && id.includes("argon")) {
     return "argon";
   }
   const family = getModelFamily(modelName);
