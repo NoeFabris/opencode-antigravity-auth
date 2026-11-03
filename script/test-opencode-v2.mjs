@@ -11,10 +11,13 @@ const authMode = process.env.OPENCODE_V2_TEST_AUTH ?? "legacy"
 if (!["legacy", "pool", "v2"].includes(authMode)) throw new Error(`Unknown fixture auth mode: ${authMode}`)
 const temporary = realpathSync(mkdtempSync(join(tmpdir(), "antigravity-v2-runtime-")))
 const config = join(temporary, "config", "opencode")
+// The plugin keeps mutable state under OpenCode's data directory, not the config directory.
+const state = join(temporary, "data", "opencode", "antigravity")
 const workspace = join(temporary, "workspace")
 const logPath = join(temporary, "requests.jsonl")
 const fixturePackage = join(temporary, "fixture-plugin")
 mkdirSync(config, { recursive: true })
+mkdirSync(state, { recursive: true })
 mkdirSync(workspace)
 mkdirSync(fixturePackage)
 copyFileSync(join(root, "script", "fixtures", "opencode-v2-plugin.mjs"), join(fixturePackage, "index.js"))
@@ -36,7 +39,7 @@ const env = {
   GEMINI_API_KEY: "",
 }
 // Deliberately synthetic credentials; never read the user's account files.
-writeFileSync(join(config, "antigravity-accounts.json"), JSON.stringify({
+writeFileSync(join(state, "antigravity-accounts.json"), JSON.stringify({
   version: 4,
   accounts: [{ refreshToken: "fixture-refresh-token", projectId: "fixture-project", managedProjectId: "fixture-project", addedAt: 1, lastUsed: 0, enabled: true }],
   activeIndex: 0,

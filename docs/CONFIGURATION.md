@@ -103,7 +103,9 @@ Settings that control plugin behavior.
 }
 ```
 
-Logs are written to `~/.config/opencode/antigravity-logs/` (or `log_dir` if set).
+Logs are written to `~/.local/share/opencode/antigravity/antigravity-logs/` (or `log_dir` if set).
+
+The plugin keeps mutable state under `~/.local/share/opencode/antigravity/` (or `$XDG_DATA_HOME/opencode/antigravity`). That includes accounts, the signature cache, and debug logs. Earlier releases wrote accounts and the cache into `~/.config/opencode`; both are moved automatically on first start. Older log files stay where they are.
 
 ---
 

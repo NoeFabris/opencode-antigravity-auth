@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { AntigravityConfigSchema, DEFAULT_CONFIG, type AntigravityConfig } from "./schema";
 import { createLogger } from "../logger";
+import { getPluginLogsDir } from "../paths";
 
 const log = createLogger("config");
 
@@ -148,9 +149,11 @@ export function configExists(path: string): boolean {
 
 /**
  * Get the default logs directory.
+ * Logs are plugin state, so they live in the data directory instead of the
+ * config directory that OpenCode watches.
  */
 export function getDefaultLogsDir(): string {
-  return join(getConfigDir(), "antigravity-logs");
+  return getPluginLogsDir();
 }
 
 let runtimeConfig: AntigravityConfig | null = null;

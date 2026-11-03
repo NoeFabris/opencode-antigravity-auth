@@ -300,7 +300,7 @@ describe("Signature Cache", () => {
 describe("shared disk signature cache lifecycle", () => {
   it("stops shared timers only after the final plugin releases the cache", () => {
     vi.useFakeTimers()
-    vi.stubEnv("XDG_CONFIG_HOME", "/tmp/antigravity-signature-cache-lifecycle-test")
+    vi.stubEnv("XDG_DATA_HOME", "/tmp/antigravity-signature-cache-lifecycle-test")
     const config = { enabled: true, memory_ttl_seconds: 3600, disk_ttl_seconds: 86400, write_interval_seconds: 30 }
     const initialTimers = vi.getTimerCount()
     const first = acquireDiskSignatureCache(config)

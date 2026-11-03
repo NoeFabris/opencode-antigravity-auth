@@ -108,7 +108,7 @@ export const AntigravityConfigSchema = z.object({
   /**
    * Custom directory for debug logs.
    * Env override: OPENCODE_ANTIGRAVITY_LOG_DIR=/path/to/logs
-   * @default OS-specific config dir + "/antigravity-logs"
+   * @default plugin data dir + "/antigravity-logs"
    */
   log_dir: z.string().optional(),
   

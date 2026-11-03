@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -9,13 +9,20 @@ const USER_AGENT = "antigravity/hub/2.24.0 (aidev_client; os_type=darwin; arch=a
 const FALLBACK_PROJECT_ID = "bamboo-precept-lgxtn";
 
 function getDefaultAccountsPath() {
-  if (process.env.OPENCODE_CONFIG_DIR) return join(process.env.OPENCODE_CONFIG_DIR, "antigravity-accounts.json");
+  const dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
+  const current = join(dataHome, "opencode", "antigravity", "antigravity-accounts.json");
+  if (existsSync(current)) return current;
+
+  // Older releases kept the pool in the config directory.
+  const legacy = [];
+  if (process.env.OPENCODE_CONFIG_DIR) legacy.push(join(process.env.OPENCODE_CONFIG_DIR, "antigravity-accounts.json"));
+  const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  legacy.push(join(xdgConfig, "opencode", "antigravity-accounts.json"));
   if (process.platform === "win32") {
     const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
-    return join(appData, "opencode", "antigravity-accounts.json");
+    legacy.push(join(appData, "opencode", "antigravity-accounts.json"));
   }
-  const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(xdgConfig, "opencode", "antigravity-accounts.json");
+  return legacy.find((candidate) => existsSync(candidate)) ?? current;
 }
 
 function parseArgs() {
