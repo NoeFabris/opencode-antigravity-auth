@@ -118,7 +118,7 @@ function pool() {
   }
 }
 
-async function host(options: { value?: Credential.Value; connection?: boolean; nativeOverride?: boolean; catalog?: Record<string, AvailableModel>; catalogAccounts?: Record<string, string[]>; legacyOverride?: boolean; discoverModels?: boolean } = {}) {
+async function host(options: { value?: Credential.Value; connection?: boolean; nativeOverride?: boolean; catalog?: Record<string, AvailableModel>; catalogAccounts?: Record<string, string[]>; legacyOverride?: boolean; discoverModels?: boolean; directory?: string } = {}) {
   let value = options.value ?? credential()
   let connectionID: string | undefined
   let connected = options.connection !== false
@@ -163,7 +163,7 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   } as unknown as ModelEditor
   const ctx = {
     options: { discoverModels: options.discoverModels ?? false },
-    location: { directory: "/tmp/antigravity-v2-test" },
+    location: { directory: options.directory ?? "/tmp/antigravity-v2-test" },
     storage: { get: vi.fn(async (key: string) => storage.get(key)), set: vi.fn(async (key: string, value: unknown) => { storage.set(key, value) }), remove: vi.fn(async (key: string) => { storage.delete(key) }) },
     credential: { activate: vi.fn(async ({ credentialID }: { credentialID: string }) => { connectionID = credentialID }) },
     event: {
@@ -601,17 +601,43 @@ describe("OpenCode V2 adapter", () => {
     expect(state.updater).not.toHaveBeenCalled()
   })
 
-  it("forwards requests from previous session's sdk instance when plugin is reloaded", async () => {
+  it("forwards requests from previous session's sdk instance when plugin is reloaded in the same location", async () => {
     mockNetwork()
-    const adapter1 = await host()
+    const adapter1 = await host({ directory: "/tmp/project-a" })
     const { sdk: oldSdk } = await adapter1.sdk()
     await stream(oldSdk)
 
-    // Reload: new plugin instance starts, then old plugin instance cleans up
-    const adapter2 = await host()
+    // Unrelated instance in project-b starts
+    const adapterB = await host({ directory: "/tmp/project-b" })
+
+    // Reload in project-a: new instance starts, old cleans up
+    const adapter1Reloaded = await host({ directory: "/tmp/project-a" })
     await adapter1.cleanup()
 
-    // Subsequent request using oldSdk should succeed via the active plugin instance
+    // Subsequent request using oldSdk routes to project-a's reloaded instance, not project-b
+    const parts = await stream(oldSdk)
+    expect(parts.some(part => part.type === "text-delta" && part.delta.includes("Hello from Antigravity"))).toBe(true)
+
+    // Project-b cleans up with no replacement; requests from project-b reject as disposed
+    const { sdk: sdkB } = await adapterB.sdk()
+    await adapterB.cleanup()
+    await expect(stream(sdkB)).rejects.toThrow("disposed")
+  })
+
+  it("shares active instances across freshly evaluated modules via the global registry", async () => {
+    mockNetwork()
+    const adapter1 = await host({ directory: "/tmp/cross-eval" })
+    const { sdk: oldSdk } = await adapter1.sdk()
+
+    // Simulate another module evaluation setting up an active instance for this location in the global registry
+    const adapter2 = await host({ directory: "/tmp/cross-eval" })
+    await adapter1.cleanup()
+
+    const registryKey = Symbol.for("opencode.antigravity.activeInstances")
+    const registry = (globalThis as Record<symbol, Map<string, unknown>>)[registryKey]
+    expect(registry).toBeInstanceOf(Map)
+    expect(registry?.get("/tmp/cross-eval")).toBeDefined()
+
     const parts = await stream(oldSdk)
     expect(parts.some(part => part.type === "text-delta" && part.delta.includes("Hello from Antigravity"))).toBe(true)
   })

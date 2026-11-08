@@ -36,7 +36,16 @@ type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 type ActivePluginInstance = {
   fetch(input: RequestInfo | URL, init?: RequestInit, bodyOverlay?: Model.Info["body"], fallback?: unknown): Promise<Response>
 }
-let activePluginInstance: ActivePluginInstance | undefined
+
+const INSTANCE_REGISTRY_KEY = Symbol.for("opencode.antigravity.activeInstances")
+type GlobalWithInstances = typeof globalThis & {
+  [INSTANCE_REGISTRY_KEY]?: Map<string, ActivePluginInstance>
+}
+
+function getActiveInstanceRegistry(): Map<string, ActivePluginInstance> {
+  const g = globalThis as GlobalWithInstances
+  return g[INSTANCE_REGISTRY_KEY] ??= new Map<string, ActivePluginInstance>()
+}
 
 function mergeBody(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
   const result = { ...base }
@@ -91,6 +100,8 @@ export const AntigravityV2Plugin = Plugin.define({
   async setup(ctx) {
     const client = transportClient()
     const outbound = new AsyncLocalStorage<Fetch>()
+    const locationKey = ctx.location?.directory ?? "default"
+    const registry = getActiveInstanceRegistry()
     let modelAccounts: Record<string, string[]> = {}
     let accountCatalogLoaded = false
     const transport = await createAntigravityPlugin(PROVIDER_ID)({
@@ -406,12 +417,13 @@ export const AntigravityV2Plugin = Plugin.define({
         return outbound.run(original, () => interceptor.fetch(input instanceof URL ? input.toString() : input, { ...init, signal }))
       }),
     }
-    activePluginInstance = thisInstance
+    registry.set(locationKey, thisInstance)
 
     const scopedFetch = (fallback: unknown, body?: Model.Info["body"]): Fetch => (input, init) => {
       if (disposed) {
-        if (activePluginInstance && activePluginInstance !== thisInstance) {
-          return activePluginInstance.fetch(input, init, body, fallback)
+        const replacement = registry.get(locationKey)
+        if (replacement && replacement !== thisInstance) {
+          return replacement.fetch(input, init, body, fallback)
         }
         return Promise.reject(new Error("Antigravity plugin has been disposed"))
       }
@@ -422,8 +434,8 @@ export const AntigravityV2Plugin = Plugin.define({
     const cleanup = () => {
       if (cleaning) return cleaning
       disposed = true
-      if (activePluginInstance === thisInstance) {
-        activePluginInstance = undefined
+      if (registry.get(locationKey) === thisInstance) {
+        registry.delete(locationKey)
       }
       cleaning = Promise.resolve().then(async () => {
         lifetime.abort(new Error("Antigravity plugin disposed"))
