@@ -601,6 +601,21 @@ describe("OpenCode V2 adapter", () => {
     expect(state.updater).not.toHaveBeenCalled()
   })
 
+  it("forwards requests from previous session's sdk instance when plugin is reloaded", async () => {
+    mockNetwork()
+    const adapter1 = await host()
+    const { sdk: oldSdk } = await adapter1.sdk()
+    await stream(oldSdk)
+
+    // Reload: new plugin instance starts, then old plugin instance cleans up
+    const adapter2 = await host()
+    await adapter1.cleanup()
+
+    // Subsequent request using oldSdk should succeed via the active plugin instance
+    const parts = await stream(oldSdk)
+    expect(parts.some(part => part.type === "text-delta" && part.delta.includes("Hello from Antigravity"))).toBe(true)
+  })
+
   it("retains cancellation through the prepared wrapper and aborts in-flight requests on cleanup", async () => {
     const adapter = await host()
     const { sdk } = await adapter.sdk()

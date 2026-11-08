@@ -33,6 +33,10 @@ const API_KEY_SENTINEL = "antigravity-oauth"
 const ownsModel = (id: string) => id.startsWith("antigravity-")
 type Registration = { dispose(): Promise<void> }
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+type ActivePluginInstance = {
+  fetch(input: RequestInfo | URL, init?: RequestInit, bodyOverlay?: Model.Info["body"], fallback?: unknown): Promise<Response>
+}
+let activePluginInstance: ActivePluginInstance | undefined
 
 function mergeBody(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
   const result = { ...base }
@@ -385,26 +389,42 @@ export const AntigravityV2Plugin = Plugin.define({
       return result ?? getLoader()
     }
 
-    const scopedFetch = (fallback: unknown, body?: Model.Info["body"]): Fetch => (input, init) => runCredentialOperation(async () => {
-      if (disposed) throw new Error("Antigravity plugin has been disposed")
-      const original: Fetch = typeof fallback === "function" ? fallback as Fetch : globalThis.fetch
-      if (!await currentAuth()) throw new Error("Connect Google with Antigravity OAuth and enable an account to use this model")
-      if (body && typeof init?.body === "string") {
-        init = { ...init, body: JSON.stringify(mergeBody(JSON.parse(init.body) as Record<string, unknown>, body)) }
+    const thisInstance: ActivePluginInstance = {
+      fetch: (input, init, bodyOverlay, fallback) => runCredentialOperation(async () => {
+        if (disposed) throw new Error("Antigravity plugin has been disposed")
+        const original: Fetch = typeof fallback === "function" ? fallback as Fetch : globalThis.fetch
+        if (!await currentAuth()) throw new Error("Connect Google with Antigravity OAuth and enable an account to use this model")
+        if (bodyOverlay && typeof init?.body === "string") {
+          init = { ...init, body: JSON.stringify(mergeBody(JSON.parse(init.body) as Record<string, unknown>, bodyOverlay)) }
+        }
+        const interceptor = await getLoader()
+        const signal = AbortSignal.any([
+          lifetime.signal,
+          requestLifetime.signal,
+          ...(init?.signal ? [init.signal] : input instanceof Request ? [input.signal] : []),
+        ])
+        return outbound.run(original, () => interceptor.fetch(input instanceof URL ? input.toString() : input, { ...init, signal }))
+      }),
+    }
+    activePluginInstance = thisInstance
+
+    const scopedFetch = (fallback: unknown, body?: Model.Info["body"]): Fetch => (input, init) => {
+      if (disposed) {
+        if (activePluginInstance && activePluginInstance !== thisInstance) {
+          return activePluginInstance.fetch(input, init, body, fallback)
+        }
+        return Promise.reject(new Error("Antigravity plugin has been disposed"))
       }
-      const interceptor = await getLoader()
-      const signal = AbortSignal.any([
-        lifetime.signal,
-        requestLifetime.signal,
-        ...(init?.signal ? [init.signal] : input instanceof Request ? [input.signal] : []),
-      ])
-      return outbound.run(original, () => interceptor.fetch(input instanceof URL ? input.toString() : input, { ...init, signal }))
-    })
+      return thisInstance.fetch(input, init, body, fallback)
+    }
 
     let cleaning: Promise<void> | undefined
     const cleanup = () => {
       if (cleaning) return cleaning
       disposed = true
+      if (activePluginInstance === thisInstance) {
+        activePluginInstance = undefined
+      }
       cleaning = Promise.resolve().then(async () => {
         lifetime.abort(new Error("Antigravity plugin disposed"))
         await Promise.allSettled([...listeners].map((listener) => listener.close()))
