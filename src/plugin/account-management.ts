@@ -43,6 +43,7 @@ function summarizeCachedQuota(account: AccountMetadataV3): AccountSummary["quota
   return quota
 }
 
+/** Register RPC handlers for listing, selecting, deleting, and updating Antigravity accounts. */
 export async function registerAccountManagement(
   ctx: Plugin.Context,
   client: PluginClient,
@@ -53,6 +54,7 @@ export async function registerAccountManagement(
 ) {
   const readAccounts = loadManagedAccounts
 
+  /** List saved accounts for UI display, omitting missing quota properties to ensure JSON compliance. */
   async function list(): Promise<AccountSummary[]> {
     const storage = await readAccounts()
     if (!storage) return []

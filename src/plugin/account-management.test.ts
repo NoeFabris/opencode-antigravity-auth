@@ -124,6 +124,8 @@ describe("account management", () => {
     }
     const { handlers } = await host()
     const accounts = await handlers.list({}, callContext)
+    expect(accounts).toHaveLength(3)
+    expect(accounts[0]?.quota).toEqual({ remainingFraction: 0.5 })
     expect("quota" in (accounts[1] ?? {})).toBe(false)
     expect(Object.values(accounts[1] ?? {})).not.toContain(undefined)
     expect("resetTime" in (accounts[0]?.quota ?? {})).toBe(false)
