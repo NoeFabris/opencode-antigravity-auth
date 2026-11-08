@@ -10,6 +10,8 @@ import { DEFAULT_CONFIG } from "./config";
 import { initializeDebug } from "./debug";
 import { SKIP_THOUGHT_SIGNATURE, getAntigravityUserAgent } from "../constants";
 import * as config from "./config";
+import { registerCollapsedModelFamily } from "./transform/model-resolver";
+import { GEMINI_38_FLASH_FAMILY } from "./config/models-v2";
 import type { SignatureStore, ThoughtBuffer, StreamingCallbacks, StreamingOptions } from "./core/streaming/types";
 
 const {
@@ -1367,5 +1369,101 @@ it("removes x-api-key header", () => {
         ),
       ).rejects.toMatchObject({ message: "THINKING_RECOVERY_NEEDED" });
     });
+  });
+});
+
+describe("collapsed reasoning tier retargeting", () => {
+  const mockAccessToken = "test-token";
+  const mockProjectId = "test-project";
+
+  registerCollapsedModelFamily(GEMINI_38_FLASH_FAMILY);
+  registerCollapsedModelFamily({
+    baseId: "claude-8-thinking",
+    tiers: { low: "claude-8-thinking-low", high: "claude-8-thinking-high" },
+    thinking: "budget",
+  });
+
+  function prepare(model: string, body: Record<string, unknown>) {
+    return prepareAntigravityRequest(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      { method: "POST", body: JSON.stringify(body) },
+      mockAccessToken,
+      mockProjectId,
+      undefined,
+      "antigravity",
+    );
+  }
+
+  it("retargets an unwrapped family request to the selected variant tier", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      providerOptions: { google: { thinkingLevel: "medium" } },
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-medium");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-medium");
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: "medium" });
+  });
+
+  it("uses the family default tier when no variant is selected", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-low");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-low");
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: "low" });
+  });
+
+  it("keeps an explicitly advertised member ID unchanged", () => {
+    const result = prepare("antigravity-gemini-3.8-flash-high", {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-high");
+  });
+
+  it("retargets a wrapped family request using the wrapped variant config", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      project: "my-project",
+      request: {
+        providerOptions: { google: { thinkingLevel: "high" } },
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      },
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-high");
+  });
+
+  it("keeps the signature session stable across variants of one family", () => {
+    const request = (level: string) => ({
+      providerOptions: { google: { thinkingLevel: level } },
+      contents: [{ role: "user", parts: [{ text: "same conversation" }] }],
+    });
+
+    const low = prepare("antigravity-gemini-3.8-flash", request("low"));
+    const high = prepare("antigravity-gemini-3.8-flash", request("high"));
+
+    expect(low.effectiveModel).toBe("gemini-3.8-flash-low");
+    expect(high.effectiveModel).toBe("gemini-3.8-flash-high");
+    expect(low.sessionId).toBe(high.sessionId);
+  });
+
+  it("selects a budget family tier from a variant thinking budget", () => {
+    const result = prepare("antigravity-claude-8-thinking", {
+      providerOptions: { google: { thinkingConfig: { thinkingBudget: 20000 } } },
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("claude-8-thinking-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("claude-8-thinking-high");
+    expect(parsed.request.generationConfig.thinkingConfig.thinking_budget).toBe(20000);
   });
 });

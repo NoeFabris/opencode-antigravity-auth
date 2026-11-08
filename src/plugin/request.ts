@@ -63,6 +63,8 @@ import {
   resolveModelWithTier,
   resolveModelWithVariant,
   resolveModelForHeaderStyle,
+  resolveCollapsedModelTarget,
+  getCollapsedModelBaseId,
   isClaudeModel,
   isClaudeThinkingModel,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
@@ -830,7 +832,7 @@ export function prepareAntigravityRequest(
   let tierThinkingLevel = resolved.thinkingLevel;
   let signatureSessionKey = buildSignatureSessionKey(
     PLUGIN_SESSION_ID,
-    effectiveModel,
+    getCollapsedModelBaseId(effectiveModel) ?? effectiveModel,
     undefined,
     resolveProjectKey(projectId),
   );
@@ -842,6 +844,28 @@ export function prepareAntigravityRequest(
       const isWrapped = typeof parsedBody.project === "string" && "request" in parsedBody;
 
       if (isWrapped) {
+        // The wrapped path usually comes from our own transport, but a caller
+        // may already have selected a variant. Retarget to the concrete
+        // backend tier before the model is written into the envelope.
+        const wrappedRequest = parsedBody.request as Record<string, unknown> | undefined;
+        const wrappedVariantConfig = wrappedRequest && typeof wrappedRequest === "object"
+          ? extractVariantThinkingConfig(
+              wrappedRequest.providerOptions as Record<string, unknown> | undefined,
+              wrappedRequest.generationConfig as Record<string, unknown> | undefined,
+            )
+          : undefined;
+        const collapsedTarget = resolveCollapsedModelTarget(effectiveModel, wrappedVariantConfig);
+        if (collapsedTarget) {
+          effectiveModel = collapsedTarget.model;
+          if (collapsedTarget.thinkingLevel) {
+            tierThinkingLevel = collapsedTarget.thinkingLevel;
+            tierThinkingBudget = undefined;
+          } else if (typeof collapsedTarget.thinkingBudget === "number") {
+            tierThinkingBudget = collapsedTarget.thinkingBudget;
+            tierThinkingLevel = undefined;
+          }
+        }
+
         const wrappedBody = {
           ...parsedBody,
           model: effectiveModel,
@@ -862,9 +886,11 @@ export function prepareAntigravityRequest(
         }
 
         const conversationKey = resolveConversationKeyFromRequests(requestObjects);
-        // Strip tier suffix from model for cache key to prevent cache misses on tier change
-        // e.g., "claude-opus-4-6-thinking-high" -> "claude-opus-4-6-thinking"
-        const modelForCacheKey = effectiveModel.replace(/-(minimal|low|medium|high)$/i, "");
+        // Use the collapsed family base for the cache key so switching variants
+        // does not create a separate signature session. Otherwise strip the
+        // tier suffix, e.g. "claude-opus-4-6-thinking-high" -> "claude-opus-4-6-thinking".
+        const modelForCacheKey = getCollapsedModelBaseId(effectiveModel)
+          ?? effectiveModel.replace(/-(minimal|low|medium|high)$/i, "");
         signatureSessionKey = buildSignatureSessionKey(PLUGIN_SESSION_ID, modelForCacheKey, conversationKey, resolveProjectKey(parsedBody.project));
 
         if (requestObjects.length > 0) {
@@ -924,6 +950,20 @@ export function prepareAntigravityRequest(
           requestPayload.providerOptions as Record<string, unknown> | undefined,
           rawGenerationConfig
         );
+        // Thinking tiers are advertised as separate backend IDs. The OpenCode
+        // model is the collapsed family base, so the selected variant decides
+        // which concrete backend ID this request is sent to.
+        const collapsedTarget = resolveCollapsedModelTarget(effectiveModel, variantConfig);
+        if (collapsedTarget) {
+          effectiveModel = collapsedTarget.model;
+          if (collapsedTarget.thinkingLevel) {
+            tierThinkingLevel = collapsedTarget.thinkingLevel;
+            tierThinkingBudget = undefined;
+          } else if (typeof collapsedTarget.thinkingBudget === "number") {
+            tierThinkingBudget = collapsedTarget.thinkingBudget;
+            tierThinkingLevel = undefined;
+          }
+        }
         const isGemini3 = effectiveModel.toLowerCase().includes("gemini-3");
 
         log.debug(`[ThinkingResolution] rawModel=${rawModel} resolvedModel=${effectiveModel} resolvedTier=${tierThinkingLevel ?? "none"} variantLevel=${variantConfig?.thinkingLevel ?? "none"} variantBudget=${variantConfig?.thinkingBudget ?? "none"} providerOptions.google=${JSON.stringify((requestPayload.providerOptions as any)?.google ?? null)} generationConfig.thinkingConfig=${JSON.stringify((rawGenerationConfig as any)?.thinkingConfig ?? null)}`);
@@ -1319,7 +1359,8 @@ export function prepareAntigravityRequest(
         }
 
         const conversationKey = resolveConversationKey(requestPayload);
-        signatureSessionKey = buildSignatureSessionKey(PLUGIN_SESSION_ID, effectiveModel, conversationKey, resolveProjectKey(projectId));
+        const modelForCacheKey = getCollapsedModelBaseId(effectiveModel) ?? effectiveModel;
+        signatureSessionKey = buildSignatureSessionKey(PLUGIN_SESSION_ID, modelForCacheKey, conversationKey, resolveProjectKey(projectId));
 
         // For Claude models, filter out unsigned thinking blocks (required by Claude API)
         // Attempts to restore signatures from cache for multi-turn conversations

@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   ADVERTISED_TIER_SUFFIX_MODEL_IDS,
+  getCollapsedModelBaseId,
+  getThinkingTierBudget,
+  getThinkingTierSuffix,
   isAdvertisedTierSuffixModel,
+  normalizeReasoningLabel,
+  parseDisplayReasoning,
+  registerCollapsedModelFamily,
+  resolveCollapsedModelTarget,
   resolveModelWithTier,
   resolveModelWithVariant,
   resolveModelForHeaderStyle,
@@ -378,5 +385,131 @@ describe("advertised tier-suffix model IDs", () => {
     expect(resolveModelWithTier("claude-opus-4-6-thinking-high").actualModel).toBe("claude-opus-4-6-thinking");
     expect(resolveModelWithTier("gemini-3-pro-high").actualModel).toBe("gemini-3-pro");
     expect(resolveModelForHeaderStyle("gemini-3-pro-high", "antigravity").actualModel).toBe("gemini-3-pro-high");
+  });
+});
+
+describe("display-name reasoning labels", () => {
+  it("extracts arbitrary effort labels", () => {
+    expect(parseDisplayReasoning("Gemini 9 Flash (Extra Low)"))
+      .toEqual({ familyName: "Gemini 9 Flash", label: "Extra Low", id: "extra-low" });
+    expect(parseDisplayReasoning("Claude Opus 5.5 [Max]"))
+      .toEqual({ familyName: "Claude Opus 5.5", label: "Max", id: "max" });
+  });
+
+  it("ignores parentheticals that describe the model", () => {
+    expect(parseDisplayReasoning("Claude Opus 4.6 (Thinking)")).toBeUndefined();
+    expect(parseDisplayReasoning("Gemini 3 Flash (Preview)")).toBeUndefined();
+    expect(parseDisplayReasoning("Gemini 3 Flash")).toBeUndefined();
+  });
+
+  it("normalizes labels into stable slugs", () => {
+    expect(normalizeReasoningLabel(" Extra Low ")).toBe("extra-low");
+    expect(normalizeReasoningLabel("Thinking High")).toBe("thinking-high");
+  });
+});
+
+describe("collapsed model families", () => {
+  it("extracts tier suffixes only for thinking-capable model families", () => {
+    expect(getThinkingTierSuffix("gemini-3.8-flash-high")).toEqual({ baseId: "gemini-3.8-flash", tier: "high" });
+    expect(getThinkingTierSuffix("antigravity-gemini-3.8-flash-low")).toEqual({ baseId: "gemini-3.8-flash", tier: "low" });
+    expect(getThinkingTierSuffix("claude-opus-4-6-thinking-medium")).toEqual({ baseId: "claude-opus-4-6-thinking", tier: "medium" });
+    expect(getThinkingTierSuffix("gemini-2.5-pro-minimal")).toEqual({ baseId: "gemini-2.5-pro", tier: "minimal" });
+    expect(getThinkingTierSuffix("gpt-oss-120b-medium")).toBeUndefined();
+    expect(getThinkingTierSuffix("claude-sonnet-5-5-high")).toBeUndefined();
+    expect(getThinkingTierSuffix("gemini-3.8-flash")).toBeUndefined();
+  });
+
+  it("resolves the base ID for both the base model and its members", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-9-flash",
+      tiers: { low: "gemini-9-flash-low", medium: "gemini-9-flash-medium", high: "gemini-9-flash-high" },
+      defaultTier: "low",
+      thinking: "level",
+    });
+
+    expect(getCollapsedModelBaseId("gemini-9-flash")).toBe("gemini-9-flash");
+    expect(getCollapsedModelBaseId("antigravity-GEMINI-9-FLASH-MEDIUM")).toBe("gemini-9-flash");
+    expect(getCollapsedModelBaseId("gemini-9-flash-high")).toBe("gemini-9-flash");
+    expect(getCollapsedModelBaseId("gemini-9-flash-ultra")).toBeUndefined();
+  });
+
+  it("replaces a family's member index when it is registered again", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-9-pro",
+      tiers: { low: "gemini-9-pro-low", high: "gemini-9-pro-high" },
+      thinking: "level",
+    });
+    registerCollapsedModelFamily({
+      baseId: "gemini-9-pro",
+      tiers: { medium: "gemini-9-pro-medium" },
+      thinking: "level",
+    });
+
+    expect(getCollapsedModelBaseId("gemini-9-pro-medium")).toBe("gemini-9-pro");
+    expect(getCollapsedModelBaseId("gemini-9-pro-high")).toBeUndefined();
+  });
+
+  describe("resolveCollapsedModelTarget", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-10-flash",
+      tiers: { low: "gemini-10-flash-low", medium: "gemini-10-flash-medium", high: "gemini-10-flash-high" },
+      defaultTier: "low",
+      thinking: "level",
+    });
+    registerCollapsedModelFamily({
+      baseId: "gemini-10-pro",
+      tiers: { low: "gemini-10-pro-low", high: "gemini-10-pro-high" },
+      baseModelId: "gemini-10-pro",
+      thinking: "level",
+    });
+    registerCollapsedModelFamily({
+      baseId: "claude-9-thinking",
+      tiers: { low: "claude-9-thinking-low", high: "claude-9-thinking-high" },
+      thinking: "budget",
+    });
+
+    it("returns undefined for unrelated models", () => {
+      expect(resolveCollapsedModelTarget("gemini-11-flash")).toBeUndefined();
+    });
+
+    it("uses the selected variant tier and reports its thinking level", () => {
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-flash", { thinkingLevel: "high" }))
+        .toEqual({ model: "gemini-10-flash-high", thinkingLevel: "high" });
+    });
+
+    it("falls back to the family default when the variant does not match", () => {
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-flash", { thinkingLevel: "minimal" }))
+        .toEqual({ model: "gemini-10-flash-low", thinkingLevel: "low" });
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-flash"))
+        .toEqual({ model: "gemini-10-flash-low", thinkingLevel: "low" });
+    });
+
+    it("keeps the tier of an explicitly requested member without a variant", () => {
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-flash-medium"))
+        .toEqual({ model: "gemini-10-flash-medium", thinkingLevel: "medium" });
+    });
+
+    it("prefers an existing backend base ID when no variant is selected", () => {
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-pro"))
+        .toEqual({ model: "gemini-10-pro" });
+    });
+
+    it("still selects a tier when a variant is provided for a base-ID family", () => {
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-pro", { thinkingLevel: "high" }))
+        .toEqual({ model: "gemini-10-pro-high", thinkingLevel: "high" });
+    });
+
+    it("maps a numeric thinking budget onto a budget family tier", () => {
+      expect(resolveCollapsedModelTarget("antigravity-claude-9-thinking", { thinkingBudget: 20000 }))
+        .toEqual({ model: "claude-9-thinking-high", thinkingBudget: 32768 });
+      expect(resolveCollapsedModelTarget("antigravity-claude-9-thinking", { thinkingBudget: 4096 }))
+        .toEqual({ model: "claude-9-thinking-low", thinkingBudget: 8192 });
+    });
+
+    it("exposes tier budgets by model family", () => {
+      expect(getThinkingTierBudget("claude-opus-4-6-thinking", "low")).toBe(8192);
+      expect(getThinkingTierBudget("gemini-2.5-flash", "high")).toBe(24576);
+      expect(getThinkingTierBudget("gemini-3.8-flash", "minimal")).toBe(4096);
+    });
   });
 });

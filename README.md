@@ -37,7 +37,7 @@ To use a local checkout, run `npm ci && npm run build` and replace the package n
 
 ```sh
 opencode models
-opencode run --model=google/antigravity-gemini-3.8-flash-high "Hello"
+opencode run --model=google/antigravity-gemini-3.8-flash#high "Hello"
 opencode run --model=google/antigravity-claude-opus-4-6-thinking#max "Hello"
 ```
 

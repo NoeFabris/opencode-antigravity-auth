@@ -32,7 +32,7 @@ Google account's Antigravity access instead. Refresh the available catalog from
 
 ```bash
 opencode models
-opencode run --model=google/antigravity-gemini-3.8-flash-high "Hello"
+opencode run --model=google/antigravity-gemini-3.8-flash#high "Hello"
 ```
 
 The plugin hides native Google API-key models while Antigravity OAuth is selected.

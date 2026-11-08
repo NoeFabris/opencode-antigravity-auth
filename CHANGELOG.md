@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Discovered reasoning tiers now collapse into one OpenCode model with
+  `low`/`medium`/`high` variants. Variant names are read from each model's
+  `displayName`, so renamed or newly added efforts (`Extra Low`, `Turbo`,
+  `Ultra`, ...) work without a code change. A labelled effort forms a family
+  even when it is the only one advertised, keeping the model key stable if more
+  efforts appear later. Requests are retargeted to the matching backend ID
+  (`gemini-3.8-flash-high`) and family eligibility is shared across accounts
+  that advertise different tiers. Suffix-only IDs with no display label keep
+  their own model entry.
+
 ## [2.1.2] - 2026-10-27
 
 ### Added

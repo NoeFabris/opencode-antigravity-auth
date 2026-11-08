@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { OPENCODE_V2_MODEL_DEFINITIONS, buildAccountModelDefinitions } from "./models-v2"
-import { resolveModelForHeaderStyle } from "../transform/model-resolver"
+import {
+  OPENCODE_V2_MODEL_DEFINITIONS,
+  buildAccountModelDefinitions,
+  buildAccountModelKeys,
+  normalizeModelAccountKeys,
+} from "./models-v2"
+import { resolveCollapsedModelTarget } from "../transform/model-resolver"
 
 describe("OpenCode V2 models", () => {
   it("registers tools, modalities, and V2 variant overlays", () => {
@@ -15,7 +20,7 @@ describe("OpenCode V2 models", () => {
     })
   })
 
-  it("uses account metadata and preserves backend tiers while filtering unavailable models", () => {
+  it("uses account metadata while filtering unavailable models", () => {
     const catalog = buildAccountModelDefinitions({
       "claude-opus-5-5-high": { displayName: "Claude Opus 5.5 High", maxTokens: 1000000, maxOutputTokens: 128000 },
       "gemini-3.9-flash-medium": { displayName: "Gemini 3.9 Flash (Medium)", maxTokens: 1048576, maxOutputTokens: 65536 },
@@ -25,13 +30,194 @@ describe("OpenCode V2 models", () => {
       "gemini-2.5-pro": { selectable: false },
       "tab_flash_lite_preview": {},
     })
-    expect(Object.keys(catalog)).toEqual(["antigravity-claude-opus-5-5-high", "antigravity-gemini-3.9-flash-medium"])
+    expect(Object.keys(catalog)).toEqual(["antigravity-claude-opus-5-5-high", "antigravity-gemini-3.9-flash"])
     expect(catalog["antigravity-claude-opus-5-5-high"]).toMatchObject({
       limit: { context: 1000000, output: 128000 },
       cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
       variants: [],
     })
-    expect(resolveModelForHeaderStyle("antigravity-gemini-3.9-flash-medium", "antigravity").actualModel).toBe("gemini-3.9-flash-medium")
-    expect(OPENCODE_V2_MODEL_DEFINITIONS["antigravity-gemini-3.8-flash-high"]).toBeDefined()
+    expect(catalog["antigravity-gemini-3.9-flash"]?.variants).toEqual([
+      { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } } },
+    ])
+    expect(resolveCollapsedModelTarget("antigravity-gemini-3.9-flash", { thinkingLevel: "medium" }))
+      .toEqual({ model: "gemini-3.9-flash-medium", thinkingLevel: "medium" })
+    expect(OPENCODE_V2_MODEL_DEFINITIONS["antigravity-gemini-3.8-flash"]).toBeDefined()
+  })
+
+  it("collapses advertised reasoning tiers into one model with variants", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.8-flash-low": { displayName: "Gemini 3.8 Flash (Low)", maxTokens: 1048576, maxOutputTokens: 65536 },
+      "gemini-3.8-flash-medium": { displayName: "Gemini 3.8 Flash (Medium)", maxTokens: 1048576, maxOutputTokens: 65536 },
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", maxTokens: 1048576, maxOutputTokens: 65536 },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gemini-3.8-flash"])
+    expect(catalog["antigravity-gemini-3.8-flash"]).toMatchObject({
+      name: "Gemini 3.8 Flash (Antigravity)",
+      limit: { context: 1048576, output: 65536 },
+      variants: [
+        { id: "low", settings: { thinkingConfig: { thinkingLevel: "low" } } },
+        { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } } },
+        { id: "high", settings: { thinkingConfig: { thinkingLevel: "high" } } },
+      ],
+    })
+  })
+
+  it("emits a collapsed model at the first family member in catalog order", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.5-pro": {},
+      "gemini-3.8-flash-medium": {},
+      "claude-opus-4-6-thinking": {},
+      "gemini-3.8-flash-low": {},
+      "gemini-3.8-flash-high": {},
+    })
+
+    expect(Object.keys(catalog)).toEqual([
+      "antigravity-gemini-3.5-pro",
+      "antigravity-gemini-3.8-flash",
+      "antigravity-claude-opus-4-6-thinking",
+    ])
+  })
+
+  it("keeps lone tier-like IDs as their own models", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gpt-oss-120b-medium": { displayName: "GPT-OSS 120B Medium" },
+      "claude-sonnet-5-5-high": { displayName: "Claude Sonnet 5.5 High" },
+      "gemini-3.9-flash-medium": { displayName: "Gemini 3.9 Flash Medium" },
+    })
+
+    expect(Object.keys(catalog)).toEqual([
+      "antigravity-gpt-oss-120b-medium",
+      "antigravity-claude-sonnet-5-5-high",
+      "antigravity-gemini-3.9-flash-medium",
+    ])
+    expect(catalog["antigravity-gpt-oss-120b-medium"]?.variants).toEqual([])
+  })
+
+  it("collapses a real base model together with its tier siblings", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.8-flash": { displayName: "Gemini 3.8 Flash", maxTokens: 1048576, maxOutputTokens: 65536 },
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", maxTokens: 1048576, maxOutputTokens: 65536 },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gemini-3.8-flash"])
+    expect(catalog["antigravity-gemini-3.8-flash"]?.variants).toEqual([
+      { id: "high", settings: { thinkingConfig: { thinkingLevel: "high" } } },
+    ])
+  })
+
+  it("uses budget variants for Claude thinking families", () => {
+    const catalog = buildAccountModelDefinitions({
+      "claude-opus-4-6-thinking-low": {},
+      "claude-opus-4-6-thinking-medium": {},
+      "claude-opus-4-6-thinking-high": {},
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-claude-opus-4-6-thinking"])
+    expect(catalog["antigravity-claude-opus-4-6-thinking"]?.variants).toEqual([
+      { id: "low", settings: { thinkingConfig: { thinkingBudget: 8192 } } },
+      { id: "medium", settings: { thinkingConfig: { thinkingBudget: 16384 } } },
+      { id: "high", settings: { thinkingConfig: { thinkingBudget: 32768 } } },
+    ])
+  })
+
+  it("maps single-tier account eligibility onto the collapsed family key", () => {
+    const catalog = {
+      "gemini-3.8-flash-low": {},
+      "gemini-3.8-flash-medium": {},
+      "gemini-3.8-flash-high": {},
+      "gemini-3.5-flash-lite": {},
+    }
+
+    expect(buildAccountModelKeys({ "gemini-3.8-flash-medium": {} }, catalog))
+      .toEqual(["antigravity-gemini-3.8-flash"])
+    expect(buildAccountModelKeys({ "gemini-3.5-flash-lite": {} }, catalog))
+      .toEqual(["antigravity-gemini-3.5-flash-lite"])
+  })
+
+  it("normalizes cached per-tier account keys to collapsed keys", () => {
+    const normalized = normalizeModelAccountKeys({
+      "antigravity-gemini-3.8-flash-low": ["first"],
+      "antigravity-gemini-3.8-flash-high": ["second", "first"],
+      "antigravity-gemini-3.5-flash-lite": ["first"],
+    }, {
+      "gemini-3.8-flash-low": {},
+      "gemini-3.8-flash-medium": {},
+      "gemini-3.8-flash-high": {},
+      "gemini-3.5-flash-lite": {},
+    })
+
+    expect(normalized).toEqual({
+      "antigravity-gemini-3.8-flash": ["first", "second"],
+      "antigravity-gemini-3.5-flash-lite": ["first"],
+    })
+  })
+
+  it("uses display-name efforts so renamed tiers work without code changes", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-9-flash-extra-low": { displayName: "Gemini 9 Flash (Extra Low)" },
+      "gemini-9-flash-turbo": { displayName: "Gemini 9 Flash (Turbo)" },
+      "gemini-9-flash-ultra": { displayName: "Gemini 9 Flash (Ultra)" },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gemini-9-flash"])
+    expect(catalog["antigravity-gemini-9-flash"]?.variants.map(variant => variant.id))
+      .toEqual(["extra-low", "turbo", "ultra"])
+    expect(resolveCollapsedModelTarget("antigravity-gemini-9-flash", { thinkingLevel: "turbo" }))
+      .toEqual({ model: "gemini-9-flash-turbo" })
+  })
+
+  it("treats the display label as authoritative when the ID disagrees", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.5-flash-low": { displayName: "Gemini 3.5 Flash (Medium)" },
+      "gemini-3.5-flash-extra-low": { displayName: "Gemini 3.5 Flash (Low)" },
+    })
+
+    expect(catalog["antigravity-gemini-3.5-flash"]?.variants).toEqual([
+      { id: "low", settings: { thinkingConfig: { thinkingLevel: "low" } } },
+      { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } } },
+    ])
+    expect(resolveCollapsedModelTarget("antigravity-gemini-3.5-flash", { thinkingLevel: "medium" }))
+      .toEqual({ model: "gemini-3.5-flash-low", thinkingLevel: "medium" })
+  })
+
+  it("collapses newly added families with parenthetical efforts", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gpt-oss-120b-low": { displayName: "GPT-OSS 120B (Low)" },
+      "gpt-oss-120b-medium": { displayName: "GPT-OSS 120B (Medium)" },
+      "gpt-oss-120b-high": { displayName: "GPT-OSS 120B (High)" },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gpt-oss-120b"])
+    expect(catalog["antigravity-gpt-oss-120b"]?.variants).toEqual([
+      { id: "low", settings: {} },
+      { id: "medium", settings: {} },
+      { id: "high", settings: {} },
+    ])
+    expect(resolveCollapsedModelTarget("antigravity-gpt-oss-120b", { thinkingLevel: "high" }))
+      .toEqual({ model: "gpt-oss-120b-high" })
+  })
+
+  it("exposes a lone labelled effort as a one-variant family", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gpt-oss-120b-medium": { displayName: "GPT-OSS 120B (Medium)" },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gpt-oss-120b"])
+    expect(catalog["antigravity-gpt-oss-120b"]?.variants).toEqual([{ id: "medium", settings: {} }])
+    expect(resolveCollapsedModelTarget("antigravity-gpt-oss-120b", { thinkingLevel: "medium" }))
+      .toEqual({ model: "gpt-oss-120b-medium" })
+  })
+
+  it("does not treat non-effort parentheticals as tiers", () => {
+    const catalog = buildAccountModelDefinitions({
+      "claude-opus-4-6": { displayName: "Claude Opus 4.6" },
+      "claude-opus-4-6-thinking": { displayName: "Claude Opus 4.6 (Thinking)" },
+    })
+
+    expect(Object.keys(catalog)).toEqual([
+      "antigravity-claude-opus-4-6",
+      "antigravity-claude-opus-4-6-thinking",
+    ])
   })
 })

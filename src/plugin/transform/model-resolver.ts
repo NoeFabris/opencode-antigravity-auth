@@ -167,6 +167,274 @@ export function isAdvertisedTierSuffixModel(model: string): boolean {
 }
 
 /**
+ * A reasoning tier or effort label advertised by the backend. Standard
+ * Gemini/Claude tiers are minimal/low/medium/high, but Google can add or rename
+ * efforts, so any slug is accepted.
+ */
+export type CollapsedModelTier = string;
+
+/** Canonical ordering used when presenting known synthesized variants. */
+export const COLLAPSED_MODEL_TIERS: readonly CollapsedModelTier[] = ["minimal", "low", "medium", "high"];
+
+const STANDARD_THINKING_LEVELS = new Set<string>(COLLAPSED_MODEL_TIERS);
+const COLLAPSED_TIER_REGEX = /-(minimal|low|medium|high)$/i;
+
+/**
+ * Normalizes a display or effort label into a stable slug:
+ * "Extra Low" -> "extra-low", "Max" -> "max".
+ */
+export function normalizeReasoningLabel(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .replace(/-+/g, "-");
+}
+
+/** Parenthetical labels that describe the model, not a reasoning effort. */
+const NON_EFFORT_LABELS = new Set([
+  "thinking",
+  "preview",
+  "custom-tools",
+  "customtools",
+  "image",
+  "video",
+  "lite",
+  "agent",
+  "experimental",
+  "deprecated",
+  "legacy",
+  "tiered",
+  "disabled",
+]);
+
+export interface DisplayReasoningLabel {
+  /** Family display name with the effort suffix removed. */
+  familyName: string;
+  /** Effort label exactly as shown by the backend. */
+  label: string;
+  /** Variant id slug derived from the label. */
+  id: string;
+}
+
+/**
+ * Extracts the reasoning effort from a backend display name. Google advertises
+ * tiers as a trailing parenthetical, e.g. "Gemini 3.8 Flash (High)". The label
+ * is authoritative: the backend ID may not match it.
+ */
+export function parseDisplayReasoning(displayName: string | undefined): DisplayReasoningLabel | undefined {
+  const name = displayName?.trim();
+  if (!name) return undefined;
+  const match = name.match(/^(.*?)\s*[\(\[]\s*([^()\[\]]{1,40})\s*[\)\]]\s*$/);
+  if (!match) return undefined;
+  const familyName = match[1]?.trim();
+  const label = match[2]?.trim();
+  if (!familyName || !label) return undefined;
+  const id = normalizeReasoningLabel(label);
+  if (!id || NON_EFFORT_LABELS.has(id)) return undefined;
+  return { familyName, label, id };
+}
+
+/**
+ * A backend model family whose thinking tiers are advertised as separate model
+ * IDs (for example gemini-3.8-flash-low/medium/high). OpenCode presents the
+ * family as one model with variants, and requests are retargeted to the
+ * concrete backend ID at request time.
+ */
+export interface CollapsedModelFamily {
+  /** Backend model ID without the tier suffix and without the antigravity- prefix. */
+  baseId: string;
+  /** Concrete backend model ID per effort slug. */
+  tiers: Record<string, string>;
+  /** Effort label shown by the backend per slug, e.g. "Extra Low". */
+  labels?: Record<string, string>;
+  /** Real backend ID for the base model, when one exists. */
+  baseModelId?: string;
+  /** Tier used when a request has no explicit variant. */
+  defaultTier?: CollapsedModelTier;
+  /**
+   * How tiers are expressed: Gemini thinkingLevel, a numeric thinkingBudget, or
+   * "none" when the backend ID already encodes the effort.
+   */
+  thinking?: "level" | "budget" | "none";
+}
+
+const collapsedFamilies = new Map<string, CollapsedModelFamily>();
+const collapsedMembersByBase = new Map<string, Set<string>>();
+const collapsedMemberIndex = new Map<string, { baseId: string; tier: CollapsedModelTier }>();
+
+/**
+ * Returns the thinking tier encoded in a model ID suffix, but only when the
+ * suffix is semantically a thinking tier. IDs such as gpt-oss-120b-medium keep
+ * their suffix as part of the real model name.
+ */
+export function getThinkingTierSuffix(model: string): { baseId: string; tier: CollapsedModelTier } | undefined {
+  const withoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  if (!supportsThinkingTiers(withoutQuota)) return undefined;
+  const match = withoutQuota.match(COLLAPSED_TIER_REGEX);
+  const tier = match?.[1]?.toLowerCase();
+  if (!match || !tier) return undefined;
+  return {
+    baseId: withoutQuota.slice(0, -match[0].length),
+    tier: tier as CollapsedModelTier,
+  };
+}
+
+/**
+ * Registers (or replaces) a collapsed family. Registration is additive so a
+ * cached catalog can keep resolving requests until a fresh discovery replaces
+ * the family.
+ */
+export function registerCollapsedModelFamily(family: CollapsedModelFamily): void {
+  const key = family.baseId.toLowerCase();
+  const previous = collapsedMembersByBase.get(key);
+  if (previous) {
+    for (const member of previous) collapsedMemberIndex.delete(member);
+  }
+  collapsedFamilies.set(key, family);
+  const members = new Set<string>();
+  for (const tier of Object.keys(family.tiers)) {
+    const id = family.tiers[tier];
+    if (!id) continue;
+    const lower = id.toLowerCase();
+    members.add(lower);
+    collapsedMemberIndex.set(lower, { baseId: family.baseId, tier });
+  }
+  collapsedMembersByBase.set(key, members);
+}
+
+/**
+ * Returns the collapsed family base ID for a base or tiered backend model ID.
+ */
+export function getCollapsedModelBaseId(model: string): string | undefined {
+  const normalized = model.replace(QUOTA_PREFIX_REGEX, "").toLowerCase();
+  const direct = collapsedFamilies.get(normalized);
+  if (direct) return direct.baseId;
+  return collapsedMemberIndex.get(normalized)?.baseId;
+}
+
+export interface CollapsedModelTarget {
+  /** Concrete backend model ID to send to Antigravity. */
+  model: string;
+  /** Gemini thinking level implied by the selected tier. */
+  thinkingLevel?: string;
+  /** Numeric thinking budget implied by the selected tier. */
+  thinkingBudget?: number;
+}
+
+function isBudgetThinkingFamily(baseId: string): boolean {
+  const lower = baseId.toLowerCase();
+  return lower.includes("claude") || lower.includes("gemini-2.5");
+}
+
+function standardThinkingLevel(tier: string): string | undefined {
+  const normalized = tier.trim().toLowerCase();
+  return STANDARD_THINKING_LEVELS.has(normalized) ? normalized : undefined;
+}
+
+function collapsedThinkingConfig(
+  family: CollapsedModelFamily,
+  tier: CollapsedModelTier,
+): Pick<CollapsedModelTarget, "thinkingLevel" | "thinkingBudget"> {
+  const mode = family.thinking ?? (isBudgetThinkingFamily(family.baseId) ? "budget" : "level");
+  if (mode === "none") return {};
+  if (mode === "budget") {
+    const budget = getThinkingTierBudget(family.baseId, tier);
+    return budget === undefined ? {} : { thinkingBudget: budget };
+  }
+  // New or renamed efforts ride on the wire model ID; only send a level the
+  // Antigravity API understands.
+  const level = standardThinkingLevel(tier);
+  return level ? { thinkingLevel: level } : {};
+}
+
+/**
+ * Numeric budget for a tier, using the same family budgets as tier suffixes.
+ * Returns undefined for effort labels the budget table does not know.
+ */
+export function getThinkingTierBudget(model: string, tier: CollapsedModelTier): number | undefined {
+  const normalized = tier.trim().toLowerCase();
+  const key = normalized === "minimal" ? "low" : normalized;
+  if (key !== "low" && key !== "medium" && key !== "high") return undefined;
+  const budgets = THINKING_TIER_BUDGETS[getBudgetFamily(model)];
+  return budgets[key];
+}
+
+function budgetToCollapsedTier(budget: number): CollapsedModelTier {
+  if (budget <= 8192) return "low";
+  if (budget <= 16384) return "medium";
+  return "high";
+}
+
+function matchCollapsedVariant(family: CollapsedModelFamily, value: string): string | undefined {
+  const normalized = normalizeReasoningLabel(value);
+  if (!normalized) return undefined;
+  if (family.tiers[normalized]) return normalized;
+  for (const [id, label] of Object.entries(family.labels ?? {})) {
+    if (normalizeReasoningLabel(label) === normalized) return id;
+  }
+  return normalized;
+}
+
+/**
+ * Maps a collapsed OpenCode model (plus the selected variant's thinking
+ * configuration) to the concrete backend model ID and tier.
+ *
+ * Explicit variant config wins. Otherwise a requested tier suffix is
+ * preserved, then a real backend base ID is preferred, and finally the
+ * family's default tier is used.
+ */
+export function resolveCollapsedModelTarget(
+  requestedModel: string,
+  variant?: { thinkingLevel?: string; thinkingBudget?: number },
+): CollapsedModelTarget | undefined {
+  const normalized = requestedModel.replace(QUOTA_PREFIX_REGEX, "").toLowerCase();
+  const direct = collapsedFamilies.get(normalized);
+  const member = collapsedMemberIndex.get(normalized);
+  const family = direct ?? (member ? collapsedFamilies.get(member.baseId.toLowerCase()) : undefined);
+  if (!family) return undefined;
+
+  const available = (tier: CollapsedModelTier) => family.tiers[tier] !== undefined;
+  const ordered = Object.keys(family.tiers);
+  const defaultTier = family.defaultTier && available(family.defaultTier)
+    ? family.defaultTier
+    : ordered[0];
+  let tier: CollapsedModelTier | undefined;
+
+  if (variant?.thinkingLevel) {
+    const candidate = matchCollapsedVariant(family, variant.thinkingLevel);
+    if (candidate && available(candidate)) tier = candidate;
+  }
+  if (!tier && typeof variant?.thinkingBudget === "number") {
+    const candidate = budgetToCollapsedTier(variant.thinkingBudget);
+    if (available(candidate)) tier = candidate;
+  }
+  if (!tier && member) tier = member.tier;
+
+  if (!tier) {
+    if (family.baseModelId) return { model: family.baseModelId };
+    tier = defaultTier;
+  }
+  if (!tier) return undefined;
+
+  const tierId = family.tiers[tier];
+  if (tierId) {
+    return { model: tierId, ...collapsedThinkingConfig(family, tier) };
+  }
+  if (family.baseModelId) {
+    return { model: family.baseModelId, ...collapsedThinkingConfig(family, tier) };
+  }
+  if (defaultTier) {
+    const fallbackId = family.tiers[defaultTier];
+    if (fallbackId) {
+      return { model: fallbackId, ...collapsedThinkingConfig(family, defaultTier) };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
  *
