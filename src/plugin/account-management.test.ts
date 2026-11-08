@@ -118,6 +118,19 @@ describe("account management", () => {
     expect(AccountSummary.parse(accounts[0]).quota).toEqual({ remainingFraction: 0.2 })
   })
 
+  it("omits undefined properties so RPC output strictly conforms to JSON values", async () => {
+    state.storage!.accounts[0]!.cachedQuota = {
+      "gemini-flash": { remainingFraction: 0.5, modelCount: 1 },
+    }
+    const { handlers } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect("quota" in (accounts[1] ?? {})).toBe(false)
+    expect(Object.values(accounts[1] ?? {})).not.toContain(undefined)
+    expect("resetTime" in (accounts[0]?.quota ?? {})).toBe(false)
+    expect("updatedAt" in (accounts[0]?.quota ?? {})).toBe(false)
+    expect(Object.values(accounts[0]?.quota ?? {})).not.toContain(undefined)
+  })
+
   it("persists the minimum quota's reset from a quota check for subsequent list calls", async () => {
     const groups = {
       claude: { remainingFraction: 0.2, resetTime: "2026-10-27T13:00:00Z", remainingFractionResetTime: "2026-10-27T17:00:00Z", modelCount: 2 },

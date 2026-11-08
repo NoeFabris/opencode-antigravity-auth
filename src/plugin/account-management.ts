@@ -33,7 +33,11 @@ function summarizeCachedQuota(account: AccountMetadataV3): AccountSummary["quota
       // Older multi-model caches only record the earliest reset in the group,
       // which may belong to a model with a different remaining fraction.
       const resetTime = group.remainingFractionResetTime ?? (group.modelCount === 1 ? group.resetTime : undefined)
-      quota = { remainingFraction, resetTime: typeof resetTime === "string" ? resetTime : undefined, updatedAt: account.cachedQuotaUpdatedAt }
+      quota = {
+        remainingFraction,
+        ...(typeof resetTime === "string" ? { resetTime } : {}),
+        ...(account.cachedQuotaUpdatedAt !== undefined ? { updatedAt: account.cachedQuotaUpdatedAt } : {}),
+      }
     }
   }
   return quota
@@ -52,12 +56,18 @@ export async function registerAccountManagement(
   async function list(): Promise<AccountSummary[]> {
     const storage = await readAccounts()
     if (!storage) return []
-    return storage.accounts.map((account, index) => ({
-      id: accountID(account), email: account.email ?? `Account ${index + 1}`,
-      enabled: account.enabled !== false, current: index === storage.activeIndex,
-      verificationRequired: account.verificationRequired === true, lastUsed: account.lastUsed ?? 0,
-      quota: summarizeCachedQuota(account),
-    }))
+    return storage.accounts.map((account, index) => {
+      const quota = summarizeCachedQuota(account)
+      return {
+        id: accountID(account),
+        email: account.email ?? `Account ${index + 1}`,
+        enabled: account.enabled !== false,
+        current: index === storage.activeIndex,
+        verificationRequired: account.verificationRequired === true,
+        lastUsed: account.lastUsed ?? 0,
+        ...(quota ? { quota } : {}),
+      }
+    })
   }
 
   // Resolving a native connection may refresh OAuth. Do this only for explicit
