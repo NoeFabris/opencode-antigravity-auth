@@ -101,9 +101,12 @@ export const AntigravityV2Plugin = Plugin.define({
       runtimeVersion: 2,
       canUseAccount: (account, model) => {
         // Collapsed families share one OpenCode model, while a resolved request
-        // may carry a tiered backend ID. Check eligibility against the family.
+        // may carry a tiered backend ID. Check eligibility against the family,
+        // and preserve a registered family key before legacy defaulting can
+        // rewrite it to an unadvertised tier.
+        const familyBase = getCollapsedModelBaseId(model)
         const actualModel = resolveModelWithTier(model).actualModel
-        const baseModel = getCollapsedModelBaseId(actualModel) ?? actualModel
+        const baseModel = familyBase ?? getCollapsedModelBaseId(actualModel) ?? actualModel
         // A catalog that only advertises one tier keeps its tiered key, while a
         // collapsed multi-tier catalog uses the family base key.
         const eligible = modelAccounts[`antigravity-${baseModel}`]

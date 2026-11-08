@@ -8,6 +8,7 @@ import {
   normalizeReasoningLabel,
   parseDisplayReasoning,
   registerCollapsedModelFamily,
+  resetCollapsedModelFamilies,
   resolveCollapsedModelTarget,
   resolveModelWithTier,
   resolveModelWithVariant,
@@ -511,5 +512,53 @@ describe("collapsed model families", () => {
       expect(getThinkingTierBudget("gemini-2.5-flash", "high")).toBe(24576);
       expect(getThinkingTierBudget("gemini-3.8-flash", "minimal")).toBe(4096);
     });
+
+    it("uses an explicit variant ID instead of inferring a tier from settings", () => {
+      registerCollapsedModelFamily({
+        baseId: "gemini-10-pro",
+        tiers: {
+          minimal: "gemini-10-pro-minimal",
+          low: "gemini-10-pro-low",
+          high: "gemini-10-pro-high",
+        },
+        thinking: "budget",
+      });
+
+      // Both minimal and low share a budget, so only the marker keeps minimal
+      // on its own backend ID.
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-pro", undefined, "minimal"))
+        .toEqual({ model: "gemini-10-pro-minimal", thinkingBudget: 4096 });
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-pro", { thinkingBudget: 8192 }, "minimal"))
+        .toEqual({ model: "gemini-10-pro-minimal", thinkingBudget: 4096 });
+    });
+
+    it("does not forward a nonstandard effort as a thinking level", () => {
+      registerCollapsedModelFamily({
+        baseId: "gemini-10-ultra",
+        tiers: { turbo: "gemini-10-ultra-turbo", high: "gemini-10-ultra-high" },
+        thinking: "level",
+      });
+
+      expect(resolveCollapsedModelTarget("antigravity-gemini-10-ultra", { thinkingLevel: "turbo" }, "turbo"))
+        .toEqual({ model: "gemini-10-ultra-turbo" });
+    });
+  });
+
+  it("drops obsolete families without touching kept ones", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-12-flash",
+      tiers: { low: "gemini-12-flash-low", high: "gemini-12-flash-high" },
+      thinking: "level",
+    });
+    registerCollapsedModelFamily({
+      baseId: "gemini-12-pro",
+      tiers: { low: "gemini-12-pro-low", high: "gemini-12-pro-high" },
+      thinking: "level",
+    });
+
+    resetCollapsedModelFamilies(["gemini-12-pro"]);
+
+    expect(getCollapsedModelBaseId("gemini-12-flash-high")).toBeUndefined();
+    expect(getCollapsedModelBaseId("gemini-12-pro-high")).toBe("gemini-12-pro");
   });
 });

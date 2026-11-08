@@ -260,6 +260,9 @@ export interface CollapsedModelFamily {
   thinking?: "level" | "budget" | "none";
 }
 
+/** Request-body field that carries the selected collapsed variant ID. */
+export const COLLAPSED_TIER_BODY_KEY = "__antigravityTier";
+
 const collapsedFamilies = new Map<string, CollapsedModelFamily>();
 const collapsedMembersByBase = new Map<string, Set<string>>();
 const collapsedMemberIndex = new Map<string, { baseId: string; tier: CollapsedModelTier }>();
@@ -294,14 +297,33 @@ export function registerCollapsedModelFamily(family: CollapsedModelFamily): void
   }
   collapsedFamilies.set(key, family);
   const members = new Set<string>();
-  for (const tier of Object.keys(family.tiers)) {
-    const id = family.tiers[tier];
-    if (!id) continue;
+  /** Indexes a concrete backend ID so requests can map it back to its family. */
+  const registerMember = (id: string, tier: CollapsedModelTier) => {
     const lower = id.toLowerCase();
     members.add(lower);
     collapsedMemberIndex.set(lower, { baseId: family.baseId, tier });
+  };
+  for (const tier of Object.keys(family.tiers)) {
+    const id = family.tiers[tier];
+    if (id) registerMember(id, tier);
   }
   collapsedMembersByBase.set(key, members);
+}
+
+/**
+ * Drops collapsed families that are not part of the current catalog. Called
+ * after a successful discovery so a refreshed catalog cannot keep routing to a
+ * tier that the backend no longer advertises. Failed discovery never calls
+ * this, so the previous families remain usable as a fallback.
+ */
+export function resetCollapsedModelFamilies(keepBaseIds: Iterable<string> = []): void {
+  const keep = new Set([...keepBaseIds].map(id => id.toLowerCase()));
+  for (const key of [...collapsedFamilies.keys()]) {
+    if (keep.has(key)) continue;
+    collapsedFamilies.delete(key);
+    for (const member of collapsedMembersByBase.get(key) ?? []) collapsedMemberIndex.delete(member);
+    collapsedMembersByBase.delete(key);
+  }
 }
 
 /**
@@ -323,16 +345,19 @@ export interface CollapsedModelTarget {
   thinkingBudget?: number;
 }
 
+/** True when a family expresses effort as a numeric thinking budget. */
 function isBudgetThinkingFamily(baseId: string): boolean {
   const lower = baseId.toLowerCase();
   return lower.includes("claude") || lower.includes("gemini-2.5");
 }
 
+/** Returns a thinking level only when the API understands the tier name. */
 function standardThinkingLevel(tier: string): string | undefined {
   const normalized = tier.trim().toLowerCase();
   return STANDARD_THINKING_LEVELS.has(normalized) ? normalized : undefined;
 }
 
+/** Builds the thinking config implied by one collapsed tier. */
 function collapsedThinkingConfig(
   family: CollapsedModelFamily,
   tier: CollapsedModelTier,
@@ -361,12 +386,14 @@ export function getThinkingTierBudget(model: string, tier: CollapsedModelTier): 
   return budgets[key];
 }
 
+/** Maps a numeric thinking budget back onto a collapsed tier. */
 function budgetToCollapsedTier(budget: number): CollapsedModelTier {
   if (budget <= 8192) return "low";
   if (budget <= 16384) return "medium";
   return "high";
 }
 
+/** Matches a raw effort label or slug against a family variant. */
 function matchCollapsedVariant(family: CollapsedModelFamily, value: string): string | undefined {
   const normalized = normalizeReasoningLabel(value);
   if (!normalized) return undefined;
@@ -378,16 +405,17 @@ function matchCollapsedVariant(family: CollapsedModelFamily, value: string): str
 }
 
 /**
- * Maps a collapsed OpenCode model (plus the selected variant's thinking
- * configuration) to the concrete backend model ID and tier.
+ * Maps a collapsed OpenCode model (plus the selected variant) to the concrete
+ * backend model ID and tier.
  *
- * Explicit variant config wins. Otherwise a requested tier suffix is
- * preserved, then a real backend base ID is preferred, and finally the
- * family's default tier is used.
+ * An explicit variant ID (carried in the request body) wins, then variant
+ * thinking config, then a requested tier suffix, then a real backend base ID,
+ * and finally the family's default tier.
  */
 export function resolveCollapsedModelTarget(
   requestedModel: string,
   variant?: { thinkingLevel?: string; thinkingBudget?: number },
+  variantId?: string,
 ): CollapsedModelTarget | undefined {
   const normalized = requestedModel.replace(QUOTA_PREFIX_REGEX, "").toLowerCase();
   const direct = collapsedFamilies.get(normalized);
@@ -402,7 +430,11 @@ export function resolveCollapsedModelTarget(
     : ordered[0];
   let tier: CollapsedModelTier | undefined;
 
-  if (variant?.thinkingLevel) {
+  if (variantId) {
+    const candidate = matchCollapsedVariant(family, variantId);
+    if (candidate && available(candidate)) tier = candidate;
+  }
+  if (!tier && variant?.thinkingLevel) {
     const candidate = matchCollapsedVariant(family, variant.thinkingLevel);
     if (candidate && available(candidate)) tier = candidate;
   }

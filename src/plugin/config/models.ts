@@ -9,6 +9,11 @@ export interface ModelThinkingConfig {
 export interface ModelVariant {
   thinkingLevel?: ModelThinkingLevel;
   thinkingConfig?: ModelThinkingConfig;
+  /**
+   * Extra request-body fields merged by OpenCode for the selected variant.
+   * Used to carry the exact collapsed tier to the request interceptor.
+   */
+  body?: Record<string, unknown>;
 }
 
 export interface ModelLimit {

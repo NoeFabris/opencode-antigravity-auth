@@ -5,7 +5,9 @@ import {
   buildAccountModelKeys,
   normalizeModelAccountKeys,
 } from "./models-v2"
-import { resolveCollapsedModelTarget } from "../transform/model-resolver"
+import { COLLAPSED_TIER_BODY_KEY, getCollapsedModelBaseId, resolveCollapsedModelTarget } from "../transform/model-resolver"
+
+const tierMarker = (id: string) => ({ [COLLAPSED_TIER_BODY_KEY]: id })
 
 describe("OpenCode V2 models", () => {
   it("registers tools, modalities, and V2 variant overlays", () => {
@@ -37,7 +39,7 @@ describe("OpenCode V2 models", () => {
       variants: [],
     })
     expect(catalog["antigravity-gemini-3.9-flash"]?.variants).toEqual([
-      { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } } },
+      { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } }, body: tierMarker("medium") },
     ])
     expect(resolveCollapsedModelTarget("antigravity-gemini-3.9-flash", { thinkingLevel: "medium" }))
       .toEqual({ model: "gemini-3.9-flash-medium", thinkingLevel: "medium" })
@@ -56,9 +58,9 @@ describe("OpenCode V2 models", () => {
       name: "Gemini 3.8 Flash (Antigravity)",
       limit: { context: 1048576, output: 65536 },
       variants: [
-        { id: "low", settings: { thinkingConfig: { thinkingLevel: "low" } } },
-        { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } } },
-        { id: "high", settings: { thinkingConfig: { thinkingLevel: "high" } } },
+        { id: "low", settings: { thinkingConfig: { thinkingLevel: "low" } }, body: tierMarker("low") },
+        { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } }, body: tierMarker("medium") },
+        { id: "high", settings: { thinkingConfig: { thinkingLevel: "high" } }, body: tierMarker("high") },
       ],
     })
   })
@@ -102,7 +104,7 @@ describe("OpenCode V2 models", () => {
 
     expect(Object.keys(catalog)).toEqual(["antigravity-gemini-3.8-flash"])
     expect(catalog["antigravity-gemini-3.8-flash"]?.variants).toEqual([
-      { id: "high", settings: { thinkingConfig: { thinkingLevel: "high" } } },
+      { id: "high", settings: { thinkingConfig: { thinkingLevel: "high" } }, body: tierMarker("high") },
     ])
   })
 
@@ -115,9 +117,9 @@ describe("OpenCode V2 models", () => {
 
     expect(Object.keys(catalog)).toEqual(["antigravity-claude-opus-4-6-thinking"])
     expect(catalog["antigravity-claude-opus-4-6-thinking"]?.variants).toEqual([
-      { id: "low", settings: { thinkingConfig: { thinkingBudget: 8192 } } },
-      { id: "medium", settings: { thinkingConfig: { thinkingBudget: 16384 } } },
-      { id: "high", settings: { thinkingConfig: { thinkingBudget: 32768 } } },
+      { id: "low", settings: { thinkingConfig: { thinkingBudget: 8192 } }, body: tierMarker("low") },
+      { id: "medium", settings: { thinkingConfig: { thinkingBudget: 16384 } }, body: tierMarker("medium") },
+      { id: "high", settings: { thinkingConfig: { thinkingBudget: 32768 } }, body: tierMarker("high") },
     ])
   })
 
@@ -163,8 +165,19 @@ describe("OpenCode V2 models", () => {
     expect(Object.keys(catalog)).toEqual(["antigravity-gemini-9-flash"])
     expect(catalog["antigravity-gemini-9-flash"]?.variants.map(variant => variant.id))
       .toEqual(["extra-low", "turbo", "ultra"])
-    expect(resolveCollapsedModelTarget("antigravity-gemini-9-flash", { thinkingLevel: "turbo" }))
-      .toEqual({ model: "gemini-9-flash-turbo" })
+    // Dispatch exactly what OpenCode emits for #turbo: empty thinking settings
+    // plus the tier marker. The marker must still select the turbo backend.
+    const turbo = catalog["antigravity-gemini-9-flash"]?.variants.find(variant => variant.id === "turbo")
+    expect(turbo?.settings).toEqual({})
+    const emittedConfig = turbo?.settings?.thinkingConfig
+    const turboSettings = emittedConfig && "thinkingLevel" in emittedConfig
+      ? { thinkingLevel: emittedConfig.thinkingLevel }
+      : undefined
+    expect(resolveCollapsedModelTarget(
+      "antigravity-gemini-9-flash",
+      turboSettings,
+      turbo?.body?.[COLLAPSED_TIER_BODY_KEY] as string | undefined,
+    )).toEqual({ model: "gemini-9-flash-turbo" })
   })
 
   it("treats the display label as authoritative when the ID disagrees", () => {
@@ -174,8 +187,8 @@ describe("OpenCode V2 models", () => {
     })
 
     expect(catalog["antigravity-gemini-3.5-flash"]?.variants).toEqual([
-      { id: "low", settings: { thinkingConfig: { thinkingLevel: "low" } } },
-      { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } } },
+      { id: "low", settings: { thinkingConfig: { thinkingLevel: "low" } }, body: tierMarker("low") },
+      { id: "medium", settings: { thinkingConfig: { thinkingLevel: "medium" } }, body: tierMarker("medium") },
     ])
     expect(resolveCollapsedModelTarget("antigravity-gemini-3.5-flash", { thinkingLevel: "medium" }))
       .toEqual({ model: "gemini-3.5-flash-low", thinkingLevel: "medium" })
@@ -190,9 +203,9 @@ describe("OpenCode V2 models", () => {
 
     expect(Object.keys(catalog)).toEqual(["antigravity-gpt-oss-120b"])
     expect(catalog["antigravity-gpt-oss-120b"]?.variants).toEqual([
-      { id: "low", settings: {} },
-      { id: "medium", settings: {} },
-      { id: "high", settings: {} },
+      { id: "low", settings: {}, body: tierMarker("low") },
+      { id: "medium", settings: {}, body: tierMarker("medium") },
+      { id: "high", settings: {}, body: tierMarker("high") },
     ])
     expect(resolveCollapsedModelTarget("antigravity-gpt-oss-120b", { thinkingLevel: "high" }))
       .toEqual({ model: "gpt-oss-120b-high" })
@@ -204,7 +217,7 @@ describe("OpenCode V2 models", () => {
     })
 
     expect(Object.keys(catalog)).toEqual(["antigravity-gpt-oss-120b"])
-    expect(catalog["antigravity-gpt-oss-120b"]?.variants).toEqual([{ id: "medium", settings: {} }])
+    expect(catalog["antigravity-gpt-oss-120b"]?.variants).toEqual([{ id: "medium", settings: {}, body: tierMarker("medium") }])
     expect(resolveCollapsedModelTarget("antigravity-gpt-oss-120b", { thinkingLevel: "medium" }))
       .toEqual({ model: "gpt-oss-120b-medium" })
   })
@@ -219,5 +232,61 @@ describe("OpenCode V2 models", () => {
       "antigravity-claude-opus-4-6",
       "antigravity-claude-opus-4-6-thinking",
     ])
+  })
+
+  it("groups a base model by backend ID even when its display name differs", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.8-flash": { displayName: "Gemini 3.8 Flash Preview Build" },
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)" },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gemini-3.8-flash"])
+    expect(catalog["antigravity-gemini-3.8-flash"]?.variants.map(variant => variant.id))
+      .toEqual(["high"])
+    // A request without a variant still prefers the real base model.
+    expect(resolveCollapsedModelTarget("antigravity-gemini-3.8-flash")).toEqual({ model: "gemini-3.8-flash" })
+  })
+
+  it("keeps a discarded bare-ID alias inside the family instead of overwriting it", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)" },
+      // The bare ID repeats the high effort through its display name.
+      "gemini-3.8-flash": { displayName: "Gemini 3.8 Flash (High)" },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gemini-3.8-flash"])
+    expect(catalog["antigravity-gemini-3.8-flash"]?.variants).toEqual([
+      { id: "high", settings: { thinkingConfig: { thinkingLevel: "high" } }, body: tierMarker("high") },
+    ])
+    expect(resolveCollapsedModelTarget("antigravity-gemini-3.8-flash", undefined, "high"))
+      .toEqual({ model: "gemini-3.8-flash-high", thinkingLevel: "high" })
+  })
+
+  it("keeps tiers with different image capabilities as separate models", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.8-flash-low": { displayName: "Gemini 3.8 Flash (Low)", supportsImages: true },
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", supportsImages: false },
+    })
+
+    expect(Object.keys(catalog)).toEqual([
+      "antigravity-gemini-3.8-flash-low",
+      "antigravity-gemini-3.8-flash-high",
+    ])
+    expect(catalog["antigravity-gemini-3.8-flash-low"]?.capabilities.input).toContain("image")
+    expect(catalog["antigravity-gemini-3.8-flash-high"]?.capabilities.input).toEqual(["text"])
+  })
+
+  it("removes obsolete families after a catalog refresh", () => {
+    buildAccountModelDefinitions({
+      "gemini-9-pro-high": { displayName: "Gemini 9 Pro (High)" },
+    })
+    expect(resolveCollapsedModelTarget("antigravity-gemini-9-pro", undefined, "high"))
+      .toEqual({ model: "gemini-9-pro-high", thinkingLevel: "high" })
+
+    buildAccountModelDefinitions({
+      "gemini-9-pro": { displayName: "Gemini 9 Pro" },
+    })
+    expect(getCollapsedModelBaseId("gemini-9-pro-high")).toBeUndefined()
+    expect(resolveCollapsedModelTarget("antigravity-gemini-9-pro")).toBeUndefined()
   })
 })

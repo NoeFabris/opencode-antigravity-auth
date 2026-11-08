@@ -27,9 +27,10 @@ OpenCode model whose variant names come from the effort label in each model's
 The selected variant is mapped back to the matching backend ID when the request
 is sent. A labelled effort forms a family even when it is the only one
 advertised, so `GPT-OSS 120B (Medium)` is exposed as one model with a `medium`
-variant. Suffix-only IDs with no display label (`gpt-oss-120b-medium`,
-`claude-sonnet-5-5-high`) remain separate models because no siblings or base ID
-exist. Model routing selects only
+variant. A lone suffix-only ID with no display label (`gpt-oss-120b-medium`,
+`claude-sonnet-5-5-high`) remains a separate model because no siblings or base
+ID exist; two or more suffix-only siblings still collapse into their family.
+Model routing selects only
 accounts advertising the requested model; families share eligibility across
 their members. Results are cached for an hour, keyed to the enabled account
 pool. `/antigravity` → **Refresh available models** updates the catalog
