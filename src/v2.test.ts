@@ -726,9 +726,17 @@ describe("OpenCode V2 adapter", () => {
     instanceRegistry()?.set(adapter.instanceKey, { fetch: forwarded, ready: new Promise<void>(() => undefined) })
 
     const controller = new AbortController()
+    const addEventListener = vi.spyOn(controller.signal, "addEventListener")
     const request = stream(sdk, "antigravity-gemini-3-flash", controller.signal)
+    const settled = expect(request).rejects.toThrow("cancelled")
+
+    // Abort only once the wait registered its listener, so this covers the
+    // in-flight path rather than the already-aborted short circuit. Without the
+    // listener the wait can only fail later with the timeout message.
+    await vi.waitFor(() => expect(addEventListener.mock.calls.some(call => call[0] === "abort")).toBe(true))
     controller.abort(new Error("cancelled"))
-    await expect(request).rejects.toThrow()
+
+    await settled
     expect(forwarded).not.toHaveBeenCalled()
   })
 
