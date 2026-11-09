@@ -435,13 +435,21 @@ function collapsedDefinition(plan: CollapsedPlan, models: Map<string, AvailableM
   const members = plan.memberIds
     .map(id => models.get(id))
     .filter((model): model is AvailableModel => !!model)
-  const primary = (plan.family.baseModelId ? models.get(plan.family.baseModelId) : undefined) ?? members[0]
   const displayName = plan.displayName || plan.family.baseId
   const limits = members.map(model => ({
     context: model.maxTokens ?? known?.limit.context ?? 200000,
     output: model.maxOutputTokens ?? known?.limit.output ?? 64000,
   }))
-  const supportsImages = primary?.supportsImages !== false && members.every(model => model.supportsImages !== false)
+  // Image support comes from the concrete dispatch targets (retained tiers and
+  // the real base). Discarded aliases stay in the family for grouping but must
+  // not narrow a capability that every possible target supports.
+  const capabilityIds = new Set<string>(Object.values(plan.family.tiers))
+  if (plan.family.baseModelId) capabilityIds.add(plan.family.baseModelId)
+  const capabilityMembers = [...capabilityIds]
+    .map(id => models.get(id))
+    .filter((model): model is AvailableModel => !!model)
+  const supportsImages = capabilityMembers.length > 0
+    && capabilityMembers.every(model => model.supportsImages !== false)
   return {
     name: `${displayName} (Antigravity)`,
     limit: {

@@ -540,7 +540,7 @@ describe("collapsed model families", () => {
       });
 
       expect(resolveCollapsedModelTarget("antigravity-gemini-10-ultra", { thinkingLevel: "turbo" }, "turbo"))
-        .toEqual({ model: "gemini-10-ultra-turbo" });
+        .toEqual({ model: "gemini-10-ultra-turbo", suppressThinking: true });
     });
   });
 

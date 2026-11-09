@@ -177,7 +177,7 @@ describe("OpenCode V2 models", () => {
       "antigravity-gemini-9-flash",
       turboSettings,
       turbo?.body?.[COLLAPSED_TIER_BODY_KEY] as string | undefined,
-    )).toEqual({ model: "gemini-9-flash-turbo" })
+    )).toEqual({ model: "gemini-9-flash-turbo", suppressThinking: true })
   })
 
   it("treats the display label as authoritative when the ID disagrees", () => {
@@ -208,7 +208,7 @@ describe("OpenCode V2 models", () => {
       { id: "high", settings: {}, body: tierMarker("high") },
     ])
     expect(resolveCollapsedModelTarget("antigravity-gpt-oss-120b", { thinkingLevel: "high" }))
-      .toEqual({ model: "gpt-oss-120b-high" })
+      .toEqual({ model: "gpt-oss-120b-high", suppressThinking: true })
   })
 
   it("exposes a lone labelled effort as a one-variant family", () => {
@@ -219,7 +219,7 @@ describe("OpenCode V2 models", () => {
     expect(Object.keys(catalog)).toEqual(["antigravity-gpt-oss-120b"])
     expect(catalog["antigravity-gpt-oss-120b"]?.variants).toEqual([{ id: "medium", settings: {}, body: tierMarker("medium") }])
     expect(resolveCollapsedModelTarget("antigravity-gpt-oss-120b", { thinkingLevel: "medium" }))
-      .toEqual({ model: "gpt-oss-120b-medium" })
+      .toEqual({ model: "gpt-oss-120b-medium", suppressThinking: true })
   })
 
   it("does not treat non-effort parentheticals as tiers", () => {
@@ -274,6 +274,17 @@ describe("OpenCode V2 models", () => {
     ])
     expect(catalog["antigravity-gemini-3.8-flash-low"]?.capabilities.input).toContain("image")
     expect(catalog["antigravity-gemini-3.8-flash-high"]?.capabilities.input).toEqual(["text"])
+  })
+
+  it("ignores a discarded alias when deciding image support", () => {
+    const catalog = buildAccountModelDefinitions({
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", supportsImages: true },
+      // The alias repeats the effort but is text-only; it is never dispatched.
+      "gemini-3.8-flash": { displayName: "Gemini 3.8 Flash (High)", supportsImages: false },
+    })
+
+    expect(Object.keys(catalog)).toEqual(["antigravity-gemini-3.8-flash"])
+    expect(catalog["antigravity-gemini-3.8-flash"]?.capabilities.input).toContain("image")
   })
 
   it("removes obsolete families after a catalog refresh", () => {

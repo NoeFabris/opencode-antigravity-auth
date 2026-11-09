@@ -343,6 +343,11 @@ export interface CollapsedModelTarget {
   thinkingLevel?: string;
   /** Numeric thinking budget implied by the selected tier. */
   thinkingBudget?: number;
+  /**
+   * True when the effort is encoded only in the backend ID, so the request must
+   * not inherit a default thinking configuration.
+   */
+  suppressThinking?: boolean;
 }
 
 /** True when a family expresses effort as a numeric thinking budget. */
@@ -452,15 +457,25 @@ export function resolveCollapsedModelTarget(
 
   const tierId = family.tiers[tier];
   if (tierId) {
-    return { model: tierId, ...collapsedThinkingConfig(family, tier) };
+    const config = collapsedThinkingConfig(family, tier);
+    return {
+      model: tierId,
+      ...config,
+      ...(Object.keys(config).length === 0 ? { suppressThinking: true } : {}),
+    };
   }
   if (family.baseModelId) {
-    return { model: family.baseModelId, ...collapsedThinkingConfig(family, tier) };
+    return { model: family.baseModelId };
   }
   if (defaultTier) {
     const fallbackId = family.tiers[defaultTier];
     if (fallbackId) {
-      return { model: fallbackId, ...collapsedThinkingConfig(family, defaultTier) };
+      const config = collapsedThinkingConfig(family, defaultTier);
+      return {
+        model: fallbackId,
+        ...config,
+        ...(Object.keys(config).length === 0 ? { suppressThinking: true } : {}),
+      };
     }
   }
   return undefined;

@@ -773,7 +773,14 @@ function applyCollapsedThinkingToRequest(
     const thinkingConfig: Record<string, unknown> = { ...existingThinking, thinkingBudget: target.thinkingBudget };
     delete thinkingConfig.thinkingLevel;
     if (typeof thinkingConfig.includeThoughts !== "boolean") thinkingConfig.includeThoughts = true;
-    request.generationConfig = { ...(generationConfig ?? {}), thinkingConfig };
+    const merged: Record<string, unknown> = { ...(generationConfig ?? {}), thinkingConfig };
+    // Antigravity requires maxOutputTokens to exceed the thinking budget.
+    const currentMax = merged.maxOutputTokens as number | undefined;
+    if (!currentMax || currentMax <= target.thinkingBudget) {
+      merged.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
+      delete merged.max_output_tokens;
+    }
+    request.generationConfig = merged;
     return;
   }
   if (generationConfig?.thinkingConfig) {
@@ -914,8 +921,11 @@ export function prepareAntigravityRequest(
         // may already have selected a variant. Retarget to the concrete
         // backend tier before the model is written into the envelope.
         const wrappedRequest = parsedBody.request as Record<string, unknown> | undefined;
-        const collapsedVariantId = takeCollapsedVariantId(parsedBody)
-          ?? (wrappedRequest ? takeCollapsedVariantId(wrappedRequest) : undefined);
+        // Strip the marker from both possible levels so neither copy reaches
+        // the backend when an envelope and its request both carry one.
+        const envelopeVariantId = takeCollapsedVariantId(parsedBody);
+        const nestedVariantId = wrappedRequest ? takeCollapsedVariantId(wrappedRequest) : undefined;
+        const collapsedVariantId = envelopeVariantId ?? nestedVariantId;
         const wrappedVariantConfig = wrappedRequest && typeof wrappedRequest === "object"
           ? extractVariantThinkingConfig(
               wrappedRequest.providerOptions as Record<string, unknown> | undefined,
@@ -936,7 +946,7 @@ export function prepareAntigravityRequest(
           } else {
             tierThinkingLevel = undefined;
             tierThinkingBudget = undefined;
-            suppressThinkingConfig = true;
+            suppressThinkingConfig = collapsedTarget.suppressThinking === true;
           }
           if (wrappedRequest && typeof wrappedRequest === "object") {
             applyCollapsedThinkingToRequest(wrappedRequest, collapsedTarget);
@@ -1049,9 +1059,17 @@ export function prepareAntigravityRequest(
           } else {
             tierThinkingLevel = undefined;
             tierThinkingBudget = undefined;
-            suppressThinkingConfig = true;
+            suppressThinkingConfig = collapsedTarget.suppressThinking === true;
           }
         }
+        // The marker/resolver result wins over a conflicting thinking setting
+        // from the request. A real base model with no resolved tier keeps the
+        // caller's configuration.
+        const collapsedResolvedThinking = collapsedTarget !== undefined && (
+          collapsedTarget.thinkingLevel !== undefined
+          || collapsedTarget.thinkingBudget !== undefined
+          || collapsedTarget.suppressThinking === true
+        );
         // Reclassify from the selected backend ID: the family key may not carry
         // the "thinking" marker that the concrete Claude tier uses.
         isClaude = isClaudeModel(effectiveModel);
@@ -1060,12 +1078,12 @@ export function prepareAntigravityRequest(
 
         log.debug(`[ThinkingResolution] rawModel=${rawModel} resolvedModel=${effectiveModel} resolvedTier=${tierThinkingLevel ?? "none"} variantLevel=${variantConfig?.thinkingLevel ?? "none"} variantBudget=${variantConfig?.thinkingBudget ?? "none"} providerOptions.google=${JSON.stringify((requestPayload.providerOptions as any)?.google ?? null)} generationConfig.thinkingConfig=${JSON.stringify((rawGenerationConfig as any)?.thinkingConfig ?? null)}`);
 
-        if (!suppressThinkingConfig && variantConfig?.thinkingLevel && isGemini3
+        if (!collapsedResolvedThinking && variantConfig?.thinkingLevel && isGemini3
           && COLLAPSED_MODEL_TIERS.includes(variantConfig.thinkingLevel)) {
           // Gemini 3 native format - use thinkingLevel directly
           tierThinkingLevel = variantConfig.thinkingLevel;
           tierThinkingBudget = undefined;
-        } else if (!suppressThinkingConfig && variantConfig?.thinkingBudget) {
+        } else if (!collapsedResolvedThinking && variantConfig?.thinkingBudget) {
           if (isGemini3) {
             // Legacy format for Gemini 3 - convert with deprecation warning
             log.warn("[Deprecated] Using thinkingBudget for Gemini 3 model. Use thinkingLevel instead.");
@@ -1145,7 +1163,8 @@ export function prepareAntigravityRequest(
             ? undefined
             : resolveThinkingConfig(
                 effectiveUserThinkingConfig,
-                isClaudeSonnetNonThinking ? false : isThinkingCapableModel(effectiveModel),
+                isClaudeSonnetNonThinking ? false : (isThinkingCapableModel(effectiveModel)
+                  || effectiveModel.toLowerCase().includes("gemini-2.5")),
                 isClaude,
                 hasAssistantHistory,
               );
