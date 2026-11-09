@@ -693,6 +693,45 @@ describe("OpenCode V2 adapter", () => {
     expect(parts.some(part => part.type === "text-delta" && part.delta.includes("From stub"))).toBe(true)
   })
 
+  it("bounds the wait when the replacement never finishes setup", async () => {
+    mockNetwork()
+    const adapter = await host({ directory: "/tmp/stalled-setup" })
+    const { sdk } = await adapter.sdk()
+    if (!adapter.instanceKey) throw new Error("Missing registry entry")
+    await adapter.cleanup()
+
+    const forwarded = vi.fn(async () => googleStream("Should not run"))
+    instanceRegistry()?.set(adapter.instanceKey, { fetch: forwarded, ready: new Promise<void>(() => undefined) })
+
+    vi.useFakeTimers()
+    try {
+      const request = stream(sdk)
+      const settled = expect(request).rejects.toThrow(/did not finish starting/)
+      await vi.advanceTimersByTimeAsync(120_000)
+      await settled
+      expect(forwarded).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("stops waiting for setup when the caller aborts", async () => {
+    mockNetwork()
+    const adapter = await host({ directory: "/tmp/aborted-wait" })
+    const { sdk } = await adapter.sdk()
+    if (!adapter.instanceKey) throw new Error("Missing registry entry")
+    await adapter.cleanup()
+
+    const forwarded = vi.fn(async () => googleStream("Should not run"))
+    instanceRegistry()?.set(adapter.instanceKey, { fetch: forwarded, ready: new Promise<void>(() => undefined) })
+
+    const controller = new AbortController()
+    const request = stream(sdk, "antigravity-gemini-3-flash", controller.signal)
+    controller.abort(new Error("cancelled"))
+    await expect(request).rejects.toThrow()
+    expect(forwarded).not.toHaveBeenCalled()
+  })
+
   it("rejects instead of forwarding into a replacement whose setup failed", async () => {
     mockNetwork()
     const adapter = await host({ directory: "/tmp/failed-setup" })

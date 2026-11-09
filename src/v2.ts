@@ -63,6 +63,40 @@ function instanceKey(location: Plugin.Context["location"] | undefined): string {
   return `${location?.directory ?? ""}\u0000${workspace ?? ""}`
 }
 
+/**
+ * Deadline for a forwarded request to wait for its replacement's setup. Setup
+ * performs model discovery, which can stall on a token refresh; without a bound
+ * the chat request would stay pending forever.
+ */
+const REPLACEMENT_SETUP_TIMEOUT_MS = 30_000
+
+type SetupOutcome = "ready" | "failed"
+
+/**
+ * Await an instance's setup, bounded by {@link REPLACEMENT_SETUP_TIMEOUT_MS} and
+ * by the caller's abort signal. A failed setup resolves to "failed" so the caller
+ * can re-read the registry instead of routing through it; a stall rejects.
+ */
+function awaitSetup(instance: ActivePluginInstance, signal?: AbortSignal): Promise<SetupOutcome> {
+  return new Promise<SetupOutcome>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("Antigravity request aborted"))
+      return
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => reject(signal?.reason ?? new Error("Antigravity request aborted"))
+    const finish = (settle: () => void) => () => {
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      settle()
+    }
+    timer = setTimeout(finish(() => reject(new Error("Antigravity plugin replacement did not finish starting"))), REPLACEMENT_SETUP_TIMEOUT_MS)
+    ;(timer as unknown as { unref?: () => void }).unref?.()
+    signal?.addEventListener("abort", onAbort, { once: true })
+    instance.ready.then(finish(() => resolve("ready")), finish(() => resolve("failed")))
+  })
+}
+
 function mergeBody(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
   const result = { ...base }
   for (const [key, value] of Object.entries(overlay)) {
@@ -445,21 +479,18 @@ export const AntigravityV2Plugin = Plugin.define({
 
     /**
      * Resolve the instance that replaced this one for the same workspace.
-     * Setup is awaited before forwarding, and a failed setup is never used:
-     * the registry is re-read so a restored instance can serve the request,
-     * otherwise the request reports disposal.
+     * Setup is awaited before forwarding, bounded so a stalled discovery cannot
+     * leave the request pending, and a failed setup is never used: the registry
+     * is re-read so a restored instance can serve the request, otherwise the
+     * request reports disposal.
      */
-    const replacementInstance = async (): Promise<ActivePluginInstance> => {
+    const replacementInstance = async (signal?: AbortSignal): Promise<ActivePluginInstance> => {
       const seen = new Set<ActivePluginInstance>([thisInstance])
       for (;;) {
         const candidate = registry.get(locationKey)
         if (!candidate || seen.has(candidate)) throw new Error("Antigravity plugin has been disposed")
         seen.add(candidate)
-        try {
-          await candidate.ready
-        } catch {
-          continue
-        }
+        if (await awaitSetup(candidate, signal) === "failed") continue
         if (registry.get(locationKey) === candidate) return candidate
         // A newer instance replaced this one while its setup was still pending.
       }
@@ -467,7 +498,7 @@ export const AntigravityV2Plugin = Plugin.define({
 
     const scopedFetch = (fallback: unknown, body?: Model.Info["body"]): Fetch => (input, init) => {
       if (disposed) {
-        return replacementInstance().then(replacement => replacement.fetch(input, init, body, fallback))
+        return replacementInstance(init?.signal ?? undefined).then(replacement => replacement.fetch(input, init, body, fallback))
       }
       return thisInstance.fetch(input, init, body, fallback)
     }
