@@ -58,9 +58,9 @@ function getActiveInstanceRegistry(): Map<string, ActivePluginInstance> {
  * workspaces can share it, and forwarding across them would apply another
  * workspace's model-access snapshot.
  */
-function instanceKey(location: Plugin.Context["location"]): string {
-  const workspace = location.workspaceID ?? location.project?.id
-  return `${location.directory}\u0000${workspace ?? ""}`
+function instanceKey(location: Plugin.Context["location"] | undefined): string {
+  const workspace = location?.workspaceID ?? location?.project?.id
+  return `${location?.directory ?? ""}\u0000${workspace ?? ""}`
 }
 
 function mergeBody(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
