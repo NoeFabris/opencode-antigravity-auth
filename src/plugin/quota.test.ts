@@ -152,4 +152,61 @@ describe("checkAccountsQuota", () => {
     const [result] = await checkAccountsQuota([account], {} as PluginClient)
     expect(result?.quota?.groups.claude).toMatchObject({ remainingFraction: 0.2, remainingFractionResetTime: "2026-10-27T17:00:00Z" })
   })
+
+  it("fetches weekly and 5h quota windows from retrieveUserQuotaSummary", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith("/v1internal:fetchAvailableModels")) {
+        return jsonResponse({ models: { "gemini-3-flash": { quotaInfo: { remainingFraction: 0.83, resetTime: "2026-10-27T16:00:00Z" } } } })
+      }
+      if (url.endsWith("/v1internal:retrieveUserQuotaSummary")) {
+        return jsonResponse({
+          groups: [
+            {
+              displayName: "Gemini Models",
+              buckets: [
+                { bucketId: "gemini-weekly", window: "weekly", remainingFraction: 0.3286, resetTime: "2026-10-31T20:11:00Z", displayName: "Weekly Limit" },
+                { bucketId: "gemini-5h", window: "5h", remainingFraction: 0.9374, resetTime: "2026-10-27T16:35:00Z", displayName: "Five Hour Limit" },
+              ],
+            },
+            {
+              displayName: "Claude and GPT models",
+              buckets: [
+                { bucketId: "3p-weekly", window: "weekly", remainingFraction: 1 },
+                { bucketId: "3p-5h", window: "5h", remainingFraction: 1 },
+              ],
+            },
+            {
+              displayName: "Gemini 4 Argon",
+              buckets: [
+                { bucketId: "gemini-argon-wtu-weekly", window: "weekly", resetTime: "2026-11-01T00:00:00Z" },
+                { bucketId: "gemini-argon-5h", window: "5h", disabled: true },
+              ],
+            },
+          ],
+        })
+      }
+      if (url.endsWith("/v1internal:retrieveUserQuota")) return jsonResponse({ buckets: [] })
+      return jsonResponse({}, 404)
+    }))
+
+    const [result] = await checkAccountsQuota([account], {} as PluginClient)
+    expect(result?.quotaSummary).toEqual([
+      {
+        displayName: "Gemini Models",
+        weekly: { remainingFraction: 0.3286, resetTime: "2026-10-31T20:11:00Z", displayName: "Weekly Limit" },
+        fiveHour: { remainingFraction: 0.9374, resetTime: "2026-10-27T16:35:00Z", displayName: "Five Hour Limit" },
+      },
+      {
+        displayName: "Claude and GPT models",
+        weekly: { remainingFraction: 1 },
+        fiveHour: { remainingFraction: 1 },
+      },
+      {
+        displayName: "Gemini 4 Argon",
+        weekly: { remainingFraction: 0, resetTime: "2026-11-01T00:00:00Z" },
+        fiveHour: { remainingFraction: 0, disabled: true },
+      },
+    ])
+  })
 })

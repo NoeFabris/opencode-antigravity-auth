@@ -54,6 +54,40 @@ interface RetrieveUserQuotaResponse {
   }[];
 }
 
+export interface AntigravityQuotaWindow {
+  remainingFraction: number;
+  resetTime?: string;
+  disabled?: boolean;
+  displayName?: string;
+}
+
+export interface AntigravityQuotaPoolSummary {
+  displayName: string;
+  description?: string;
+  weekly?: AntigravityQuotaWindow;
+  fiveHour?: AntigravityQuotaWindow;
+}
+
+interface QuotaSummaryBucket {
+  bucketId?: string;
+  window?: string;
+  remainingFraction?: number;
+  resetTime?: string;
+  displayName?: string;
+  description?: string;
+  disabled?: boolean;
+}
+
+interface QuotaSummaryGroup {
+  displayName?: string;
+  description?: string;
+  buckets?: QuotaSummaryBucket[];
+}
+
+interface RetrieveUserQuotaSummaryResponse {
+  groups?: QuotaSummaryGroup[];
+}
+
 export type AccountQuotaStatus = "ok" | "disabled" | "error";
 
 export interface AccountQuotaResult {
@@ -63,6 +97,7 @@ export interface AccountQuotaResult {
   error?: string;
   disabled?: boolean;
   quota?: QuotaSummary;
+  quotaSummary?: AntigravityQuotaPoolSummary[];
   geminiCliQuota?: GeminiCliQuotaSummary;
   updatedAccount?: AccountMetadataV3;
 }
@@ -254,6 +289,88 @@ async function fetchAvailableModels(
   throw new Error(errors.join("; ") || "fetchAvailableModels failed");
 }
 
+async function fetchUserQuotaSummary(
+  accessToken: string,
+  projectId: string,
+): Promise<AntigravityQuotaPoolSummary[] | undefined> {
+  const endpoint = ANTIGRAVITY_ENDPOINT;
+  const quotaUserAgent = getAntigravityUserAgent();
+  const body = projectId ? { project: projectId } : {};
+
+  try {
+    const response = await fetchWithTimeout(`${endpoint}/v1internal:retrieveUserQuotaSummary`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "User-Agent": quotaUserAgent,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const data = (await response.json()) as RetrieveUserQuotaSummaryResponse;
+    return parseUserQuotaSummary(data);
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseUserQuotaSummary(
+  response: RetrieveUserQuotaSummaryResponse | undefined,
+): AntigravityQuotaPoolSummary[] | undefined {
+  if (!response || !Array.isArray(response.groups) || response.groups.length === 0) {
+    return undefined;
+  }
+
+  const pools: AntigravityQuotaPoolSummary[] = [];
+  for (const group of response.groups) {
+    if (!group || typeof group !== "object" || !Array.isArray(group.buckets)) continue;
+    const displayName = typeof group.displayName === "string" && group.displayName.trim() ? group.displayName.trim() : "Quota";
+    const pool: AntigravityQuotaPoolSummary = {
+      displayName,
+      ...(typeof group.description === "string" && group.description.trim() ? { description: group.description.trim() } : {}),
+    };
+
+    for (const bucket of group.buckets) {
+      if (!bucket || typeof bucket !== "object") continue;
+      const winRaw = typeof bucket.window === "string" ? bucket.window.toLowerCase() : "";
+      const idRaw = typeof bucket.bucketId === "string" ? bucket.bucketId.toLowerCase() : "";
+      const nameRaw = typeof bucket.displayName === "string" ? bucket.displayName.toLowerCase() : "";
+
+      let target: "weekly" | "fiveHour" | null = null;
+      if (winRaw === "weekly" || idRaw.includes("weekly") || nameRaw.includes("weekly")) {
+        target = "weekly";
+      } else if (winRaw === "5h" || idRaw.includes("5h") || idRaw.includes("fivehour") || nameRaw.includes("five hour")) {
+        target = "fiveHour";
+      }
+      if (!target) continue;
+
+      const remainingFraction = normalizeRemainingFraction(bucket.remainingFraction);
+      const windowData: AntigravityQuotaWindow = {
+        remainingFraction,
+        ...(typeof bucket.resetTime === "string" && bucket.resetTime ? { resetTime: bucket.resetTime } : {}),
+        ...(bucket.disabled === true ? { disabled: true } : {}),
+        ...(typeof bucket.displayName === "string" && bucket.displayName.trim() ? { displayName: bucket.displayName.trim() } : {}),
+      };
+
+      const existing = pool[target];
+      if (!existing || remainingFraction < existing.remainingFraction) {
+        pool[target] = windowData;
+      }
+    }
+
+    if (pool.weekly || pool.fiveHour) {
+      pools.push(pool);
+    }
+  }
+
+  return pools.length > 0 ? pools : undefined;
+}
+
 async function fetchGeminiCliQuota(
   accessToken: string,
   projectId: string,
@@ -385,10 +502,11 @@ export async function checkAccountsQuota(
       let quotaResult: QuotaSummary;
       let geminiCliQuotaResult: GeminiCliQuotaSummary;
       
-      // Fetch both Antigravity and Gemini CLI quotas in parallel
-      const [antigravityResponse, geminiCliResponse] = await Promise.all([
+      // Fetch Antigravity models, Antigravity 5h/weekly quota summary, and Gemini CLI quotas in parallel
+      const [antigravityResponse, quotaSummary, geminiCliResponse] = await Promise.all([
         fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
           .catch((error): FetchAvailableModelsResponse => ({ models: undefined })),
+        fetchUserQuotaSummary(auth.access ?? "", projectContext.effectiveProjectId),
         fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
       ]);
 
@@ -421,6 +539,7 @@ export async function checkAccountsQuota(
         status: "ok",
         disabled,
         quota: quotaResult,
+        ...(quotaSummary ? { quotaSummary } : {}),
         geminiCliQuota: geminiCliQuotaResult,
         updatedAccount,
       });
