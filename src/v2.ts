@@ -33,6 +33,69 @@ const API_KEY_SENTINEL = "antigravity-oauth"
 const ownsModel = (id: string) => id.startsWith("antigravity-")
 type Registration = { dispose(): Promise<void> }
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+type ActivePluginInstance = {
+  fetch(input: RequestInfo | URL, init?: RequestInit, bodyOverlay?: Model.Info["body"], fallback?: unknown): Promise<Response>
+  /** Settles when this instance finished setup; rejects if setup failed. */
+  ready: Promise<void>
+}
+
+const INSTANCE_REGISTRY_KEY = Symbol.for("opencode.antigravity.activeInstances")
+type GlobalWithInstances = typeof globalThis & {
+  [INSTANCE_REGISTRY_KEY]?: Map<string, ActivePluginInstance>
+}
+
+/**
+ * Reload-stable registry of active instances. A reloaded module evaluation reads
+ * the same map, so cached SDK closures can find the instance that replaced them.
+ */
+function getActiveInstanceRegistry(): Map<string, ActivePluginInstance> {
+  const g = globalThis as GlobalWithInstances
+  return g[INSTANCE_REGISTRY_KEY] ??= new Map<string, ActivePluginInstance>()
+}
+
+/**
+ * Identity of one plugin instance. A directory alone is not unique: several
+ * workspaces can share it, and forwarding across them would apply another
+ * workspace's model-access snapshot.
+ */
+function instanceKey(location: Plugin.Context["location"] | undefined): string {
+  const workspace = location?.workspaceID ?? location?.project?.id
+  return `${location?.directory ?? ""}\u0000${workspace ?? ""}`
+}
+
+/**
+ * Deadline for a forwarded request to wait for its replacement's setup. Setup
+ * performs model discovery, which can stall on a token refresh; without a bound
+ * the chat request would stay pending forever.
+ */
+const REPLACEMENT_SETUP_TIMEOUT_MS = 30_000
+
+type SetupOutcome = "ready" | "failed"
+
+/**
+ * Await an instance's setup, bounded by {@link REPLACEMENT_SETUP_TIMEOUT_MS} and
+ * by the caller's abort signal. A failed setup resolves to "failed" so the caller
+ * can re-read the registry instead of routing through it; a stall rejects.
+ */
+function awaitSetup(instance: ActivePluginInstance, signal?: AbortSignal): Promise<SetupOutcome> {
+  return new Promise<SetupOutcome>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("Antigravity request aborted"))
+      return
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => reject(signal?.reason ?? new Error("Antigravity request aborted"))
+    const finish = (settle: () => void) => () => {
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      settle()
+    }
+    timer = setTimeout(finish(() => reject(new Error("Antigravity plugin replacement did not finish starting"))), REPLACEMENT_SETUP_TIMEOUT_MS)
+    ;(timer as unknown as { unref?: () => void }).unref?.()
+    signal?.addEventListener("abort", onAbort, { once: true })
+    instance.ready.then(finish(() => resolve("ready")), finish(() => resolve("failed")))
+  })
+}
 
 function mergeBody(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
   const result = { ...base }
@@ -87,6 +150,8 @@ export const AntigravityV2Plugin = Plugin.define({
   async setup(ctx) {
     const client = transportClient()
     const outbound = new AsyncLocalStorage<Fetch>()
+    const locationKey = instanceKey(ctx.location)
+    const registry = getActiveInstanceRegistry()
     let modelAccounts: Record<string, string[]> = {}
     let accountCatalogLoaded = false
     const transport = await createAntigravityPlugin(PROVIDER_ID)({
@@ -385,26 +450,67 @@ export const AntigravityV2Plugin = Plugin.define({
       return result ?? getLoader()
     }
 
-    const scopedFetch = (fallback: unknown, body?: Model.Info["body"]): Fetch => (input, init) => runCredentialOperation(async () => {
-      if (disposed) throw new Error("Antigravity plugin has been disposed")
-      const original: Fetch = typeof fallback === "function" ? fallback as Fetch : globalThis.fetch
-      if (!await currentAuth()) throw new Error("Connect Google with Antigravity OAuth and enable an account to use this model")
-      if (body && typeof init?.body === "string") {
-        init = { ...init, body: JSON.stringify(mergeBody(JSON.parse(init.body) as Record<string, unknown>, body)) }
-      }
-      const interceptor = await getLoader()
-      const signal = AbortSignal.any([
-        lifetime.signal,
-        requestLifetime.signal,
-        ...(init?.signal ? [init.signal] : input instanceof Request ? [input.signal] : []),
-      ])
-      return outbound.run(original, () => interceptor.fetch(input instanceof URL ? input.toString() : input, { ...init, signal }))
+    let settleReady!: (failure?: unknown) => void
+    const ready = new Promise<void>((resolve, reject) => {
+      settleReady = failure => { if (failure === undefined) resolve(); else reject(failure) }
     })
+    // Forwarders may never await this promise; keep a rejection from going unhandled.
+    void ready.catch(() => undefined)
+
+    const thisInstance: ActivePluginInstance = {
+      ready,
+      fetch: (input, init, bodyOverlay, fallback) => runCredentialOperation(async () => {
+        if (disposed) throw new Error("Antigravity plugin has been disposed")
+        const original: Fetch = typeof fallback === "function" ? fallback as Fetch : globalThis.fetch
+        if (!await currentAuth()) throw new Error("Connect Google with Antigravity OAuth and enable an account to use this model")
+        if (bodyOverlay && typeof init?.body === "string") {
+          init = { ...init, body: JSON.stringify(mergeBody(JSON.parse(init.body) as Record<string, unknown>, bodyOverlay)) }
+        }
+        const interceptor = await getLoader()
+        const signal = AbortSignal.any([
+          lifetime.signal,
+          requestLifetime.signal,
+          ...(init?.signal ? [init.signal] : input instanceof Request ? [input.signal] : []),
+        ])
+        return outbound.run(original, () => interceptor.fetch(input instanceof URL ? input.toString() : input, { ...init, signal }))
+      }),
+    }
+    registry.set(locationKey, thisInstance)
+
+    /**
+     * Resolve the instance that replaced this one for the same workspace.
+     * Setup is awaited before forwarding, bounded so a stalled discovery cannot
+     * leave the request pending, and a failed setup is never used: the registry
+     * is re-read so a restored instance can serve the request, otherwise the
+     * request reports disposal.
+     */
+    const replacementInstance = async (signal?: AbortSignal): Promise<ActivePluginInstance> => {
+      const seen = new Set<ActivePluginInstance>([thisInstance])
+      for (;;) {
+        const candidate = registry.get(locationKey)
+        if (!candidate || seen.has(candidate)) throw new Error("Antigravity plugin has been disposed")
+        seen.add(candidate)
+        if (await awaitSetup(candidate, signal) === "failed") continue
+        if (registry.get(locationKey) === candidate) return candidate
+        // A newer instance replaced this one while its setup was still pending.
+      }
+    }
+
+    const scopedFetch = (fallback: unknown, body?: Model.Info["body"]): Fetch => (input, init) => {
+      if (disposed) {
+        return replacementInstance(init?.signal ?? undefined).then(replacement => replacement.fetch(input, init, body, fallback))
+      }
+      return thisInstance.fetch(input, init, body, fallback)
+    }
 
     let cleaning: Promise<void> | undefined
     const cleanup = () => {
       if (cleaning) return cleaning
       disposed = true
+      settleReady(new Error("Antigravity plugin has been disposed"))
+      if (registry.get(locationKey) === thisInstance) {
+        registry.delete(locationKey)
+      }
       cleaning = Promise.resolve().then(async () => {
         lifetime.abort(new Error("Antigravity plugin disposed"))
         await Promise.allSettled([...listeners].map((listener) => listener.close()))
@@ -651,6 +757,7 @@ export const AntigravityV2Plugin = Plugin.define({
       if (hasSavedAccounts && ctx.options.discoverModels !== false && (!validCache || Date.now() - (cached?.updatedAt ?? 0) > 3600_000)) {
         try { await refreshModels() } catch (error) { log.warn("Model discovery unavailable; using cached or fallback models", { error: String(error) }) }
       }
+      settleReady()
       return cleanup
     } catch (error) {
       await cleanup()

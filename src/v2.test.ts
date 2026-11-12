@@ -118,7 +118,7 @@ function pool() {
   }
 }
 
-async function host(options: { value?: Credential.Value; connection?: boolean; nativeOverride?: boolean; catalog?: Record<string, AvailableModel>; catalogAccounts?: Record<string, string[]>; legacyOverride?: boolean; discoverModels?: boolean } = {}) {
+async function host(options: { value?: Credential.Value; connection?: boolean; nativeOverride?: boolean; catalog?: Record<string, AvailableModel>; catalogAccounts?: Record<string, string[]>; legacyOverride?: boolean; discoverModels?: boolean; directory?: string; workspaceID?: string } = {}) {
   let value = options.value ?? credential()
   let connectionID: string | undefined
   let connected = options.connection !== false
@@ -163,7 +163,7 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   } as unknown as ModelEditor
   const ctx = {
     options: { discoverModels: options.discoverModels ?? false },
-    location: { directory: "/tmp/antigravity-v2-test" },
+    location: { directory: options.directory ?? "/tmp/antigravity-v2-test", ...(options.workspaceID ? { workspaceID: options.workspaceID } : {}) },
     storage: { get: vi.fn(async (key: string) => storage.get(key)), set: vi.fn(async (key: string, value: unknown) => { storage.set(key, value) }), remove: vi.fn(async (key: string) => { storage.delete(key) }) },
     credential: { activate: vi.fn(async ({ credentialID }: { credentialID: string }) => { connectionID = credentialID }) },
     event: {
@@ -216,12 +216,14 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
       },
     },
   } as unknown as Plugin.Context
+  const keysBefore = new Set(instanceRegistry()?.keys() ?? [])
   const cleanup = await AntigravityV2Plugin.setup(ctx)
   if (cleanup) cleanups.push(cleanup)
   if (!method || !sdkHook || !tool || !cleanup) throw new Error("Missing V2 registrations")
+  const instanceKey = [...(instanceRegistry()?.keys() ?? [])].find(key => !keysBefore.has(key))
   const hook = sdkHook
   return {
-    models, provider, method, tool, cleanup, disposals, accountHandlers, storage, ctx,
+    models, provider, method, tool, cleanup, disposals, accountHandlers, storage, ctx, instanceKey,
     emit: (event: V2Event) => events.emit("event", event),
     setCredential: (next: Credential.Value, id?: string) => { value = next; connectionID = id },
     disconnect: () => { connected = false },
@@ -238,6 +240,19 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
       return { sdk: event.sdk as ReturnType<typeof import("@ai-sdk/google")["createGoogleGenerativeAI"]>, preparedFetch }
     },
   }
+}
+
+/** Shared reload registry the plugin keeps on globalThis. */
+function instanceRegistry() {
+  return (globalThis as Record<symbol, Map<string, { fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>; ready: Promise<void> }>>)[Symbol.for("opencode.antigravity.activeInstances")]
+}
+
+/** Minimal Google-format SSE body, the shape the interceptor hands to the SDK. */
+function googleStream(text: string) {
+  return new Response(`data: ${JSON.stringify({
+    candidates: [{ index: 0, content: { role: "model", parts: [{ text }] }, finishReason: "STOP" }],
+    usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 4, totalTokenCount: 7 },
+  })}\n\n`, { headers: { "content-type": "text/event-stream" } })
 }
 
 function mockNetwork() {
@@ -599,6 +614,146 @@ describe("OpenCode V2 adapter", () => {
     await expect(stream(sdk)).rejects.toThrow("disposed")
     expect(state.recovery).not.toHaveBeenCalled()
     expect(state.updater).not.toHaveBeenCalled()
+  })
+
+  it("forwards requests from previous session's sdk instance when plugin is reloaded in the same location", async () => {
+    mockNetwork()
+    const adapter1 = await host({ directory: "/tmp/project-a" })
+    const { sdk: oldSdk } = await adapter1.sdk()
+    await stream(oldSdk)
+
+    // Unrelated instance in project-b starts
+    const adapterB = await host({ directory: "/tmp/project-b" })
+
+    // Reload in project-a: new instance starts, old cleans up
+    const adapter1Reloaded = await host({ directory: "/tmp/project-a" })
+    await adapter1.cleanup()
+
+    // Subsequent request using oldSdk routes to project-a's reloaded instance, not project-b
+    const parts = await stream(oldSdk)
+    expect(parts.some(part => part.type === "text-delta" && part.delta.includes("Hello from Antigravity"))).toBe(true)
+
+    // Project-b cleans up with no replacement; requests from project-b reject as disposed
+    const { sdk: sdkB } = await adapterB.sdk()
+    await adapterB.cleanup()
+    await expect(stream(sdkB)).rejects.toThrow("disposed")
+  })
+
+  it("shares the active instance through the global registry so a reloaded module can find it", async () => {
+    mockNetwork()
+    const adapter1 = await host({ directory: "/tmp/cross-eval" })
+    const { sdk: oldSdk } = await adapter1.sdk()
+
+    // A second evaluation of the module registers its instance for the same location
+    const adapter2 = await host({ directory: "/tmp/cross-eval" })
+    await adapter1.cleanup()
+
+    const registry = instanceRegistry()
+    expect(registry).toBeInstanceOf(Map)
+    expect(registry?.size).toBeGreaterThan(0)
+
+    const parts = await stream(oldSdk)
+    expect(parts.some(part => part.type === "text-delta" && part.delta.includes("Hello from Antigravity"))).toBe(true)
+    expect(adapter2).toBeDefined()
+  })
+
+  it("keeps same-directory workspaces from forwarding into each other", async () => {
+    mockNetwork()
+    const adapterA = await host({ directory: "/tmp/shared-dir", workspaceID: "ws-a" })
+    const { sdk } = await adapterA.sdk()
+    await stream(sdk)
+
+    // A different workspace rooted at the same directory must not become ws-a's replacement
+    const adapterB = await host({ directory: "/tmp/shared-dir", workspaceID: "ws-b" })
+    await adapterA.cleanup()
+
+    await expect(stream(sdk)).rejects.toThrow("disposed")
+    expect(adapterB).toBeDefined()
+  })
+
+  it("waits for the replacement instance to finish setup before forwarding", async () => {
+    mockNetwork()
+    const adapter = await host({ directory: "/tmp/ready-gate" })
+    const { sdk } = await adapter.sdk()
+    if (!adapter.instanceKey) throw new Error("Missing registry entry")
+    await adapter.cleanup()
+
+    let release!: () => void
+    const ready = new Promise<void>(resolve => { release = resolve })
+    const forwarded = vi.fn(async () => googleStream("From stub"))
+    instanceRegistry()?.set(adapter.instanceKey, { fetch: forwarded, ready })
+
+    const request = stream(sdk)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(forwarded).not.toHaveBeenCalled()
+
+    release()
+    const parts = await request
+    expect(forwarded).toHaveBeenCalledOnce()
+    expect(parts.some(part => part.type === "text-delta" && part.delta.includes("From stub"))).toBe(true)
+  })
+
+  it("bounds the wait when the replacement never finishes setup", async () => {
+    mockNetwork()
+    const adapter = await host({ directory: "/tmp/stalled-setup" })
+    const { sdk } = await adapter.sdk()
+    if (!adapter.instanceKey) throw new Error("Missing registry entry")
+    await adapter.cleanup()
+
+    const forwarded = vi.fn(async () => googleStream("Should not run"))
+    instanceRegistry()?.set(adapter.instanceKey, { fetch: forwarded, ready: new Promise<void>(() => undefined) })
+
+    vi.useFakeTimers()
+    try {
+      const request = stream(sdk)
+      const settled = expect(request).rejects.toThrow(/did not finish starting/)
+      await vi.advanceTimersByTimeAsync(120_000)
+      await settled
+      expect(forwarded).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("stops waiting for setup when the caller aborts", async () => {
+    mockNetwork()
+    const adapter = await host({ directory: "/tmp/aborted-wait" })
+    const { sdk } = await adapter.sdk()
+    if (!adapter.instanceKey) throw new Error("Missing registry entry")
+    await adapter.cleanup()
+
+    const forwarded = vi.fn(async () => googleStream("Should not run"))
+    instanceRegistry()?.set(adapter.instanceKey, { fetch: forwarded, ready: new Promise<void>(() => undefined) })
+
+    const controller = new AbortController()
+    const addEventListener = vi.spyOn(controller.signal, "addEventListener")
+    const request = stream(sdk, "antigravity-gemini-3-flash", controller.signal)
+    const settled = expect(request).rejects.toThrow("cancelled")
+
+    // Abort only once the wait registered its listener, so this covers the
+    // in-flight path rather than the already-aborted short circuit. Without the
+    // listener the wait can only fail later with the timeout message.
+    await vi.waitFor(() => expect(addEventListener.mock.calls.some(call => call[0] === "abort")).toBe(true))
+    controller.abort(new Error("cancelled"))
+
+    await settled
+    expect(forwarded).not.toHaveBeenCalled()
+  })
+
+  it("rejects instead of forwarding into a replacement whose setup failed", async () => {
+    mockNetwork()
+    const adapter = await host({ directory: "/tmp/failed-setup" })
+    const { sdk } = await adapter.sdk()
+    if (!adapter.instanceKey) throw new Error("Missing registry entry")
+    await adapter.cleanup()
+
+    const failure = Promise.reject(new Error("setup failed"))
+    failure.catch(() => undefined)
+    const forwarded = vi.fn(async () => googleStream("Should not run"))
+    instanceRegistry()?.set(adapter.instanceKey, { fetch: forwarded, ready: failure })
+
+    await expect(stream(sdk)).rejects.toThrow("disposed")
+    expect(forwarded).not.toHaveBeenCalled()
   })
 
   it("retains cancellation through the prepared wrapper and aborts in-flight requests on cleanup", async () => {
