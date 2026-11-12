@@ -60,6 +60,9 @@
         "test:e2e:v2": "node script/test-opencode-v2.mjs"
     },
     "devDependencies": {
+        "@opentui/core": "^0.6.6",
+        "@opentui/solid": "^0.6.6",
+        "solid-js": "^1.9.0",
         "@types/node": "^24.10.1",
         "@types/proper-lockfile": "^4.1.4",
         "@vitest/coverage-v8": "^3.0.0",

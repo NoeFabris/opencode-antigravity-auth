@@ -4,18 +4,40 @@ import type { KeymapLayer } from "@opencode/plugin/tui/context"
 import type { AccountSummary } from "./plugin/account-rpc.ts"
 import { AntigravityTuiPlugin } from "./tui.ts"
 
+vi.mock("@opentui/solid/jsx-runtime", () => ({
+  jsx: (type: unknown, props: unknown) => ({ type, props }),
+  jsxs: (type: unknown, props: unknown) => ({ type, props }),
+  Fragment: "fragment",
+}))
+vi.mock("@opentui/solid/jsx-dev-runtime", () => ({
+  jsxDEV: (type: unknown, props: unknown) => ({ type, props }),
+  Fragment: "fragment",
+}))
+
+interface ShownElement {
+  type: string
+  props: { children?: Array<{ type: string; props: Record<string, unknown> }> } & Record<string, unknown>
+}
+
 const account: AccountSummary = { id: "account-id", email: "saved@example.test", enabled: true, current: true, verificationRequired: false, lastUsed: 1 }
 
 afterEach(() => vi.useRealTimers())
 
 async function host(actions: Array<string | undefined>, options: { confirmed?: boolean; accounts?: AccountSummary[] } = {}) {
   let layer: KeymapLayer | undefined
+  let shown: ShownElement | undefined
   const rpc = {
     list: vi.fn(async () => options.accounts ?? [account]), connections: vi.fn(async () => ({ ids: ["native-credential"] })), quotas: vi.fn(async () => ({ report: "Antigravity claude: 84% remaining; resets tomorrow", accounts: [{ id: account.id, email: account.email, disabled: false, report: "Antigravity claude: 84% remaining; resets tomorrow" }] })),
     update: vi.fn(async () => ({ message: "Account updated" })), models: vi.fn(async () => ({ count: 12 })),
   }
   const select = vi.fn(async (_options: { title: string; options: Array<{ title: string; value: string }> }) => actions.shift())
   const alert = vi.fn(async () => undefined)
+  const show = vi.fn((render: () => ShownElement, onClose?: () => void) => {
+    shown = render()
+    onClose?.()
+  })
+  const clear = vi.fn()
+  const set = vi.fn()
   const remove = vi.fn(async () => undefined)
   const cancel = vi.fn(async () => undefined)
   const toast = vi.fn()
@@ -25,14 +47,25 @@ async function host(actions: Array<string | undefined>, options: { confirmed?: b
       complete: vi.fn(async () => undefined), cancel,
     } } },
     location: { directory: "/tmp/menu-test" },
-    ui: { dialog: { select, alert, confirm: async () => options.confirmed ?? false, prompt: async () => undefined }, toast: { show: toast } },
+    renderer: { height: 40 },
+    theme: { surface: () => ({
+      text: {
+        base: "base",
+        muted: "muted",
+        faint: "faint",
+        feedback: { success: { base: "tone-success" }, warning: { base: "tone-warning" }, error: { base: "tone-error" } },
+        action: { primary: { focused: "focus-fg" } },
+      },
+      background: { action: { primary: { focused: "focus-bg" } } },
+    }) },
+    ui: { dialog: { select, alert, set, show, clear, confirm: async () => options.confirmed ?? false, prompt: async () => undefined }, toast: { show: toast } },
     keymap: { layer: (factory: () => KeymapLayer) => { layer = factory() } },
   } as unknown as Plugin.Context
   await AntigravityTuiPlugin.setup(ctx)
   const command = layer?.commands?.[0]
   if (!command) throw new Error("Account menu command was not registered")
   await command.run()
-  return { command, rpc, select, alert, remove, cancel, toast }
+  return { command, rpc, select, alert, show, clear, set, get shown() { return shown }, remove, cancel, toast }
 }
 
 describe("Antigravity native menu", () => {
@@ -42,7 +75,8 @@ describe("Antigravity native menu", () => {
     expect(result.select.mock.calls[0]?.[0].options).toContainEqual(expect.objectContaining({ title: "saved@example.test [current]" }))
     expect(result.rpc.list).toHaveBeenCalledTimes(2)
     expect(result.rpc.quotas).toHaveBeenCalledOnce()
-    expect(result.alert).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("84% remaining") }))
+    expect(result.show).toHaveBeenCalledOnce()
+    expect(JSON.stringify(result.shown)).toContain("84% remaining")
   })
 
   it("requires confirmation before deleting an account or its native connection", async () => {
@@ -113,5 +147,76 @@ describe("Antigravity native menu", () => {
     const result = await host(["manage", undefined, undefined])
     expect(result.rpc.list).toHaveBeenCalledTimes(2)
     expect(result.rpc.update).not.toHaveBeenCalled()
+  })
+
+  it("registers /quota slash command without /usage and checks quotas directly", async () => {
+    let layer: KeymapLayer | undefined
+    let shown: ShownElement | undefined
+    const report = [
+      "GEMINI MODELS",
+      "  Models within this group: Gemini Flash, Gemini Pro",
+      "",
+      "  Weekly Limit Remaining",
+      "    [██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 18.00%",
+      "    Refreshes in 2h 0m",
+      "",
+      "  Five Hour Limit Remaining",
+      "    [████████████████████████████████░░] 93.74%",
+      "    Quota available",
+    ].join("\n")
+    const rpc = {
+      list: vi.fn(async () => [account]),
+      quotas: vi.fn(async () => ({ report, accounts: [{ id: account.id, email: account.email, disabled: false, report }] })),
+    }
+    const alert = vi.fn(async () => undefined)
+    const show = vi.fn((render: () => ShownElement, onClose?: () => void) => {
+      shown = render()
+      onClose?.()
+    })
+    const clear = vi.fn()
+    const set = vi.fn()
+    const toast = vi.fn()
+    const ctx = {
+      client: { rpc: () => rpc },
+      location: { directory: "/tmp/menu-test" },
+      renderer: { height: 40 },
+      theme: { surface: () => ({
+        text: {
+          base: "base",
+          muted: "muted",
+          faint: "faint",
+          feedback: { success: { base: "tone-success" }, warning: { base: "tone-warning" }, error: { base: "tone-error" } },
+          action: { primary: { focused: "focus-fg" } },
+        },
+        background: { action: { primary: { focused: "focus-bg" } } },
+      }) },
+      ui: { dialog: { alert, set, show, clear }, toast: { show: toast } },
+      keymap: { layer: (factory: () => KeymapLayer) => { layer = factory() } },
+    } as unknown as Plugin.Context
+    await AntigravityTuiPlugin.setup(ctx)
+    const usageCmd = layer?.commands?.find(c => c.slash?.name === "usage" || c.slash?.aliases?.includes("usage"))
+    expect(usageCmd).toBeUndefined()
+    const quotaCmd = layer?.commands?.find(c => c.id === "antigravity.quota")
+    expect(quotaCmd).toBeDefined()
+    expect(quotaCmd?.slash).toEqual({ name: "quota", aliases: [] })
+    await quotaCmd?.run()
+    expect(rpc.quotas).toHaveBeenCalledOnce()
+    expect(set).toHaveBeenCalledWith({ size: "medium", centered: true })
+    expect(show).toHaveBeenCalledOnce()
+    expect(alert).not.toHaveBeenCalled()
+
+    const tree = shown as ShownElement
+    expect(tree.type).toBe("box")
+    const scroll = tree.props.children?.find(child => child.type === "scrollbox")
+    expect(scroll).toBeDefined()
+    expect(scroll?.props.height).toBe(20)
+    const body = JSON.stringify(tree)
+    expect(body).toContain("GEMINI MODELS")
+    expect(body).toContain("focus-bg")
+    expect(body).toContain("focus-fg")
+    expect(body).toContain("faint")
+    expect(body).toContain("muted")
+    expect(body).toContain("tone-error")
+    expect(body).toContain("tone-success")
   })
 })

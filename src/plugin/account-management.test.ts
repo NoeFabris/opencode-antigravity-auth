@@ -146,6 +146,32 @@ describe("account management", () => {
     const { handlers } = await host()
     const accounts = await handlers.list({}, callContext)
     expect(accounts[0]?.quota).toBeUndefined()
+    expect("quota" in accounts[0]!).toBe(false)
+  })
+
+  it("omits undefined resetTime and updatedAt inside summarized cached quota", async () => {
+    state.storage!.accounts[0]!.cachedQuota = {
+      "gemini-pro": { remainingFraction: 0.4, modelCount: 1 },
+    }
+    const { handlers } = await host()
+    const accounts = await handlers.list({}, callContext)
+    expect("resetTime" in accounts[0]!.quota!).toBe(false)
+    expect("updatedAt" in accounts[0]!.quota!).toBe(false)
+  })
+
+  it("returns plain-text quota card reports without raw ANSI escapes for TUI dialogs", async () => {
+    const groups = {
+      claude: { remainingFraction: 1, modelCount: 2 },
+      "gemini-flash": { remainingFraction: 0.5, modelCount: 1 },
+    }
+    vi.mocked(checkAccountsQuota).mockResolvedValueOnce([{ index: 0, status: "ok", quota: { groups, modelCount: 3 } }])
+    const { handlers } = await host()
+    const [account] = await handlers.list({}, callContext)
+    const response = await handlers.quotas({ id: account!.id }, callContext)
+    expect(response.report).toContain("GEMINI MODELS")
+    expect(response.report).toContain("CLAUDE AND GPT MODELS")
+    expect(response.report).not.toMatch(/\x1b\[/)
+    expect(response.accounts[0]?.report).not.toMatch(/\x1b\[/)
   })
 
   it("flushes the manager before disabling an account and moves selection to an enabled account", async () => {

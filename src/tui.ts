@@ -1,28 +1,33 @@
 import type { Plugin } from "@opencode/plugin/tui"
 import type { LocationRef, OpenCodeClient } from "@opencode/client"
+import type { JSX } from "solid-js"
 import { AntigravityAccountsRpc, type AccountSummary } from "./plugin/account-rpc.ts"
 import { formatQuotaDescription } from "./plugin/ui/quota.ts"
+import { showQuotaDialog, type QuotaDialogKeymapLayer, type QuotaDialogTheme } from "./quota-dialog.tsx"
 
-// This plugin uses host dialogs and renders no JSX. Keep its public declarations
-// independent of the SDK's optional Solid/OpenTUI rendering dependencies.
+// This plugin uses host dialogs and renders no JSX outside quota-dialog.tsx.
+// Keep its public declarations independent of the SDK's optional Solid/OpenTUI
+// rendering dependencies.
 interface AccountMenuContext {
   readonly client: OpenCodeClient
   readonly location: LocationRef | undefined
   readonly data: { readonly location: { default(): LocationRef } }
+  readonly renderer: { readonly height: number }
+  readonly theme: { surface(name: "dialog"): QuotaDialogTheme }
   readonly ui: {
     readonly dialog: {
       prompt(options: { title: string; description?: string }): Promise<string | undefined>
       alert(options: { title: string; message: string }): Promise<void>
       confirm(options: { title: string; message: string }): Promise<boolean | undefined>
       select<Value>(options: { title: string; options: ReadonlyArray<{ title: string; value: Value; description?: string; category?: string; disabled?: boolean }> }): Promise<Value | undefined>
+      set(options: { size?: "medium" | "large" | "xlarge"; centered?: boolean }): void
+      show(render: () => JSX.Element, onClose?: () => void): void
+      clear(): void
     }
     readonly toast: { show(options: { message: string; variant: "info" | "success" }): void }
   }
   readonly keymap: {
-    layer(factory: () => { mode: "global"; commands: ReadonlyArray<{
-      id: string; title: string; group: string; palette: true
-      slash: { name: string; aliases: string[] }; run: () => Promise<void>
-    }> }): void
+    layer(factory: () => QuotaDialogKeymapLayer): void
   }
 }
 
@@ -54,17 +59,21 @@ export const AntigravityTuiPlugin = {
       const result = await rpc.quotas(id ? { id } : {}, location())
       const reports = result.accounts.filter(account => id || !account.disabled)
       if (reports.length <= 1) {
-        await ctx.ui.dialog.alert({ title: "Antigravity quotas", message: reports[0]?.report ?? result.report })
+        await showQuotaDialog(ctx, "Antigravity quotas", reports[0]?.report ?? result.report)
         return
       }
       while (true) {
         const selected = await ctx.ui.dialog.select({
           title: "Antigravity quotas",
-          options: reports.map(account => ({ title: account.email, value: account.id, description: account.report.split("\n").slice(1, 4).join("; ") })),
+          options: reports.map(account => ({
+            title: account.email,
+            value: account.id,
+            description: account.report.split("\n").map(l => l.trim()).filter(l => l.length > 0).slice(0, 2).join("; "),
+          })),
         })
         const report = reports.find(account => account.id === selected)
         if (!report) return
-        await ctx.ui.dialog.alert({ title: report.email, message: report.report })
+        await showQuotaDialog(ctx, report.email, report.report)
       }
     }
 
@@ -142,10 +151,24 @@ export const AntigravityTuiPlugin = {
 
     ctx.keymap.layer(() => ({
       mode: "global",
-      commands: [{
-        id: "antigravity.accounts", title: "Antigravity accounts and quotas", group: "Antigravity",
-        palette: true, slash: { name: "antigravity", aliases: ["ag"] }, run: menu,
-      }],
+      commands: [
+        {
+          id: "antigravity.accounts",
+          title: "Antigravity accounts and quotas",
+          group: "Antigravity",
+          palette: true,
+          slash: { name: "antigravity", aliases: ["ag"] },
+          run: menu,
+        },
+        {
+          id: "antigravity.quota",
+          title: "Antigravity model quota",
+          group: "Antigravity",
+          palette: true,
+          slash: { name: "quota", aliases: [] },
+          run: () => quotas(),
+        },
+      ],
     }))
   },
 } satisfies Plugin.Definition
