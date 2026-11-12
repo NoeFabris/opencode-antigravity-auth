@@ -10,6 +10,8 @@ import { DEFAULT_CONFIG } from "./config";
 import { initializeDebug } from "./debug";
 import { SKIP_THOUGHT_SIGNATURE, getAntigravityUserAgent } from "../constants";
 import * as config from "./config";
+import { registerCollapsedModelFamily } from "./transform/model-resolver";
+import { GEMINI_38_FLASH_FAMILY } from "./config/models-v2";
 import type { SignatureStore, ThoughtBuffer, StreamingCallbacks, StreamingOptions } from "./core/streaming/types";
 
 const {
@@ -1367,5 +1369,270 @@ it("removes x-api-key header", () => {
         ),
       ).rejects.toMatchObject({ message: "THINKING_RECOVERY_NEEDED" });
     });
+  });
+});
+
+describe("collapsed reasoning tier retargeting", () => {
+  const mockAccessToken = "test-token";
+  const mockProjectId = "test-project";
+
+  registerCollapsedModelFamily(GEMINI_38_FLASH_FAMILY);
+  registerCollapsedModelFamily({
+    baseId: "claude-8-thinking",
+    tiers: { low: "claude-8-thinking-low", high: "claude-8-thinking-high" },
+    thinking: "budget",
+  });
+
+  function prepare(model: string, body: Record<string, unknown>) {
+    return prepareAntigravityRequest(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      { method: "POST", body: JSON.stringify(body) },
+      mockAccessToken,
+      mockProjectId,
+      undefined,
+      "antigravity",
+    );
+  }
+
+  it("retargets an unwrapped family request to the selected variant tier", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      providerOptions: { google: { thinkingLevel: "medium" } },
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-medium");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-medium");
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: "medium" });
+  });
+
+  it("uses the family default tier when no variant is selected", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-low");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-low");
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: "low" });
+  });
+
+  it("keeps an explicitly advertised member ID unchanged", () => {
+    const result = prepare("antigravity-gemini-3.8-flash-high", {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-high");
+  });
+
+  it("retargets a wrapped family request using the wrapped variant config", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      project: "my-project",
+      request: {
+        providerOptions: { google: { thinkingLevel: "high" } },
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      },
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-3.8-flash-high");
+  });
+
+  it("keeps the signature session stable across variants of one family", () => {
+    const request = (level: string) => ({
+      providerOptions: { google: { thinkingLevel: level } },
+      contents: [{ role: "user", parts: [{ text: "same conversation" }] }],
+    });
+
+    const low = prepare("antigravity-gemini-3.8-flash", request("low"));
+    const high = prepare("antigravity-gemini-3.8-flash", request("high"));
+
+    expect(low.effectiveModel).toBe("gemini-3.8-flash-low");
+    expect(high.effectiveModel).toBe("gemini-3.8-flash-high");
+    expect(low.sessionId).toBe(high.sessionId);
+  });
+
+  it("selects a budget family tier from a variant thinking budget", () => {
+    const result = prepare("antigravity-claude-8-thinking", {
+      providerOptions: { google: { thinkingConfig: { thinkingBudget: 20000 } } },
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("claude-8-thinking-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("claude-8-thinking-high");
+    expect(parsed.request.generationConfig.thinkingConfig.thinking_budget).toBe(32768);
+  });
+
+  it("routes a nonstandard effort through the selected marker without a thinking level", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-6-flash",
+      tiers: { turbo: "gemini-6-flash-turbo", high: "gemini-6-flash-high" },
+      thinking: "level",
+    });
+
+    const result = prepare("antigravity-gemini-6-flash", {
+      __antigravityTier: "turbo",
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-6-flash-turbo");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.model).toBe("gemini-6-flash-turbo");
+    expect(parsed.__antigravityTier).toBeUndefined();
+    expect(parsed.request.__antigravityTier).toBeUndefined();
+    expect(parsed.request.generationConfig?.thinkingConfig).toBeUndefined();
+  });
+
+  it("writes the selected level into a wrapped family request", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      project: "my-project",
+      __antigravityTier: "high",
+      request: {
+        generationConfig: { maxOutputTokens: 1024 },
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      },
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.__antigravityTier).toBeUndefined();
+    expect(parsed.request.generationConfig).toMatchObject({
+      maxOutputTokens: 1024,
+      thinkingConfig: { thinkingLevel: "high" },
+    });
+  });
+
+  it("writes the family default level into a wrapped request with no variant", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      project: "my-project",
+      request: {
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      },
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-low");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: "low" });
+  });
+
+  it("keeps a registered family base instead of legacy-defaulting it to an unadvertised tier", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-3.5-pro",
+      tiers: { high: "gemini-3.5-pro-high" },
+      thinking: "level",
+    });
+
+    const result = prepare("antigravity-gemini-3.5-pro", {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.5-pro-high");
+    expect(JSON.parse(result.init.body as string).model).toBe("gemini-3.5-pro-high");
+  });
+
+  it("reclassifies a family as Claude thinking after retargeting", () => {
+    registerCollapsedModelFamily({
+      baseId: "claude-7",
+      tiers: { high: "claude-7-thinking-high" },
+      defaultTier: "high",
+      thinking: "budget",
+    });
+
+    const result = prepare("antigravity-claude-7", {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("claude-7-thinking-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({
+      include_thoughts: true,
+      thinking_budget: 32768,
+    });
+  });
+
+  it("raises maxOutputTokens for a wrapped Claude thinking budget", () => {
+    const result = prepare("antigravity-claude-8-thinking", {
+      project: "my-project",
+      __antigravityTier: "high",
+      request: {
+        generationConfig: { maxOutputTokens: 1024 },
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      },
+    });
+
+    expect(result.effectiveModel).toBe("claude-8-thinking-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.request.generationConfig).toMatchObject({
+      maxOutputTokens: 64000,
+      thinkingConfig: { thinkingBudget: 32768 },
+    });
+  });
+
+  it("strips a marker from both the envelope and the nested request", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      project: "my-project",
+      __antigravityTier: "low",
+      request: {
+        __antigravityTier: "high",
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      },
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-low");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.__antigravityTier).toBeUndefined();
+    expect(parsed.request.__antigravityTier).toBeUndefined();
+  });
+
+  it("preserves caller thinking config when the request stays on a real base model", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-3.5-pro",
+      tiers: { high: "gemini-3.5-pro-high" },
+      baseModelId: "gemini-3.5-pro",
+      thinking: "level",
+    });
+
+    const result = prepare("antigravity-gemini-3.5-pro", {
+      generationConfig: { thinkingConfig: { thinkingBudget: 4096 } },
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.5-pro");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.request.generationConfig.thinkingConfig).toBeDefined();
+    expect(parsed.request.generationConfig.thinkingConfig.thinkingLevel).toBe("low");
+  });
+
+  it("lets the marker override a conflicting thinking level", () => {
+    const result = prepare("antigravity-gemini-3.8-flash", {
+      __antigravityTier: "high",
+      providerOptions: { google: { thinkingLevel: "low" } },
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-3.8-flash-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: "high" });
+  });
+
+  it("applies the tier budget to a retargeted Gemini 2.5 family", () => {
+    registerCollapsedModelFamily({
+      baseId: "gemini-2.5-flash",
+      tiers: { high: "gemini-2.5-flash-high" },
+      defaultTier: "high",
+      thinking: "budget",
+    });
+
+    const result = prepare("antigravity-gemini-2.5-flash", {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+
+    expect(result.effectiveModel).toBe("gemini-2.5-flash-high");
+    const parsed = JSON.parse(result.init.body as string);
+    expect(parsed.request.generationConfig.thinkingConfig).toMatchObject({ thinkingBudget: 24576 });
   });
 });

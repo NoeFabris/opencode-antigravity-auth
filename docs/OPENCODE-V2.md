@@ -20,11 +20,22 @@ checkout, run `npm ci && npm run build` and put its absolute directory in
 Models are discovered from the enabled accounts' `fetchAvailableModels` response.
 The catalog follows `agentModelSorts` and `tieredModelIds`, excluding disabled,
 internal, image-generation, and retired alias entries. Names and token limits
-come from Google; backend tier suffixes are preserved. Model routing selects only
-accounts advertising the requested model. Results are cached for an
-hour, keyed to the enabled account pool. `/antigravity` → **Refresh available
-models** updates the catalog immediately. If discovery fails, the last known
-catalog or a small fallback catalog remains usable.
+come from Google. Google advertises some reasoning tiers as separate backend
+IDs (`gemini-3.8-flash-low`, `-medium`, `-high`); these collapse into one
+OpenCode model whose variant names come from the effort label in each model's
+`displayName`, so renamed or newly added efforts are picked up automatically.
+The selected variant is mapped back to the matching backend ID when the request
+is sent. A labelled effort forms a family even when it is the only one
+advertised, so `GPT-OSS 120B (Medium)` is exposed as one model with a `medium`
+variant. A lone suffix-only ID with no display label (`gpt-oss-120b-medium`,
+`claude-sonnet-5-5-high`) remains a separate model because no siblings or base
+ID exist; two or more suffix-only siblings still collapse into their family.
+Model routing selects only
+accounts advertising the requested model; families share eligibility across
+their members. Results are cached for an hour, keyed to the enabled account
+pool. `/antigravity` → **Refresh available models** updates the catalog
+immediately. If discovery fails, the last known catalog or a small fallback
+catalog remains usable.
 
 Manual overrides belong under `providers`:
 
@@ -144,7 +155,7 @@ checks all three modes against a freshly installed npm archive. Set
 Authenticated checks are separate:
 
 ```bash
-opencode run --model=google/antigravity-gemini-3.8-flash-high "Reply exactly WORKING"
+opencode run --model=google/antigravity-gemini-3.8-flash#high "Reply exactly WORKING"
 opencode run --model=google/antigravity-claude-opus-4-6-thinking#max "Reply exactly WORKING"
 ```
 

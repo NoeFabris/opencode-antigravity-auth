@@ -136,6 +136,65 @@ You can define custom budgets:
 
 ---
 
+## Advertised Reasoning Tiers
+
+Some models are advertised by the backend as one entry per reasoning tier, for
+example `gemini-3.8-flash-low`, `gemini-3.8-flash-medium`, and
+`gemini-3.8-flash-high`. The plugin collapses those siblings into a single
+OpenCode model (`antigravity-gemini-3.8-flash`) and synthesizes one variant per
+discovered tier:
+
+```json
+{
+  "antigravity-gemini-3.8-flash": {
+    "variants": [
+      { "id": "low", "settings": { "thinkingConfig": { "thinkingLevel": "low" } } },
+      { "id": "medium", "settings": { "thinkingConfig": { "thinkingLevel": "medium" } } },
+      { "id": "high", "settings": { "thinkingConfig": { "thinkingLevel": "high" } } }
+    ]
+  }
+}
+```
+
+Selecting `#high` retargets the request to `gemini-3.8-flash-high`. Variant
+names come from the effort label in each model's `displayName`
+(`"Gemini 3.8 Flash (High)"` → `#high`), not from the backend ID suffix. That
+means renamed or newly added efforts (`Extra Low`, `Turbo`, `Ultra`, ...) work
+without a code change, and the backend ID remains authoritative for routing.
+The selected variant is always carried through to request routing, including
+efforts whose settings are empty.
+
+How the effort reaches the API depends on the family:
+
+- **Gemini 3+** sends `generationConfig.thinkingConfig.thinkingLevel` for
+  `minimal`/`low`/`medium`/`high`; renamed efforts (for example `turbo`) ride
+  the selected backend ID with no thinking level.
+- **Claude and Gemini 2.5** (budget families) send
+  `generationConfig.thinkingConfig.thinkingBudget`; an unknown effort still
+  routes to its own backend ID.
+- **GPT-OSS and other families that encode effort only in the model ID** send
+  no thinking configuration at all.
+
+If a catalog omits `displayName`, the plugin falls back to the legacy ID-suffix
+parser for known thinking families.
+
+With no variant selected, the family default is used (normally `low` for Gemini
+and `high` for Claude budget families, or the real base ID when Google
+advertises one). An explicit display-name effort always forms a family, even
+when it is the only one advertised — `GPT-OSS 120B (Medium)` becomes
+`antigravity-gpt-oss-120b` with a single `medium` variant, so the model key
+stays stable if Google later adds more efforts. The two-sibling rule only
+applies when the effort comes from an ID suffix with no display label: a lone
+suffix-only ID such as `gpt-oss-120b-medium` (no parenthetical) keeps its own
+entry, while two or more suffix-only siblings (for example
+`gemini-3.8-flash-low` plus `gemini-3.8-flash-high`) collapse into the family
+key `antigravity-gemini-3.8-flash`. Parentheticals that describe the model
+rather than an effort (`(Thinking)`, `(Preview)`, image/video variants) are
+never treated as tiers. Members that disagree about image support stay as
+separate models so each keeps its own capability.
+
+---
+
 ## Legacy Budget Format (Deprecated)
 
 For Gemini 3 models, the old `thinkingBudget` format is still supported but deprecated:
@@ -169,6 +228,9 @@ However, **we recommend using simplified model names with variants** for:
 - **Automatic quota routing** — Plugin handles model name transformation
 - **Flexible budgets** — Define any budget, not just preset tiers
 - **Future-proof** — Works with OpenCode's native variant system
+
+Discovered families already collapse automatically; the advice above applies to
+manual model overrides and other tier-suffixed aliases.
 
 ---
 

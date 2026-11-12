@@ -63,6 +63,10 @@ import {
   resolveModelWithTier,
   resolveModelWithVariant,
   resolveModelForHeaderStyle,
+  resolveCollapsedModelTarget,
+  getCollapsedModelBaseId,
+  COLLAPSED_TIER_BODY_KEY,
+  COLLAPSED_MODEL_TIERS,
   isClaudeModel,
   isClaudeThinkingModel,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
@@ -729,6 +733,63 @@ export function isGenerativeLanguageRequest(input: RequestInfo): input is string
 }
 
 /**
+ * Removes the collapsed-variant marker that OpenCode merges into the request
+ * body from a selected variant. The marker must not reach the backend.
+ */
+function takeCollapsedVariantId(container: Record<string, unknown> | undefined): string | undefined {
+  if (!container || !(COLLAPSED_TIER_BODY_KEY in container)) return undefined;
+  const value = container[COLLAPSED_TIER_BODY_KEY];
+  delete container[COLLAPSED_TIER_BODY_KEY];
+  return typeof value === "string" && value ? value : undefined;
+}
+
+/**
+ * Writes the resolved collapsed tier into an already-wrapped Antigravity
+ * request. Standard efforts get an explicit level or budget; effort names the
+ * API does not understand stay in the backend ID and inherit no thinking
+ * configuration.
+ */
+function applyCollapsedThinkingToRequest(
+  request: Record<string, unknown>,
+  target: { thinkingLevel?: string; thinkingBudget?: number },
+): void {
+  const rawGenerationConfig = request.generationConfig;
+  const generationConfig = rawGenerationConfig && typeof rawGenerationConfig === "object" && !Array.isArray(rawGenerationConfig)
+    ? rawGenerationConfig as Record<string, unknown>
+    : undefined;
+  const rawThinkingConfig = generationConfig?.thinkingConfig;
+  const existingThinking = rawThinkingConfig && typeof rawThinkingConfig === "object" && !Array.isArray(rawThinkingConfig)
+    ? rawThinkingConfig as Record<string, unknown>
+    : undefined;
+
+  if (target.thinkingLevel) {
+    const thinkingConfig: Record<string, unknown> = { ...existingThinking, thinkingLevel: target.thinkingLevel };
+    delete thinkingConfig.thinkingBudget;
+    if (typeof thinkingConfig.includeThoughts !== "boolean") thinkingConfig.includeThoughts = true;
+    request.generationConfig = { ...(generationConfig ?? {}), thinkingConfig };
+    return;
+  }
+  if (typeof target.thinkingBudget === "number") {
+    const thinkingConfig: Record<string, unknown> = { ...existingThinking, thinkingBudget: target.thinkingBudget };
+    delete thinkingConfig.thinkingLevel;
+    if (typeof thinkingConfig.includeThoughts !== "boolean") thinkingConfig.includeThoughts = true;
+    const merged: Record<string, unknown> = { ...(generationConfig ?? {}), thinkingConfig };
+    // Antigravity requires maxOutputTokens to exceed the thinking budget.
+    const currentMax = merged.maxOutputTokens as number | undefined;
+    if (!currentMax || currentMax <= target.thinkingBudget) {
+      merged.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
+      delete merged.max_output_tokens;
+    }
+    request.generationConfig = merged;
+    return;
+  }
+  if (generationConfig?.thinkingConfig) {
+    delete generationConfig.thinkingConfig;
+    if (Object.keys(generationConfig).length === 0) delete request.generationConfig;
+  }
+}
+
+/**
  * Options for request preparation.
  */
 export interface PrepareRequestOptions {
@@ -812,25 +873,39 @@ export function prepareAntigravityRequest(
   const [, rawModel = "", rawAction = ""] = match;
   const requestedModel = rawModel;
 
-  const resolved = resolveModelForHeaderStyle(rawModel, headerStyle);
-  let effectiveModel = resolved.actualModel;
+  // A collapsed family key can look like a legacy Gemini 3 Pro ID, which
+  // resolveModelForHeaderStyle would rewrite to an unadvertised `-low` tier.
+  // Preserve the registered family base or member before that legacy default.
+  // Collapsed tiers belong to the Antigravity catalog; the gemini-cli pool
+  // keeps its own `-preview` IDs and legacy resolution.
+  const collapsedBase = headerStyle === "antigravity" ? getCollapsedModelBaseId(rawModel) : undefined;
+  const requestedWithoutQuota = rawModel.replace(/^antigravity-/i, "");
+  const collapsedRequested = collapsedBase
+    && requestedWithoutQuota.toLowerCase().startsWith(collapsedBase.toLowerCase())
+    ? requestedWithoutQuota
+    : undefined;
+  const resolved = resolveModelForHeaderStyle(collapsedRequested ?? rawModel, headerStyle);
+  let effectiveModel = collapsedRequested ?? resolved.actualModel;
 
   const streaming = rawAction === STREAM_ACTION;
   const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
   const baseEndpoint = endpointOverride ?? defaultEndpoint;
   const transformedUrl = `${baseEndpoint}/v1internal:${rawAction}${streaming ? "?alt=sse" : ""}`;
 
-  const isClaude = isClaudeModel(resolved.actualModel);
-  const isClaudeThinking = isClaudeThinkingModel(resolved.actualModel);
+  let isClaude = isClaudeModel(resolved.actualModel);
+  let isClaudeThinking = isClaudeThinkingModel(resolved.actualModel);
   const keepThinkingEnabled = getKeepThinking();
   const enableClaudePromptAutoCaching = options?.claudePromptAutoCaching ?? false;
 
   // Tier-based thinking configuration from model resolver (can be overridden by variant config)
   let tierThinkingBudget = resolved.thinkingBudget;
   let tierThinkingLevel = resolved.thinkingLevel;
+  // Set when the selected effort is encoded only in the backend ID. The
+  // request must not inherit the family's legacy default thinking config.
+  let suppressThinkingConfig = false;
   let signatureSessionKey = buildSignatureSessionKey(
     PLUGIN_SESSION_ID,
-    effectiveModel,
+    getCollapsedModelBaseId(effectiveModel) ?? effectiveModel,
     undefined,
     resolveProjectKey(projectId),
   );
@@ -842,6 +917,46 @@ export function prepareAntigravityRequest(
       const isWrapped = typeof parsedBody.project === "string" && "request" in parsedBody;
 
       if (isWrapped) {
+        // The wrapped path usually comes from our own transport, but a caller
+        // may already have selected a variant. Retarget to the concrete
+        // backend tier before the model is written into the envelope.
+        const wrappedRequest = parsedBody.request as Record<string, unknown> | undefined;
+        // Strip the marker from both possible levels so neither copy reaches
+        // the backend when an envelope and its request both carry one.
+        const envelopeVariantId = takeCollapsedVariantId(parsedBody);
+        const nestedVariantId = wrappedRequest ? takeCollapsedVariantId(wrappedRequest) : undefined;
+        const collapsedVariantId = envelopeVariantId ?? nestedVariantId;
+        const wrappedVariantConfig = wrappedRequest && typeof wrappedRequest === "object"
+          ? extractVariantThinkingConfig(
+              wrappedRequest.providerOptions as Record<string, unknown> | undefined,
+              wrappedRequest.generationConfig as Record<string, unknown> | undefined,
+            )
+          : undefined;
+        const collapsedTarget = headerStyle === "antigravity"
+          ? resolveCollapsedModelTarget(effectiveModel, wrappedVariantConfig, collapsedVariantId)
+          : undefined;
+        if (collapsedTarget) {
+          effectiveModel = collapsedTarget.model;
+          if (collapsedTarget.thinkingLevel) {
+            tierThinkingLevel = collapsedTarget.thinkingLevel;
+            tierThinkingBudget = undefined;
+          } else if (typeof collapsedTarget.thinkingBudget === "number") {
+            tierThinkingBudget = collapsedTarget.thinkingBudget;
+            tierThinkingLevel = undefined;
+          } else {
+            tierThinkingLevel = undefined;
+            tierThinkingBudget = undefined;
+            suppressThinkingConfig = collapsedTarget.suppressThinking === true;
+          }
+          if (wrappedRequest && typeof wrappedRequest === "object") {
+            applyCollapsedThinkingToRequest(wrappedRequest, collapsedTarget);
+          }
+        }
+        // A display label can map to a family ID without "thinking" while the
+        // backend tier is a Claude thinking model. Reclassify after retargeting.
+        isClaude = isClaudeModel(effectiveModel);
+        isClaudeThinking = isClaudeThinkingModel(effectiveModel);
+
         const wrappedBody = {
           ...parsedBody,
           model: effectiveModel,
@@ -862,9 +977,11 @@ export function prepareAntigravityRequest(
         }
 
         const conversationKey = resolveConversationKeyFromRequests(requestObjects);
-        // Strip tier suffix from model for cache key to prevent cache misses on tier change
-        // e.g., "claude-opus-4-6-thinking-high" -> "claude-opus-4-6-thinking"
-        const modelForCacheKey = effectiveModel.replace(/-(minimal|low|medium|high)$/i, "");
+        // Use the collapsed family base for the cache key so switching variants
+        // does not create a separate signature session. Otherwise strip the
+        // tier suffix, e.g. "claude-opus-4-6-thinking-high" -> "claude-opus-4-6-thinking".
+        const modelForCacheKey = getCollapsedModelBaseId(effectiveModel)
+          ?? effectiveModel.replace(/-(minimal|low|medium|high)$/i, "");
         signatureSessionKey = buildSignatureSessionKey(PLUGIN_SESSION_ID, modelForCacheKey, conversationKey, resolveProjectKey(parsedBody.project));
 
         if (requestObjects.length > 0) {
@@ -917,6 +1034,7 @@ export function prepareAntigravityRequest(
       } else {
         const requestPayload: Record<string, unknown> = { ...parsedBody };
 
+        const collapsedVariantId = takeCollapsedVariantId(requestPayload);
         const rawGenerationConfig = requestPayload.generationConfig as Record<string, unknown> | undefined;
         const extraBody = requestPayload.extra_body as Record<string, unknown> | undefined;
 
@@ -924,15 +1042,48 @@ export function prepareAntigravityRequest(
           requestPayload.providerOptions as Record<string, unknown> | undefined,
           rawGenerationConfig
         );
+        // Thinking tiers are advertised as separate backend IDs. The OpenCode
+        // model is the collapsed family base, so the selected variant decides
+        // which concrete backend ID this request is sent to.
+        const collapsedTarget = headerStyle === "antigravity"
+          ? resolveCollapsedModelTarget(effectiveModel, variantConfig, collapsedVariantId)
+          : undefined;
+        if (collapsedTarget) {
+          effectiveModel = collapsedTarget.model;
+          if (collapsedTarget.thinkingLevel) {
+            tierThinkingLevel = collapsedTarget.thinkingLevel;
+            tierThinkingBudget = undefined;
+          } else if (typeof collapsedTarget.thinkingBudget === "number") {
+            tierThinkingBudget = collapsedTarget.thinkingBudget;
+            tierThinkingLevel = undefined;
+          } else {
+            tierThinkingLevel = undefined;
+            tierThinkingBudget = undefined;
+            suppressThinkingConfig = collapsedTarget.suppressThinking === true;
+          }
+        }
+        // The marker/resolver result wins over a conflicting thinking setting
+        // from the request. A real base model with no resolved tier keeps the
+        // caller's configuration.
+        const collapsedResolvedThinking = collapsedTarget !== undefined && (
+          collapsedTarget.thinkingLevel !== undefined
+          || collapsedTarget.thinkingBudget !== undefined
+          || collapsedTarget.suppressThinking === true
+        );
+        // Reclassify from the selected backend ID: the family key may not carry
+        // the "thinking" marker that the concrete Claude tier uses.
+        isClaude = isClaudeModel(effectiveModel);
+        isClaudeThinking = isClaudeThinkingModel(effectiveModel);
         const isGemini3 = effectiveModel.toLowerCase().includes("gemini-3");
 
         log.debug(`[ThinkingResolution] rawModel=${rawModel} resolvedModel=${effectiveModel} resolvedTier=${tierThinkingLevel ?? "none"} variantLevel=${variantConfig?.thinkingLevel ?? "none"} variantBudget=${variantConfig?.thinkingBudget ?? "none"} providerOptions.google=${JSON.stringify((requestPayload.providerOptions as any)?.google ?? null)} generationConfig.thinkingConfig=${JSON.stringify((rawGenerationConfig as any)?.thinkingConfig ?? null)}`);
 
-        if (variantConfig?.thinkingLevel && isGemini3) {
+        if (!collapsedResolvedThinking && variantConfig?.thinkingLevel && isGemini3
+          && COLLAPSED_MODEL_TIERS.includes(variantConfig.thinkingLevel)) {
           // Gemini 3 native format - use thinkingLevel directly
           tierThinkingLevel = variantConfig.thinkingLevel;
           tierThinkingBudget = undefined;
-        } else if (variantConfig?.thinkingBudget) {
+        } else if (!collapsedResolvedThinking && variantConfig?.thinkingBudget) {
           if (isGemini3) {
             // Legacy format for Gemini 3 - convert with deprecation warning
             log.warn("[Deprecated] Using thinkingBudget for Gemini 3 model. Use thinkingLevel instead.");
@@ -1008,12 +1159,15 @@ export function prepareAntigravityRequest(
             parts: [{ text: "You are an AI image generator. Generate images based on user descriptions. Focus on creating high-quality, visually appealing images that match the user's request." }]
           };
         } else {
-          const finalThinkingConfig = resolveThinkingConfig(
-            effectiveUserThinkingConfig,
-            isClaudeSonnetNonThinking ? false : (resolved.isThinkingModel ?? isThinkingCapableModel(effectiveModel)),
-            isClaude,
-            hasAssistantHistory,
-          );
+          const finalThinkingConfig = suppressThinkingConfig
+            ? undefined
+            : resolveThinkingConfig(
+                effectiveUserThinkingConfig,
+                isClaudeSonnetNonThinking ? false : (isThinkingCapableModel(effectiveModel)
+                  || effectiveModel.toLowerCase().includes("gemini-2.5")),
+                isClaude,
+                hasAssistantHistory,
+              );
 
           const normalizedThinking = normalizeThinkingConfig(finalThinkingConfig);
           if (normalizedThinking) {
@@ -1319,7 +1473,8 @@ export function prepareAntigravityRequest(
         }
 
         const conversationKey = resolveConversationKey(requestPayload);
-        signatureSessionKey = buildSignatureSessionKey(PLUGIN_SESSION_ID, effectiveModel, conversationKey, resolveProjectKey(projectId));
+        const modelForCacheKey = getCollapsedModelBaseId(effectiveModel) ?? effectiveModel;
+        signatureSessionKey = buildSignatureSessionKey(PLUGIN_SESSION_ID, modelForCacheKey, conversationKey, resolveProjectKey(projectId));
 
         // For Claude models, filter out unsigned thinking blocks (required by Claude API)
         // Attempts to restore signatures from cache for multi-turn conversations

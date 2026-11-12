@@ -391,6 +391,47 @@ describe("OpenCode V2 adapter", () => {
     expect(String(tokenRequests[0]?.[1]?.body)).toContain("refresh_token=second")
   })
 
+  it("collapses advertised reasoning tiers into one model and dispatches the selected variant", async () => {
+    const network = mockNetwork()
+    const id = accountID(state.storage!.accounts[0]!)
+    const adapter = await host({
+      connection: false,
+      catalog: {
+        "gemini-3.8-flash-low": { displayName: "Gemini 3.8 Flash (Low)", maxTokens: 1048576, maxOutputTokens: 65536 },
+        "gemini-3.8-flash-medium": { displayName: "Gemini 3.8 Flash (Medium)", maxTokens: 1048576, maxOutputTokens: 65536 },
+        "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", maxTokens: 1048576, maxOutputTokens: 65536 },
+      },
+      // Old cached catalogs used per-tier account keys; they must still grant
+      // access to the collapsed family model.
+      catalogAccounts: {
+        "antigravity-gemini-3.8-flash-low": [id],
+        "antigravity-gemini-3.8-flash-medium": [id],
+        "antigravity-gemini-3.8-flash-high": [id],
+      },
+    })
+
+    const model = adapter.models.get("antigravity-gemini-3.8-flash")
+    expect(model).toBeDefined()
+    expect(adapter.models.has("antigravity-gemini-3.8-flash-high")).toBe(false)
+    expect(model?.variants.map(variant => String(variant.id))).toEqual(["low", "medium", "high"])
+    expect(model?.variants.find(variant => String(variant.id) === "high")?.settings)
+      .toEqual({ thinkingConfig: { thinkingLevel: "high" } })
+
+    const { sdk } = await adapter.sdk("antigravity-gemini-3.8-flash")
+    const response = await sdk("antigravity-gemini-3.8-flash").doStream({
+      prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+      providerOptions: { google: { thinkingConfig: { thinkingLevel: "high" } } },
+    })
+    const reader = response.stream.getReader()
+    while (!(await reader.read()).done) { /* drain */ }
+
+    const call = network.mock.calls.find(([input]) => (input instanceof Request ? input.url : String(input)).includes("streamGenerateContent"))
+    expect(call).toBeDefined()
+    const body = JSON.parse(await new Request(call![0], call![1]).text())
+    expect(body.model).toBe("gemini-3.8-flash-high")
+    expect(body.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: "high" })
+  })
+
   it("disables retired models from legacy config instead of exposing a native Google route", async () => {
     const adapter = await host({ catalog: { "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", maxTokens: 1048576, maxOutputTokens: 65536 } }, legacyOverride: true })
     expect(adapter.models.get("antigravity-gemini-3-pro")?.enabled).toBe(false)
@@ -710,7 +751,7 @@ describe("discovery and account eligibility regressions", () => {
 
   it("blocks a cached SDK after the only account supporting its model is disabled", async () => {
     const model = "antigravity-gemini-3.8-flash-high"
-    state.storage!.accounts[0]!.refreshToken = "only-low"
+    state.storage!.accounts[0]!.refreshToken = "only-other"
     state.storage!.accounts.push({ ...pool().accounts[0]!, email: "high@example.test", refreshToken: "only-high" })
     const network = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input instanceof Request ? input.url : String(input)
@@ -720,7 +761,14 @@ describe("discovery and account eligibility regressions", () => {
       return new Response(`data: ${JSON.stringify({ response: { candidates: [{ index: 0, content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP" }] } })}\n\n`, { headers: { "content-type": "text/event-stream" } })
     })
     const highAccount = accountID(state.storage!.accounts[1]!)
-    const adapter = await host({ connection: false, discoverModels: true, catalog: { "gemini-3.8-flash-high": {}, "gemini-3.8-flash-low": {} }, catalogAccounts: { [model]: [highAccount], "antigravity-gemini-3.8-flash-low": [accountID(state.storage!.accounts[0]!)] } })
+    // The two cached models are unrelated so neither collapses into a family;
+    // disabling the only account that advertises the high model must remove it.
+    const adapter = await host({
+      connection: false,
+      discoverModels: true,
+      catalog: { "gemini-3.8-flash-high": {}, "gemini-3.5-flash-lite": {} },
+      catalogAccounts: { [model]: [highAccount], "antigravity-gemini-3.5-flash-lite": [accountID(state.storage!.accounts[0]!)] },
+    })
     const { sdk } = await adapter.sdk(model)
     await stream(sdk, model)
     const context = { signal: new AbortController().signal, error: () => { throw new Error("Unexpected RPC error") } }

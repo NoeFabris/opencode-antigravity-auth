@@ -23,11 +23,21 @@ export {
   resolveModelWithVariant,
   resolveModelForHeaderStyle,
   getModelFamily,
+  getThinkingTierSuffix,
+  getThinkingTierBudget,
+  normalizeReasoningLabel,
+  parseDisplayReasoning,
+  registerCollapsedModelFamily,
+  resetCollapsedModelFamilies,
+  getCollapsedModelBaseId,
+  resolveCollapsedModelTarget,
+  COLLAPSED_TIER_BODY_KEY,
   MODEL_ALIASES,
   THINKING_TIER_BUDGETS,
   GEMINI_3_THINKING_LEVELS,
+  COLLAPSED_MODEL_TIERS,
 } from "./model-resolver";
-export type { VariantConfig } from "./model-resolver";
+export type { VariantConfig, CollapsedModelFamily, CollapsedModelTier, CollapsedModelTarget, DisplayReasoningLabel } from "./model-resolver";
 
 // Claude transforms
 export {

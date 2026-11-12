@@ -8,7 +8,13 @@ import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth.t
 import { ANTIGRAVITY_REDIRECT_URI } from "./constants.ts"
 import { createAntigravityPlugin } from "./plugin.ts"
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./plugin/auth.ts"
-import { OPENCODE_V2_MODEL_DEFINITIONS, buildAccountModelDefinitions, ModelCatalogCacheSchema } from "./plugin/config/models-v2.ts"
+import {
+  OPENCODE_V2_MODEL_DEFINITIONS,
+  buildAccountModelDefinitions,
+  buildAccountModelKeys,
+  normalizeModelAccountKeys,
+  ModelCatalogCacheSchema,
+} from "./plugin/config/models-v2.ts"
 import { accountID, accountPoolIdentity, accountCredentialsIdentity, loadManagedAccounts, registerAccountManagement } from "./plugin/account-management.ts"
 import { checkAccountsQuota, type AvailableModel } from "./plugin/quota.ts"
 import { createLogger } from "./plugin/logger.ts"
@@ -17,7 +23,7 @@ import { executeSearch, type SearchArgs } from "./plugin/search.ts"
 import { startOAuthListener, type OAuthListener } from "./plugin/server.ts"
 import { loadAccounts, matchesAccountToken, saveAccountCredentials, updateAccountCredentials, updateAccounts, type AccountMetadataV3 } from "./plugin/storage.ts"
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./plugin/token.ts"
-import { resolveModelWithTier } from "./plugin/transform/model-resolver.ts"
+import { getCollapsedModelBaseId, resolveModelWithTier } from "./plugin/transform/model-resolver.ts"
 import type { AuthDetails, LoaderResult, OAuthAuthDetails, PluginClient } from "./plugin/types.ts"
 
 const PROVIDER_ID = "google"
@@ -94,7 +100,17 @@ export const AntigravityV2Plugin = Plugin.define({
       directory: ctx.location.directory,
       runtimeVersion: 2,
       canUseAccount: (account, model) => {
-        const eligible = modelAccounts[`antigravity-${resolveModelWithTier(model).actualModel}`]
+        // Collapsed families share one OpenCode model, while a resolved request
+        // may carry a tiered backend ID. Check eligibility against the family,
+        // and preserve a registered family key before legacy defaulting can
+        // rewrite it to an unadvertised tier.
+        const familyBase = getCollapsedModelBaseId(model)
+        const actualModel = resolveModelWithTier(model).actualModel
+        const baseModel = familyBase ?? getCollapsedModelBaseId(actualModel) ?? actualModel
+        // A catalog that only advertises one tier keeps its tiered key, while a
+        // collapsed multi-tier catalog uses the family base key.
+        const eligible = modelAccounts[`antigravity-${baseModel}`]
+          ?? modelAccounts[`antigravity-${actualModel}`]
         return !accountCatalogLoaded || !!eligible?.includes(accountID(account))
       },
       fetch: (input, init) => {
@@ -116,7 +132,9 @@ export const AntigravityV2Plugin = Plugin.define({
     const validCache = cached?.identity === accountPoolIdentity(saved?.accounts ?? []) && cached.models
     let modelDefinitions = validCache ? buildAccountModelDefinitions(validCache) : OPENCODE_V2_MODEL_DEFINITIONS
     accountCatalogLoaded = !!validCache
-    if (validCache) modelAccounts = cached.accounts
+    // Older cache entries used per-tier keys (antigravity-gemini-3.8-flash-low).
+    // Normalize them to the collapsed family key without discarding the catalog.
+    if (validCache && cached) modelAccounts = normalizeModelAccountKeys(cached.accounts, validCache)
     let discoveryGeneration = 0
     let catalogSnapshot: Parameters<typeof ctx.storage.set>[1] | undefined
     const catalogWrites = new Set<Promise<void>>()
@@ -141,7 +159,17 @@ export const AntigravityV2Plugin = Plugin.define({
         signal: lifetime.signal,
       })
       const successful = results.filter(result => result.quota?.models && Object.keys(result.quota.models).length)
+      // Build the global catalog first so per-account eligibility can be
+      // expressed in collapsed family keys even when an account only reports
+      // one member of a reasoning-tier family.
       const models: Record<string, AvailableModel> = {}
+      const usable = (value: AvailableModel) => !value.disabled && value.selectable !== false
+      for (const result of results) {
+        for (const [id, model] of Object.entries(result.quota?.models ?? {})) {
+          const current = models[id]
+          if (!current || !usable(current) || usable(model)) models[id] = model
+        }
+      }
       const eligibleAccounts: Record<string, string[]> = {}
       if (discovery === discoveryGeneration) {
         invalidateLoader()
@@ -158,12 +186,8 @@ export const AntigravityV2Plugin = Plugin.define({
           }
           if (account.enabled === false) continue
           if (!result.quota?.models) continue
-          for (const id of Object.keys(buildAccountModelDefinitions(result.quota.models))) {
+          for (const id of buildAccountModelKeys(result.quota.models, models)) {
             (eligibleAccounts[id] ??= []).push(accountID(account))
-          }
-          for (const [id, model] of Object.entries(result.quota?.models ?? {})) {
-            const usable = (value: AvailableModel) => !value.disabled && value.selectable !== false
-            if (!models[id] || !usable(models[id]) || usable(model)) models[id] = model
           }
         }
       })
@@ -172,9 +196,9 @@ export const AntigravityV2Plugin = Plugin.define({
       if (disposed || discovery !== discoveryGeneration || accountPoolIdentity(latest?.accounts ?? []) !== accountPoolIdentity(accounts)) return Object.keys(modelDefinitions).length
       if (!successful.length) throw new Error(results.find(result => result.error)?.error ?? "Google did not return a model catalog. Check account access and try again.")
       modelDefinitions = buildAccountModelDefinitions(models)
-      modelAccounts = eligibleAccounts
+      modelAccounts = normalizeModelAccountKeys(eligibleAccounts, models)
       accountCatalogLoaded = true
-      catalogSnapshot = JSON.parse(JSON.stringify({ version: 3, identity: accountPoolIdentity(latest?.accounts ?? []), updatedAt: Date.now(), models, accounts: eligibleAccounts }))
+      catalogSnapshot = JSON.parse(JSON.stringify({ version: 3, identity: accountPoolIdentity(latest?.accounts ?? []), updatedAt: Date.now(), models, accounts: modelAccounts }))
       const writing = writeCatalog()
       catalogWrites.add(writing)
       try { await writing } finally { catalogWrites.delete(writing) }
