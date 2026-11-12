@@ -15,17 +15,12 @@ export const ModelCatalogCacheSchema = z.object({
 
 // Used before login or when discovery is unavailable. Once connected, Google's
 // catalog replaces this list, including model IDs, names and token limits.
+// Every Antigravity definition doubles as a fallback entry so newly added
+// models stay visible even when live discovery has not completed yet.
 const fallbackModels: Record<string, OpencodeModelDefinition> = Object.fromEntries(
-  ["antigravity-gemini-3-flash", "antigravity-claude-sonnet-4-6", "antigravity-claude-opus-4-6-thinking"]
-    .flatMap(id => OPENCODE_MODEL_DEFINITIONS[id] ? [[id, OPENCODE_MODEL_DEFINITIONS[id]]] : []),
+  Object.entries(OPENCODE_MODEL_DEFINITIONS)
+    .filter(([id]) => id.startsWith("antigravity-")),
 )
-for (const tier of ["low", "medium", "high"]) {
-  fallbackModels[`antigravity-gemini-3.8-flash-${tier}`] = {
-    name: `Gemini 3.8 Flash (${tier}) (Antigravity)`,
-    limit: { context: 1048576, output: 65536 },
-    modalities: { input: ["text", "image", "pdf"], output: ["text"] },
-  }
-}
 
 function definition(model: OpencodeModelDefinition) {
   return {
@@ -48,6 +43,13 @@ export const OPENCODE_V2_MODEL_DEFINITIONS = Object.fromEntries(
 )
 export type V2ModelDefinitions = typeof OPENCODE_V2_MODEL_DEFINITIONS
 
+/**
+ * Builds OpenCode V2 model definitions from the account-specific catalog.
+ *
+ * Filters the catalog down to selectable chat models (gemini-, claude-, and
+ * gpt-oss- prefixed IDs) and falls back to each model's known static definition
+ * for name, limit, and modalities when the catalog omits them.
+ */
 export function buildAccountModelDefinitions(models: Record<string, AvailableModel>): V2ModelDefinitions {
   const definitions: V2ModelDefinitions = {}
   for (const [id, model] of Object.entries(models)) {
@@ -62,7 +64,9 @@ export function buildAccountModelDefinitions(models: Record<string, AvailableMod
         context: model.maxTokens ?? known?.limit.context ?? 200000,
         output: model.maxOutputTokens ?? known?.limit.output ?? 64000,
       },
-      modalities: { input: model.supportsImages === false ? ["text"] : ["text", "image", "pdf"], output: ["text"] },
+      modalities: model.supportsImages === false
+        ? { input: ["text"], output: ["text"] }
+        : known?.modalities ?? { input: ["text", "image", "pdf"], output: ["text"] },
       variants: known?.variants,
     })
   }
