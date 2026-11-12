@@ -12,9 +12,11 @@ Unofficial plugin. Google may restrict accounts using third-party clients.
 
 ## Special Thanks
 
-<a href="https://www.infistar.cc/register?aff=TDPL8KBJ&ref_source=link">
-  <img src="assets/sponsors/infistar-banner.png" alt="Infistar.cc, leading AI models with one API key" width="100%">
-</a>
+<p align="center">
+  <a href="https://www.infistar.cc/register?aff=TDPL8KBJ&ref_source=link">
+    <img src="assets/sponsors/infistar-banner.png" alt="Infistar.cc, leading AI models with one API key" width="600">
+  </a>
+</p>
 
 Claude, GPT, Gemini and more with one API key at [Infistar.cc](https://www.infistar.cc/register?aff=TDPL8KBJ&ref_source=link). Sign up through the link to get CNY 5 in free credit.
 
