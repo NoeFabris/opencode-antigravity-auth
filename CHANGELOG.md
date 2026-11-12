@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Store accounts, the signature cache, and debug logs under OpenCode's data
+  directory (`~/.local/share/opencode/antigravity/`) instead of the config
+  directory that OpenCode manages. Existing account and cache files are moved
+  automatically on first start; new logs go to the new location.
+
 ## [2.1.2] - 2026-10-27
 
 ### Added

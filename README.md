@@ -63,7 +63,7 @@ Inside OpenCode, open **`/antigravity`** (or **`/ag`**) to:
 
 The account list shows the lowest cached quota across Claude, Gemini Pro, and Gemini Flash. Choose **Check quotas / verify enabled accounts** to refresh the saved quota data. Refresh quotas if an older cache shows a percentage without a reset time.
 
-Accounts are stored in `~/.config/opencode/antigravity-accounts.json`. Back up this file before moving machines; it contains credentials. Disabling an account excludes it from rotation and routine quota checks.
+Accounts are stored in `~/.local/share/opencode/antigravity/antigravity-accounts.json`. Back up this file before moving machines; it contains credentials. Disabling an account excludes it from rotation and routine quota checks. Older releases kept the same file in `~/.config/opencode`; it is moved automatically on first start.
 
 ## Development
 

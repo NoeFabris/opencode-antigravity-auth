@@ -1,8 +1,8 @@
 import { createWriteStream, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { env } from "node:process";
-import { homedir } from "node:os";
 import type { AntigravityConfig } from "./config";
+import { getPluginDataDir, getPluginLogsDir } from "./paths";
 import {
   deriveDebugPolicy,
   formatAccountContextLabel,
@@ -33,22 +33,10 @@ interface DebugState {
 let debugState: DebugState | null = null;
 
 /**
- * Get the OS-specific config directory.
- */
-function getConfigDir(): string {
-  const platform = process.platform;
-  if (platform === "win32") {
-    return join(env.APPDATA || join(homedir(), "AppData", "Roaming"), "opencode");
-  }
-  const xdgConfig = env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(xdgConfig, "opencode");
-}
-
-/**
  * Returns the logs directory, creating it if needed.
  */
 function getLogsDir(customLogDir?: string): string {
-  const logsDir = customLogDir || join(getConfigDir(), "antigravity-logs");
+  const logsDir = customLogDir || getPluginLogsDir();
 
   try {
     mkdirSync(logsDir, { recursive: true });
@@ -140,7 +128,7 @@ export function initializeDebug(config: AntigravityConfig): void {
   const logWriter = createLogWriter(logFilePath);
 
   if (debugEnabled) {
-    ensureGitignoreSync(getConfigDir());
+    ensureGitignoreSync(getPluginDataDir());
   }
 
   debugState = {

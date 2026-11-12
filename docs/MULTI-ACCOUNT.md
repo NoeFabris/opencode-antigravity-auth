@@ -123,7 +123,7 @@ Choose `a` to add more accounts while keeping existing ones.
 
 ## Account Storage
 
-Accounts are stored in `~/.config/opencode/antigravity-accounts.json`:
+Accounts are stored in `~/.local/share/opencode/antigravity/antigravity-accounts.json`:
 
 ```json
 {
@@ -171,7 +171,7 @@ If Google revokes a token (e.g., password change, security event), you'll see `i
 To manually reset:
 
 ```bash
-rm ~/.config/opencode/antigravity-accounts.json
+rm ~/.local/share/opencode/antigravity/antigravity-accounts.json
 opencode auth login
 ```
 

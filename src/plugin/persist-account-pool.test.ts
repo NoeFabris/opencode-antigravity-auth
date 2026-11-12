@@ -243,7 +243,7 @@ describe("persistAccountPool behavior (Issue #89)", () => {
   describe("THE BUG: error handling when loadAccounts fails (Issue #89)", () => {
     /**
      * Current buggy behavior:
-     * 1. User has accounts saved in ~/.config/opencode/antigravity-accounts.json
+     * 1. User has accounts saved in the plugin's antigravity-accounts.json
      * 2. loadAccounts() fails (permission error, JSON parse error, etc.)
      * 3. loadAccounts() returns null
      * 4. persistAccountPool treats null as "no accounts exist"

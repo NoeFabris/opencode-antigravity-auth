@@ -2,20 +2,20 @@
 
 Solutions to common issues with the Antigravity Auth plugin.
 
-> **Quick Reset**: Most issues can be resolved by deleting `~/.config/opencode/antigravity-accounts.json` and running `opencode auth login` again.
+> **Quick Reset**: Most issues can be resolved by deleting `~/.local/share/opencode/antigravity/antigravity-accounts.json` and running `opencode auth login` again.
 
 ---
 
 ## Configuration Paths (All Platforms)
 
-OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
+OpenCode keeps its config in `~/.config/opencode/` on **all platforms** including Windows. The plugin keeps mutable state in the data directory shown below.
 
 | File | Path |
 |------|------|
 | Main config | `~/.config/opencode/opencode.json` |
-| Accounts | `~/.config/opencode/antigravity-accounts.json` |
+| Accounts | `~/.local/share/opencode/antigravity/antigravity-accounts.json` |
 | Plugin config | `~/.config/opencode/antigravity.json` |
-| Debug logs | `~/.config/opencode/antigravity-logs/` |
+| Debug logs | `~/.local/share/opencode/antigravity/antigravity-logs/` |
 
 > **Windows users**: `~` resolves to your user home directory (e.g., `C:\Users\YourName`). Do NOT use `%APPDATA%`.
 
@@ -41,7 +41,7 @@ Switch to a Google API-key connection to use the native catalog.
 ### Auth problems
 Delete the accounts file and re-authenticate:
 ```bash
-rm ~/.config/opencode/antigravity-accounts.json
+rm ~/.local/share/opencode/antigravity/antigravity-accounts.json
 opencode auth login
 ```
 
@@ -64,7 +64,7 @@ Stop-Process -Name "opencode" -Force -ErrorAction SilentlyContinue
 
 **macOS/Linux:**
 ```bash
-rm -f ~/.config/opencode/antigravity-accounts.json
+rm -f ~/.local/share/opencode/antigravity/antigravity-accounts.json
 rm -rf ~/.cache/opencode/node_modules/opencode-antigravity-auth
 rm -rf ~/.bun/install/cache/opencode-antigravity-auth*
 opencode auth login
@@ -72,7 +72,7 @@ opencode auth login
 
 **Windows (PowerShell):**
 ```powershell
-Remove-Item "$env:APPDATA\opencode\antigravity-accounts.json" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.local\share\opencode\antigravity\antigravity-accounts.json" -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:LOCALAPPDATA\opencode\Cache\node_modules\opencode-antigravity-auth" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:USERPROFILE\.bun\install\cache\opencode-antigravity-auth*" -Recurse -Force -ErrorAction SilentlyContinue
 opencode auth login
@@ -146,7 +146,7 @@ When using Gemini CLI models, you may see:
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create or select a project
 3. Enable the **Gemini for Google Cloud API** (`cloudaicompanion.googleapis.com`)
-4. Add `projectId` to your account in `~/.config/opencode/antigravity-accounts.json`:
+4. Add `projectId` to your account in `~/.local/share/opencode/antigravity/antigravity-accounts.json`:
 
 ```json
 {
@@ -268,7 +268,7 @@ If you only have one account, you'll likely have a better experience using [Anti
 <summary><b>5. Fresh account setup</b></summary>
 
 If adding new accounts:
-1. Delete accounts file: `rm ~/.config/opencode/antigravity-accounts.json`
+1. Delete accounts file: `rm ~/.local/share/opencode/antigravity/antigravity-accounts.json`
 2. Re-authenticate: `opencode auth login`
 3. Update to latest beta: `"plugin": ["opencode-antigravity-auth@beta"]`
 4. Consider "warming up" the account in Antigravity IDE first
@@ -290,7 +290,7 @@ If you're seeing unusual rate limit behavior, please share in a [GitHub issue](h
 
 **Workaround:**
 1. Stop OpenCode
-2. Clean up: `rm ~/.config/opencode/*.tmp`
+2. Clean up: `rm ~/.local/share/opencode/antigravity/*.tmp`
 3. Add more accounts or wait for rate limit to expire
 
 ---
@@ -375,7 +375,7 @@ ssh -L 51121:localhost:51121 user@remote
 
 When copying `antigravity-accounts.json` to a new machine:
 1. Ensure the plugin is installed: `"plugin": ["opencode-antigravity-auth@beta"]`
-2. Copy `~/.config/opencode/antigravity-accounts.json`
+2. Copy `~/.local/share/opencode/antigravity/antigravity-accounts.json`
 3. If you get "API key missing" error, the refresh token may be invalid — re-authenticate
 
 ---
@@ -463,7 +463,7 @@ Enable debug logging:
 }
 ```
 
-Logs are in `~/.config/opencode/antigravity-logs/`.
+Logs are in `~/.local/share/opencode/antigravity/antigravity-logs/`.
 
 ---
 

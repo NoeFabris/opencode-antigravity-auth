@@ -193,7 +193,7 @@ Claude rejects unsupported JSON Schema features. The plugin uses an **allowlist 
 
 ### Account Storage
 
-Location: `~/.config/opencode/antigravity-accounts.json`
+Location: `~/.local/share/opencode/antigravity/antigravity-accounts.json`
 
 Contains OAuth refresh tokens - treat as sensitive.
 
@@ -273,7 +273,7 @@ export OPENCODE_ANTIGRAVITY_DEBUG_TUI=1  # TUI log panel output
 
 ### Log Location
 
-`~/.config/opencode/antigravity-logs/`
+`~/.local/share/opencode/antigravity/antigravity-logs/`
 
 ### What To Check
 

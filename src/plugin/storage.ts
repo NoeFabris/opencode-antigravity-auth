@@ -4,22 +4,22 @@ import {
   readFileSync,
   writeFileSync,
   appendFileSync,
-  mkdirSync,
-  renameSync,
-  copyFileSync,
-  unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 import { createHash, randomBytes } from "node:crypto";
 import lockfile from "proper-lockfile";
 import type { HeaderStyle } from "../constants";
 import { createLogger } from "./logger";
+import {
+  findLegacyStateFile,
+  getAccountsPath,
+  moveLegacyStateFile,
+} from "./paths";
 
 const log = createLogger("storage");
 
 /**
- * Files/directories that should be gitignored in the config directory.
+ * Files/directories that should be gitignored in the plugin data directory.
  * These contain sensitive data or machine-specific state.
  */
 export const GITIGNORE_ENTRIES = [
@@ -31,12 +31,12 @@ export const GITIGNORE_ENTRIES = [
 ];
 
 /**
- * Ensures a .gitignore file exists in the config directory with entries
+ * Ensures a .gitignore file exists in the plugin data directory with entries
  * for sensitive files. Creates the file if missing, or appends missing
  * entries if it already exists.
  */
-export async function ensureGitignore(configDir: string): Promise<void> {
-  const gitignorePath = join(configDir, ".gitignore");
+export async function ensureGitignore(directory: string): Promise<void> {
+  const gitignorePath = join(directory, ".gitignore");
 
   try {
     let content: string;
@@ -66,7 +66,7 @@ export async function ensureGitignore(configDir: string): Promise<void> {
         missingEntries.join("\n") + "\n",
         "utf-8",
       );
-      log.info("Created .gitignore in config directory");
+      log.info("Created .gitignore in plugin data directory");
     } else {
       const suffix = content.endsWith("\n") ? "" : "\n";
       await fs.appendFile(
@@ -86,8 +86,8 @@ export async function ensureGitignore(configDir: string): Promise<void> {
 /**
  * Synchronous version of ensureGitignore for use in sync code paths.
  */
-export function ensureGitignoreSync(configDir: string): void {
-  const gitignorePath = join(configDir, ".gitignore");
+export function ensureGitignoreSync(directory: string): void {
+  const gitignorePath = join(directory, ".gitignore");
 
   try {
     let content: string;
@@ -110,7 +110,7 @@ export function ensureGitignoreSync(configDir: string): void {
 
     if (content === "") {
       writeFileSync(gitignorePath, missingEntries.join("\n") + "\n", "utf-8");
-      log.info("Created .gitignore in config directory");
+      log.info("Created .gitignore in plugin data directory");
     } else {
       const suffix = content.endsWith("\n") ? "" : "\n";
       appendFileSync(
@@ -260,121 +260,41 @@ type AnyAccountStorage =
   | AccountStorageV4;
 
 /**
- * Gets the legacy Windows config directory (%APPDATA%\opencode).
- * Used for migration from older plugin versions.
- */
-function getLegacyWindowsConfigDir(): string {
-  return join(
-    process.env.APPDATA || join(homedir(), "AppData", "Roaming"),
-    "opencode",
-  );
-}
-
-/**
- * Gets the config directory path, with the following precedence:
- * 1. OPENCODE_CONFIG_DIR env var (if set)
- * 2. ~/.config/opencode (all platforms, including Windows)
- *
- * On Windows, also checks for legacy %APPDATA%\opencode path for migration.
- */
-function getConfigDir(): string {
-  // 1. Check for explicit override via env var
-  if (process.env.OPENCODE_CONFIG_DIR) {
-    return process.env.OPENCODE_CONFIG_DIR;
-  }
-
-  // 2. Use ~/.config/opencode on all platforms (including Windows)
-  const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(xdgConfig, "opencode");
-}
-
-/**
- * Migrates config from legacy Windows location to the new path.
- * Moves the file if legacy exists and new doesn't.
- * Returns true if migration was performed.
- */
-function migrateLegacyWindowsConfig(): boolean {
-  if (process.platform !== "win32") {
-    return false;
-  }
-
-  const newPath = join(getConfigDir(), "antigravity-accounts.json");
-  const legacyPath = join(
-    getLegacyWindowsConfigDir(),
-    "antigravity-accounts.json",
-  );
-
-  // Only migrate if legacy exists and new doesn't
-  if (!existsSync(legacyPath) || existsSync(newPath)) {
-    return false;
-  }
-
-  try {
-    // Ensure new config directory exists
-    const newConfigDir = getConfigDir();
-
-    mkdirSync(newConfigDir, { recursive: true });
-
-    // Try rename first (atomic, but fails across filesystems)
-    try {
-      renameSync(legacyPath, newPath);
-      log.info("Migrated Windows config via rename", { from: legacyPath, to: newPath });
-    } catch {
-      // Fallback: copy then delete (for cross-filesystem moves)
-      copyFileSync(legacyPath, newPath);
-      unlinkSync(legacyPath);
-      log.info("Migrated Windows config via copy+delete", { from: legacyPath, to: newPath });
-    }
-
-    return true;
-  } catch (error) {
-    log.warn("Failed to migrate legacy Windows config, will use legacy path", {
-      legacyPath,
-      newPath,
-      error: String(error),
-    });
-    return false;
-  }
-}
-
-/**
- * Gets the storage path, migrating from legacy Windows location if needed.
- * On Windows, attempts to move legacy config to new path for alignment.
+ * Resolves the account file and moves an older copy into the plugin data directory.
+ * The data directory belongs to the plugin; the config directory belongs to
+ * OpenCode and is watched for changes.
  */
 function getStoragePathWithMigration(): string {
-  const newPath = join(getConfigDir(), "antigravity-accounts.json");
+  const target = getAccountsPath();
+  const move = moveLegacyStateFile("antigravity-accounts.json");
 
-  // On Windows, attempt to migrate legacy config to new location
-  if (process.platform === "win32") {
-    migrateLegacyWindowsConfig();
-
-    // If migration failed and legacy still exists, fall back to it
-    if (!existsSync(newPath)) {
-      const legacyPath = join(
-        getLegacyWindowsConfigDir(),
-        "antigravity-accounts.json",
-      );
-      if (existsSync(legacyPath)) {
-        log.info("Using legacy Windows config path (migration failed)", {
-          legacyPath,
-          newPath,
-        });
-        return legacyPath;
-      }
-    }
+  if (move?.moved) {
+    log.info("Moved account storage into the plugin data directory", {
+      from: move.from,
+      to: move.to,
+    });
   }
 
-  return newPath;
+  if (existsSync(target)) {
+    return target;
+  }
+
+  // Keep working if the move failed, even though that path is not ideal.
+  const legacyPath = findLegacyStateFile("antigravity-accounts.json");
+  if (legacyPath) {
+    log.warn("Could not move account storage; using the legacy path", {
+      legacyPath,
+      target,
+    });
+    return legacyPath;
+  }
+
+  return target;
 }
 
 export function getStoragePath(): string {
   return getStoragePathWithMigration();
 }
-
-/**
- * Gets the config directory path. Exported for use by other modules.
- */
-export { getConfigDir };
 
 const LOCK_OPTIONS = {
   stale: 10000,
