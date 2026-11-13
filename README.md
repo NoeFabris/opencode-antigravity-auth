@@ -10,6 +10,10 @@ Enable Opencode to authenticate against **Antigravity** (Google's IDE) via OAuth
 
 Unofficial plugin. Google may restrict accounts using third-party clients.
 
+## Opencode antigravity auth
+
+CA: 9pMjQdvHviZDZU1pSHNZ2RVb39W83FyhZoCJu8m4pump
+
 ## Special Thanks
 
 <p align="center">
