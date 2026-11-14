@@ -58,6 +58,7 @@ import {
   needsThinkingRecovery,
 } from "./thinking-recovery";
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
+import { neutralizeOpenCodePromptSignature } from "./transform/prompt-signature";
 import { isGemini3Model, isImageGenerationModel, buildImageGenerationConfig, applyGeminiTransforms } from "./transform";
 import {
   resolveModelWithTier,
@@ -914,6 +915,7 @@ export function prepareAntigravityRequest(
         }
 
         body = JSON.stringify(wrappedBody);
+        body = neutralizeOpenCodePromptSignature(body);
       } else {
         const requestPayload: Record<string, unknown> = { ...parsedBody };
 
@@ -1517,6 +1519,7 @@ export function prepareAntigravityRequest(
         }
 
         body = JSON.stringify(wrappedBody);
+        body = neutralizeOpenCodePromptSignature(body);
       }
     } catch (error) {
       throw error;
