@@ -8,6 +8,7 @@ import {
 } from "./request";
 import { DEFAULT_CONFIG } from "./config";
 import { initializeDebug } from "./debug";
+import { defaultSignatureStore } from "./stores/signature-store";
 import { SKIP_THOUGHT_SIGNATURE, getAntigravityUserAgent } from "../constants";
 import * as config from "./config";
 import type { SignatureStore, ThoughtBuffer, StreamingCallbacks, StreamingOptions } from "./core/streaming/types";
@@ -1337,6 +1338,71 @@ it("removes x-api-key header", () => {
         expect(() => JSON.parse(bodyStr)).not.toThrow();
         const parsed = JSON.parse(bodyStr);
         expect(parsed.request.systemInstruction.parts[0].text).toContain("You are Antigravity assistant.");
+      });
+
+      it("sanitizes wrapped requests after cached thinking injection", () => {
+        withKeepThinking(true, () => {
+          const conversationId = "conv-thinking-sig-test";
+          const model = "claude-sonnet-4-5-thinking";
+          const modelForCache = "claude-sonnet-4-5-thinking";
+          const projectKey = resolveProjectKey(mockProjectId);
+          const signatureSessionKey = buildSignatureSessionKey(
+            getPluginSessionId(),
+            modelForCache,
+            conversationId,
+            projectKey,
+          );
+
+          // Seed store with thinking text containing the prompt signature
+          defaultSignatureStore.set(signatureSessionKey, {
+            text: "I am thinking about tools.opencode.session_move implementation",
+            signature: "valid_signed_thinking_signature_data_for_claude_model_testing_12345",
+          });
+
+          // Wrapped body with Claude thinking model and tool use, triggering injection
+          const wrappedBody = {
+            project: mockProjectId,
+            request: {
+              conversationId,
+              contents: [
+                {
+                  role: "assistant",
+                  parts: [
+                    {
+                      functionCall: {
+                        name: "test_tool",
+                        args: {},
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+
+          const result = prepareAntigravityRequest(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+            { method: "POST", body: JSON.stringify(wrappedBody) },
+            mockAccessToken,
+            mockProjectId,
+            undefined,
+            "antigravity",
+          );
+
+          const bodyStr = result.init.body as string;
+          expect(() => JSON.parse(bodyStr)).not.toThrow();
+
+          // Must NOT contain raw tools.opencode.
+          expect(bodyStr).not.toContain("tools.opencode.session_move");
+          // Must contain neutralized bracket access
+          expect(bodyStr).toContain('tools[\\"opencode\\"].session_move');
+
+          const parsed = JSON.parse(bodyStr);
+          const thinkingPart = parsed.request.contents[0].parts.find((p: any) => p.thought === true);
+          expect(thinkingPart).toBeDefined();
+          expect(thinkingPart.text).toContain('tools["opencode"].session_move');
+          expect(thinkingPart.text).not.toContain("tools.opencode.session_move");
+        });
       });
     });
   });

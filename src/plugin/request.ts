@@ -876,7 +876,6 @@ export function prepareAntigravityRequest(
           // Use stable session ID for signature caching across multi-turn conversations
           (req as any).sessionId = signatureSessionKey;
           stripInjectedDebugFromRequestPayload(req as Record<string, unknown>);
-          sanitizeOpenCodePromptSignatureInPlace(req as Record<string, unknown>);
 
           if (isClaude) {
             // Step 0: Sanitize cross-model metadata (strips Gemini signatures when sending to Claude)
@@ -900,6 +899,9 @@ export function prepareAntigravityRequest(
             // Step 3: Apply tool pairing fixes (ID assignment, response matching, orphan recovery)
             applyToolPairingFixes(req as Record<string, unknown>, true);
           }
+
+          // Sanitize after Claude transformations so any injected cached thinking text is also covered
+          sanitizeOpenCodePromptSignatureInPlace(req as Record<string, unknown>);
         }
 
         if (isClaudeThinking && keepThinkingEnabled && sessionId) {
