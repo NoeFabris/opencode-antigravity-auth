@@ -1256,6 +1256,89 @@ it("removes x-api-key header", () => {
         expect(result.effectiveModel).toBe("gemini-2.5-flash");
       });
     });
+
+    describe("Issue #622: OpenCode Code Mode prompt signature neutralization", () => {
+      it("neutralizes signature in unwrapped body format and preserves valid JSON", () => {
+        const unwrappedBody = {
+          contents: [{ parts: [{ text: "Hello" }] }],
+          systemInstruction: {
+            role: "user",
+            parts: [{ text: "Code Mode:\n - tools.opencode.session_move({\n  directory: string\n})" }],
+          },
+        };
+
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.8-flash-medium:generateContent",
+          { method: "POST", body: JSON.stringify(unwrappedBody) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+        );
+
+        const bodyStr = result.init.body as string;
+        expect(() => JSON.parse(bodyStr)).not.toThrow();
+
+        const parsed = JSON.parse(bodyStr);
+        const sysText = parsed.request.systemInstruction.parts[0].text;
+        expect(sysText).not.toContain("tools.opencode.");
+        expect(sysText).toContain('tools["opencode"].session_move');
+      });
+
+      it("neutralizes signature in wrapped body format and preserves valid JSON", () => {
+        const wrappedBody = {
+          project: "my-project",
+          request: {
+            contents: [{ parts: [{ text: "Hello" }] }],
+            systemInstruction: {
+              role: "user",
+              parts: [{ text: "Tools:\n - tools.opencode.session_move" }],
+            },
+          },
+        };
+
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.8-flash-medium:generateContent",
+          { method: "POST", body: JSON.stringify(wrappedBody) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+        );
+
+        const bodyStr = result.init.body as string;
+        expect(() => JSON.parse(bodyStr)).not.toThrow();
+
+        const parsed = JSON.parse(bodyStr);
+        const sysText = parsed.request.systemInstruction.parts[0].text;
+        expect(sysText).not.toContain("tools.opencode.");
+        expect(sysText).toContain('tools["opencode"].session_move');
+      });
+
+      it("leaves requests without signature unchanged in terms of semantics", () => {
+        const unwrappedBody = {
+          contents: [{ parts: [{ text: "Plain message" }] }],
+          systemInstruction: {
+            role: "user",
+            parts: [{ text: "You are Antigravity assistant." }],
+          },
+        };
+
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/antigravity-gemini-3.8-flash-medium:generateContent",
+          { method: "POST", body: JSON.stringify(unwrappedBody) },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity",
+        );
+
+        const bodyStr = result.init.body as string;
+        expect(() => JSON.parse(bodyStr)).not.toThrow();
+        const parsed = JSON.parse(bodyStr);
+        expect(parsed.request.systemInstruction.parts[0].text).toContain("You are Antigravity assistant.");
+      });
+    });
   });
 
   describe("transformAntigravityResponse", () => {

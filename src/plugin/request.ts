@@ -58,7 +58,7 @@ import {
   needsThinkingRecovery,
 } from "./thinking-recovery";
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
-import { neutralizeOpenCodePromptSignature } from "./transform/prompt-signature";
+import { sanitizeOpenCodePromptSignatureInPlace } from "./transform/prompt-signature";
 import { isGemini3Model, isImageGenerationModel, buildImageGenerationConfig, applyGeminiTransforms } from "./transform";
 import {
   resolveModelWithTier,
@@ -876,6 +876,7 @@ export function prepareAntigravityRequest(
           // Use stable session ID for signature caching across multi-turn conversations
           (req as any).sessionId = signatureSessionKey;
           stripInjectedDebugFromRequestPayload(req as Record<string, unknown>);
+          sanitizeOpenCodePromptSignatureInPlace(req as Record<string, unknown>);
 
           if (isClaude) {
             // Step 0: Sanitize cross-model metadata (strips Gemini signatures when sending to Claude)
@@ -915,7 +916,6 @@ export function prepareAntigravityRequest(
         }
 
         body = JSON.stringify(wrappedBody);
-        body = neutralizeOpenCodePromptSignature(body);
       } else {
         const requestPayload: Record<string, unknown> = { ...parsedBody };
 
@@ -1467,6 +1467,7 @@ export function prepareAntigravityRequest(
 
         stripInjectedDebugFromRequestPayload(requestPayload);
         sanitizeRequestPayloadForAntigravity(requestPayload);
+        sanitizeOpenCodePromptSignatureInPlace(requestPayload);
 
         const effectiveProjectId = projectId?.trim() || (headerStyle === "antigravity" ? generateSyntheticProjectId() : "");
         resolvedProjectId = effectiveProjectId;
@@ -1519,7 +1520,6 @@ export function prepareAntigravityRequest(
         }
 
         body = JSON.stringify(wrappedBody);
-        body = neutralizeOpenCodePromptSignature(body);
       }
     } catch (error) {
       throw error;
