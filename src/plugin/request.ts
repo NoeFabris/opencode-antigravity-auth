@@ -58,6 +58,7 @@ import {
   needsThinkingRecovery,
 } from "./thinking-recovery";
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
+import { sanitizeOpenCodePromptSignatureInPlace } from "./transform/prompt-signature";
 import { isGemini3Model, isImageGenerationModel, buildImageGenerationConfig, applyGeminiTransforms } from "./transform";
 import {
   resolveModelWithTier,
@@ -898,6 +899,9 @@ export function prepareAntigravityRequest(
             // Step 3: Apply tool pairing fixes (ID assignment, response matching, orphan recovery)
             applyToolPairingFixes(req as Record<string, unknown>, true);
           }
+
+          // Sanitize after Claude transformations so any injected cached thinking text is also covered
+          sanitizeOpenCodePromptSignatureInPlace(req as Record<string, unknown>);
         }
 
         if (isClaudeThinking && keepThinkingEnabled && sessionId) {
@@ -1465,6 +1469,7 @@ export function prepareAntigravityRequest(
 
         stripInjectedDebugFromRequestPayload(requestPayload);
         sanitizeRequestPayloadForAntigravity(requestPayload);
+        sanitizeOpenCodePromptSignatureInPlace(requestPayload);
 
         const effectiveProjectId = projectId?.trim() || (headerStyle === "antigravity" ? generateSyntheticProjectId() : "");
         resolvedProjectId = effectiveProjectId;
