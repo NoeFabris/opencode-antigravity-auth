@@ -2305,6 +2305,23 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     await showToast(`Rate limited again. Switching account in 5s...${quotaMsg}`, "warning");
                     await sleep(SWITCH_ACCOUNT_DELAY_MS, abortSignal);
                   } else {
+                    if (attempt > 3) {
+                      lastFailure = createFailureContext(response);
+                      return transformAntigravityResponse(
+                        lastFailure.response,
+                        lastFailure.streaming,
+                        lastFailure.debugContext,
+                        lastFailure.requestedModel,
+                        lastFailure.projectId,
+                        lastFailure.endpoint,
+                        lastFailure.effectiveModel,
+                        lastFailure.sessionId,
+                        lastFailure.toolDebugMissing,
+                        lastFailure.toolDebugSummary,
+                        lastFailure.toolDebugPayload,
+                        debugLines,
+                      );
+                    }
                     // Single account: exponential backoff (1s, 2s, 4s, 8s... max 60s)
                     const expBackoffMs = Math.min(FIRST_RETRY_DELAY_MS * Math.pow(2, attempt - 1), 60000);
                     const expBackoffFormatted = expBackoffMs >= 1000 ? `${Math.round(expBackoffMs / 1000)}s` : `${expBackoffMs}ms`;

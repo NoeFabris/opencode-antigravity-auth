@@ -361,6 +361,11 @@ function isValidRequestPart(part: unknown): boolean {
 function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>): void {
   const anyPayload = payload as any;
 
+  const sanitizeText = (text: unknown): unknown => {
+    if (typeof text !== "string") return text;
+    return text.replaceAll("tools.opencode.session_move", "tools.opencode.session_relocate");
+  };
+
   if (Array.isArray(anyPayload.contents)) {
     anyPayload.contents = anyPayload.contents
       .map((content: unknown) => {
@@ -373,31 +378,36 @@ function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>):
         let foundFirstFunctionCall = false;
 
         const sanitizedParts = rawParts.filter(isValidRequestPart).map((part: any) => {
-          if (part && typeof part === "object" && part.functionCall) {
-            let sig = part.thoughtSignature || part.thought_signature;
+          if (part && typeof part === "object") {
+            if (typeof part.text === "string") {
+              part.text = sanitizeText(part.text);
+            }
+            if (part.functionCall) {
+              let sig = part.thoughtSignature || part.thought_signature;
 
-            // Only the first functionCall part in a block should have the signature.
-            // If it's the first one and missing a valid signature, inject the sentinel
-            // to prevent the API from rejecting the request with a 400 error.
-            if (!foundFirstFunctionCall) {
-              foundFirstFunctionCall = true;
-              if (!sig || sig.length < MIN_SIGNATURE_LENGTH) {
-                sig = SKIP_THOUGHT_SIGNATURE;
+              // Only the first functionCall part in a block should have the signature.
+              // If it's the first one and missing a valid signature, inject the sentinel
+              // to prevent the API from rejecting the request with a 400 error.
+              if (!foundFirstFunctionCall) {
+                foundFirstFunctionCall = true;
+                if (!sig || sig.length < MIN_SIGNATURE_LENGTH) {
+                  sig = SKIP_THOUGHT_SIGNATURE;
+                }
+              } else {
+                // Parallel function calls MUST NOT have a signature
+                sig = undefined;
               }
-            } else {
-              // Parallel function calls MUST NOT have a signature
-              sig = undefined;
-            }
 
-            if (sig) {
-              return { ...part, thought_signature: sig, thoughtSignature: sig };
+              if (sig) {
+                return { ...part, thought_signature: sig, thoughtSignature: sig };
+              }
+              
+              // If not the first part, just return the part without adding any signature keys
+              const newPart = { ...part };
+              delete newPart.thoughtSignature;
+              delete newPart.thought_signature;
+              return newPart;
             }
-            
-            // If not the first part, just return the part without adding any signature keys
-            const newPart = { ...part };
-            delete newPart.thoughtSignature;
-            delete newPart.thought_signature;
-            return newPart;
           }
           return part;
         });
@@ -418,6 +428,11 @@ function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>):
   if (systemInstruction && typeof systemInstruction === "object" && !Array.isArray(systemInstruction)) {
     const sys = systemInstruction as Record<string, unknown>;
     if (Array.isArray(sys.parts)) {
+      for (const part of sys.parts) {
+        if (part && typeof (part as any).text === "string") {
+          (part as any).text = sanitizeText((part as any).text);
+        }
+      }
       const sanitizedSystemParts = sys.parts.filter(isValidRequestPart);
       if (sanitizedSystemParts.length > 0) {
         sys.parts = sanitizedSystemParts;
@@ -425,6 +440,8 @@ function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>):
         delete anyPayload.systemInstruction;
       }
     }
+  } else if (typeof anyPayload.systemInstruction === "string") {
+    anyPayload.systemInstruction = sanitizeText(anyPayload.systemInstruction);
   }
 }
 
@@ -724,8 +741,9 @@ const STREAM_ACTION = "streamGenerateContent";
 /**
  * Detects requests headed to the Google Generative Language API so we can intercept them.
  */
-export function isGenerativeLanguageRequest(input: RequestInfo): input is string {
-  return typeof input === "string" && input.includes("generativelanguage.googleapis.com");
+export function isGenerativeLanguageRequest(input: RequestInfo | URL): boolean {
+  const url = typeof input === "string" ? input : (input as Request)?.url ? (input as Request).url : input?.toString?.() ?? "";
+  return typeof url === "string" && url.includes("generativelanguage.googleapis.com");
 }
 
 /**
@@ -746,7 +764,7 @@ export interface PrepareRequestOptions {
 }
 
 export function prepareAntigravityRequest(
-  input: RequestInfo,
+  input: RequestInfo | URL,
   init: RequestInit | undefined,
   accessToken: string,
   projectId: string,
@@ -782,7 +800,7 @@ export function prepareAntigravityRequest(
 
   if (!isGenerativeLanguageRequest(input)) {
     return {
-      request: input,
+      request: input as RequestInfo,
       init: { ...baseInit, headers },
       streaming: false,
       headerStyle,
@@ -799,10 +817,11 @@ export function prepareAntigravityRequest(
   // that are not required for Antigravity/Gemini CLI OAuth requests.
   headers.delete("x-goog-user-project");
 
-  const match = input.match(/\/models\/([^:]+):(\w+)/);
+  const urlString = typeof input === "string" ? input : (input as Request)?.url ?? String(input);
+  const match = urlString.match(/\/models\/([^:]+):(\w+)/);
   if (!match) {
     return {
-      request: input,
+      request: input as RequestInfo,
       init: { ...baseInit, headers },
       streaming: false,
       headerStyle,
@@ -1555,6 +1574,11 @@ export function prepareAntigravityRequest(
     headers.set("X-Goog-Api-Client", GEMINI_CLI_HEADERS["X-Goog-Api-Client"]);
     headers.set("Client-Metadata", GEMINI_CLI_HEADERS["Client-Metadata"]);
   }
+
+  if (typeof body === "string") {
+    body = body.replaceAll("tools.opencode.session_move", "tools.opencode.session_relocate");
+  }
+
   return {
     request: transformedUrl,
     init: {
