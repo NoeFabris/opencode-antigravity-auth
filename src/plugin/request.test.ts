@@ -79,15 +79,19 @@ describe("request.ts", () => {
   describe("isGenerativeLanguageRequest", () => {
     it("returns true for generativelanguage.googleapis.com URLs", () => {
       expect(isGenerativeLanguageRequest("https://generativelanguage.googleapis.com/v1/models")).toBe(true);
+      expect(isGenerativeLanguageRequest(new URL("https://generativelanguage.googleapis.com/v1/models"))).toBe(true);
+      expect(isGenerativeLanguageRequest(new Request("https://generativelanguage.googleapis.com/v1/models"))).toBe(true);
     });
 
     it("returns false for other URLs", () => {
       expect(isGenerativeLanguageRequest("https://api.anthropic.com/v1/messages")).toBe(false);
+      expect(isGenerativeLanguageRequest(new Request("https://example.com"))).toBe(false);
+      expect(isGenerativeLanguageRequest(new URL("https://example.com"))).toBe(false);
     });
 
-    it("returns false for non-string inputs", () => {
+    it("returns false for non-string invalid inputs", () => {
       expect(isGenerativeLanguageRequest({} as any)).toBe(false);
-      expect(isGenerativeLanguageRequest(new Request("https://example.com"))).toBe(false);
+      expect(isGenerativeLanguageRequest(null as any)).toBe(false);
     });
   });
 
@@ -1254,6 +1258,34 @@ it("removes x-api-key header", () => {
           "antigravity"
         );
         expect(result.effectiveModel).toBe("gemini-2.5-flash");
+      });
+
+      it("sanitizes tools.opencode.session_move from prompt and system instruction", () => {
+        const result = prepareAntigravityRequest(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              systemInstruction: {
+                parts: [{ text: "Use tools.opencode.session_move to change directory." }],
+              },
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: "Please call tools.opencode.session_move" }],
+                },
+              ],
+            }),
+          },
+          mockAccessToken,
+          mockProjectId,
+          undefined,
+          "antigravity"
+        );
+        const parsed = JSON.parse(result.init.body as string);
+        expect(result.init.body as string).not.toContain("tools.opencode.session_move");
+        expect(result.init.body as string).toContain("tools.opencode.session_relocate");
+        expect(parsed.request.systemInstruction.parts[0].text).toContain("tools.opencode.session_relocate");
       });
     });
   });

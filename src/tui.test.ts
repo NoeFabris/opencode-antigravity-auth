@@ -114,4 +114,18 @@ describe("Antigravity native menu", () => {
     expect(result.rpc.list).toHaveBeenCalledTimes(2)
     expect(result.rpc.update).not.toHaveBeenCalled()
   })
+
+  it("registers /limits and /cuentas slash command for all account quotas", async () => {
+    let layer: KeymapLayer | undefined
+    const ctx = {
+      client: { rpc: () => ({ list: vi.fn(), quotas: vi.fn() }) },
+      location: { directory: "/tmp/menu-test" },
+      ui: { dialog: { select: vi.fn(), alert: vi.fn() }, toast: { show: vi.fn() } },
+      keymap: { layer: (factory: () => KeymapLayer) => { layer = factory() } },
+    } as unknown as Plugin.Context
+    await AntigravityTuiPlugin.setup(ctx)
+    const limitsCommand = layer?.commands?.find(c => c.slash?.name === "limits")
+    expect(limitsCommand).toBeDefined()
+    expect(limitsCommand?.slash?.aliases).toContain("cuentas")
+  })
 })
