@@ -118,8 +118,11 @@ export const AntigravityV2Plugin = Plugin.define({
     let modelDefinitions = validCache ? buildAccountModelDefinitions(validCache) : OPENCODE_V2_MODEL_DEFINITIONS
     accountCatalogLoaded = !!validCache
     if (validCache) modelAccounts = cached.accounts
+    let observedPoolIdentity = accountPoolIdentity(saved?.accounts ?? [])
     let catalogPoolIdentity = validCache ? cached.identity : undefined
     let catalogReloadCount = 0
+    let providerReloadPending = false
+    const staleCatalogModels = new Set<string>()
     let discoveryGeneration = 0
     let catalogSnapshot: Parameters<typeof ctx.storage.set>[1] | undefined
     const catalogWrites = new Set<Promise<void>>()
@@ -132,8 +135,16 @@ export const AntigravityV2Plugin = Plugin.define({
         pending = catalogSnapshot
       }
     }
+    /** Reloads the provider registration and keeps publication pending until it succeeds. */
+    const reloadProvider = async () => {
+      providerReloadPending = true
+      await ctx.provider.reload()
+      staleCatalogModels.clear()
+      providerReloadPending = false
+      catalogReloadCount += 1
+    }
     /** Queries enabled accounts' selectable catalogs and reloads the provider models. */
-    const discoverModels = async () => {
+    const discoverModels = async (abortRequests = true) => {
       const discovery = ++discoveryGeneration
       await resolveAuth()
       const stored = await loadManagedAccounts()
@@ -148,7 +159,7 @@ export const AntigravityV2Plugin = Plugin.define({
       const models: Record<string, AvailableModel> = {}
       const eligibleAccounts: Record<string, string[]> = {}
       if (discovery === discoveryGeneration) {
-        invalidateLoader()
+        invalidateLoader(abortRequests)
         await transport.flush?.()
       }
       const latest = await updateAccounts(latest => {
@@ -175,36 +186,56 @@ export const AntigravityV2Plugin = Plugin.define({
       // the newest complete discovery for this pool may replace the catalog.
       const latestPoolIdentity = accountPoolIdentity(latest?.accounts ?? [])
       hasSavedAccounts = Boolean(latest?.accounts.some(account => account.enabled !== false && !!account.refreshToken))
+      observedPoolIdentity = latestPoolIdentity
       if (disposed || discovery !== discoveryGeneration || latestPoolIdentity !== accountPoolIdentity(accounts)) return Object.keys(modelDefinitions).length
       if (!successful.length) throw new Error(results.find(result => result.error)?.error ?? "Google did not return a model catalog. Check account access and try again.")
       modelDefinitions = buildAccountModelDefinitions(models)
       modelAccounts = eligibleAccounts
       accountCatalogLoaded = true
       catalogPoolIdentity = latestPoolIdentity
+      providerReloadPending = true
       catalogSnapshot = JSON.parse(JSON.stringify({ version: 3, identity: latestPoolIdentity, updatedAt: Date.now(), models, accounts: eligibleAccounts }))
       const writing = writeCatalog()
       catalogWrites.add(writing)
       try { await writing } finally { catalogWrites.delete(writing) }
-      await ctx.provider.reload()
-      catalogReloadCount += 1
+      await reloadProvider()
       return Object.keys(modelDefinitions).length
     }
     /** Starts a tracked catalog discovery run unless the plugin is disposed. */
-    const refreshModels = () => {
+    const refreshModels = (abortRequests = true) => {
       if (disposed) return Promise.reject(new Error("Antigravity plugin has been disposed"))
-      const discovering = discoverModels()
+      const discovering = discoverModels(abortRequests)
       discoveries.add(discovering)
       void discovering.then(() => discoveries.delete(discovering), () => discoveries.delete(discovering))
       return discovering
     }
     /** Refreshes catalog discovery and provider state after account pool updates. */
-    const syncPoolModels = async () => {
+    const syncPoolModels = async (abortRequests = true) => {
       const beforeReloads = catalogReloadCount
-      hasSavedAccounts = Boolean((await loadAccounts())?.accounts.some(account => account.enabled !== false && !!account.refreshToken))
+      const initialAccounts = (await loadManagedAccounts())?.accounts ?? []
+      observedPoolIdentity = accountPoolIdentity(initialAccounts)
+      hasSavedAccounts = initialAccounts.some(account => account.enabled !== false && !!account.refreshToken)
       if (hasSavedAccounts && !disposed && ctx.options.discoverModels !== false) {
-        try { await refreshModels() } catch (error) { if (!disposed) log.warn("Model refresh unavailable", { error: String(error) }) }
+        try { await refreshModels(abortRequests) } catch (error) { if (!disposed) log.warn("Model refresh unavailable", { error: String(error) }) }
       }
-      if (!disposed && catalogReloadCount === beforeReloads) await ctx.provider.reload()
+      if (disposed) return
+      const currentAccounts = (await loadManagedAccounts())?.accounts ?? []
+      const currentPoolIdentity = accountPoolIdentity(currentAccounts)
+      observedPoolIdentity = currentPoolIdentity
+      hasSavedAccounts = currentAccounts.some(account => account.enabled !== false && !!account.refreshToken)
+      if (accountCatalogLoaded && catalogPoolIdentity !== currentPoolIdentity) {
+        for (const id of Object.keys(modelDefinitions)) {
+          if (!OPENCODE_V2_MODEL_DEFINITIONS[id]) staleCatalogModels.add(id)
+        }
+        modelDefinitions = OPENCODE_V2_MODEL_DEFINITIONS
+        modelAccounts = {}
+        accountCatalogLoaded = false
+        catalogPoolIdentity = undefined
+        providerReloadPending = true
+      }
+      if (catalogReloadCount === beforeReloads || providerReloadPending) {
+        await reloadProvider()
+      }
     }
     const listeners = new Set<OAuthListener>()
     const lifetime = new AbortController()
@@ -295,11 +326,16 @@ export const AntigravityV2Plugin = Plugin.define({
           const pool = reload && next ? (stored ?? await loadManagedAccounts()) : undefined
           const nextHasSavedAccounts = pool ? pool.accounts.some(account => account.enabled !== false && !!account.refreshToken) : hasSavedAccounts
           const poolIdentity = pool ? accountPoolIdentity(pool.accounts) : undefined
+          const poolChanged = poolIdentity !== undefined && poolIdentity !== observedPoolIdentity
           const needsDiscovery = Boolean(reload && next && nextHasSavedAccounts && ctx.options.discoverModels !== false && (!accountCatalogLoaded || catalogPoolIdentity !== poolIdentity))
           const hadSavedAccounts = hasSavedAccounts
-          if (pool) hasSavedAccounts = nextHasSavedAccounts
+          if (pool && poolIdentity !== undefined) {
+            hasSavedAccounts = nextHasSavedAccounts
+            observedPoolIdentity = poolIdentity
+          }
+          if (reload && hadSavedAccounts !== hasSavedAccounts) providerReloadPending = true
           const accessChanged = next !== usesAntigravityOAuth
-          if (disposed || (!accessChanged && !modelReloadPending && !needsDiscovery && (!reload || hadSavedAccounts === hasSavedAccounts))) return
+          if (disposed || (!accessChanged && !modelReloadPending && !providerReloadPending && !needsDiscovery)) return
           usesAntigravityOAuth = next
           if (reload && (accessChanged || modelReloadPending)) {
             modelReloadPending = true
@@ -307,9 +343,9 @@ export const AntigravityV2Plugin = Plugin.define({
             modelReloadPending = false
           }
           if (needsDiscovery && !disposed) {
-            await syncPoolModels()
-          } else if (reload && !disposed && hadSavedAccounts !== hasSavedAccounts) {
-            await ctx.provider.reload()
+            await syncPoolModels(poolChanged)
+          } else if (reload && !disposed && providerReloadPending) {
+            await reloadProvider()
           }
         } catch (error) {
           if (!disposed) log.warn("Could not update Google model authentication", { error: String(error) })
@@ -495,7 +531,11 @@ export const AntigravityV2Plugin = Plugin.define({
                 })
                 await ctx.storage.remove("pool-selection")
                 invalidateLoader()
-                await syncPoolModels()
+                try {
+                  await syncPoolModels(true)
+                } catch (error) {
+                  if (!disposed) log.warn("Could not reload provider after OAuth login", { error: String(error) })
+                }
                 const latest = account?.id ? (await loadAccounts())?.accounts.find(item => item.id === account.id) : undefined
                 return oauthCredential(
                   latest ? { ...result, type: "oauth", refresh: formatRefreshParts(latest) } : { ...result, type: "oauth" },
@@ -582,9 +622,11 @@ export const AntigravityV2Plugin = Plugin.define({
             if (provider.activation === "auto") provider.activation = "enabled"
           })
         }
-        if (accountCatalogLoaded) {
+        if (accountCatalogLoaded || staleCatalogModels.size > 0) {
           for (const id of editor.get(PROVIDER_ID)?.models.keys() ?? []) {
-            if (ownsModel(id) && !modelDefinitions[id]) editor.models.remove(PROVIDER_ID, id)
+            if (ownsModel(id) && !modelDefinitions[id] && (accountCatalogLoaded || staleCatalogModels.has(id))) {
+              editor.models.remove(PROVIDER_ID, id)
+            }
           }
         }
         for (const [id, definition] of Object.entries(modelDefinitions)) {
@@ -678,9 +720,9 @@ export const AntigravityV2Plugin = Plugin.define({
       registrations.push(await registerAccountManagement(ctx, client, async () => {
         invalidateLoader()
         await transport.flush?.()
-      }, refreshModels, syncPoolModels, runCredentialOperation))
+      }, () => refreshModels(false), () => syncPoolModels(true), runCredentialOperation))
       if (hasSavedAccounts && ctx.options.discoverModels !== false && (!validCache || Date.now() - (cached?.updatedAt ?? 0) > 3600_000)) {
-        try { await refreshModels() } catch (error) { log.warn("Model discovery unavailable; using cached or fallback models", { error: String(error) }) }
+        try { await refreshModels(false) } catch (error) { log.warn("Model discovery unavailable; using cached or fallback models", { error: String(error) }) }
       }
       return cleanup
     } catch (error) {

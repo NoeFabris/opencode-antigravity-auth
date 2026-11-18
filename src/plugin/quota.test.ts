@@ -28,6 +28,7 @@ const account: AccountMetadataV3 = {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -151,5 +152,38 @@ describe("checkAccountsQuota", () => {
     }))
     const [result] = await checkAccountsQuota([account], {} as PluginClient)
     expect(result?.quota?.groups.claude).toMatchObject({ remainingFraction: 0.2, remainingFractionResetTime: "2026-10-27T17:00:00Z" })
+  })
+
+  it.each([200, 503])("times out quota fetches when status %s response bodies stall after headers arrive", async status => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start() {} }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    })))
+
+    const pending = checkAccountsQuota([account], {} as PluginClient)
+    await vi.advanceTimersByTimeAsync(10_000)
+    const [result] = await pending
+
+    expect(result?.status).toBe("ok")
+    expect(result?.quota?.error).toBe("Failed to fetch Antigravity quota")
+    expect(result?.geminiCliQuota?.models).toEqual([])
+  })
+
+  it("aborts immediately when options.signal fires while quota response bodies are stalled", async () => {
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream({ start() {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))
+    vi.stubGlobal("fetch", fetchMock)
+    const controller = new AbortController()
+
+    const pending = checkAccountsQuota([account], {} as PluginClient, undefined, { signal: controller.signal })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    controller.abort(new Error("plugin disposed"))
+    const [result] = await pending
+
+    expect(result?.status).toBe("error")
+    expect(result?.error).toContain("plugin disposed")
   })
 })

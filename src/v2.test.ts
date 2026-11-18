@@ -130,6 +130,7 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   const record = { provider, models }
   const storage = new Map<string, unknown>()
   const events = new EventEmitter<{ event: [V2Event] }>()
+  let handledEvents = 0
   if (options.catalog) storage.set("model-catalog", { version: 3, identity: accountPoolIdentity(state.storage?.accounts ?? []), updatedAt: Date.now(), models: options.catalog, accounts: options.catalogAccounts ?? {} })
   let method: OAuthMethod | undefined
   let sdkHook: ((event: AISDKHooks["sdk"]) => Promise<void> | void) | undefined
@@ -170,7 +171,10 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
     credential: { activate: vi.fn(async ({ credentialID }: { credentialID: string }) => { connectionID = credentialID }) },
     event: {
       async *subscribe(options?: { signal?: AbortSignal }) {
-        for await (const [event] of on(events, "event", options)) yield event as V2Event
+        for await (const [event] of on(events, "event", options)) {
+          yield event as V2Event
+          handledEvents += 1
+        }
       },
     },
     rpc: { register: async (_definition: typeof AntigravityAccountsRpc, handlers: RpcHandlers<typeof AntigravityAccountsRpc>) => {
@@ -234,6 +238,7 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   const hook = sdkHook
   return {
     models, provider, method, tool, cleanup, disposals, accountHandlers, storage, ctx,
+    handledEvents: () => handledEvents,
     emit: (event: V2Event) => events.emit("event", event),
     setCredential: (next: Credential.Value, id?: string) => { value = next; connectionID = id; connected = true },
     disconnect: () => { connected = false },
@@ -1019,7 +1024,8 @@ describe("independent integration edge cases", () => {
 
     adapter.setCredential(result, "first-native")
     adapter.emit({ type: "credential.updated", id: "event-after-connect", created: Date.now(), data: {} } as V2Event)
-    await vi.waitFor(() => expect(adapter.ctx.model.reload).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(adapter.handledEvents()).toBe(1))
+    expect(adapter.ctx.model.reload).toHaveBeenCalledTimes(1)
     expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
     expect(catalogCalls).toBe(1)
   })
@@ -1079,6 +1085,140 @@ describe("independent integration edge cases", () => {
     expect(adapter.provider.activation).toBe("enabled")
     expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
     expect(adapter.models.has("antigravity-gemini-3-flash")).toBe(false)
+  })
+
+  it("clears stale pool eligibility when replacement discovery fails, while preserving a matching catalog on transient failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes("oauth2.googleapis.com/token")) return Response.json({ access_token: "fresh", expires_in: 3600 })
+      if (url.endsWith(":fetchAvailableModels")) return Response.json({ error: "temporary outage" }, { status: 503 })
+      if (url.endsWith(":retrieveUserQuota")) return Response.json({ buckets: [] })
+      return new Response(`data: ${JSON.stringify({ response: { candidates: [{ index: 0, content: { role: "model", parts: [{ text: "Hello from fallback" }] }, finishReason: "STOP" }] } })}\n\n`, { headers: { "content-type": "text/event-stream" } })
+    })
+
+    const accountAID = accountID(state.storage!.accounts[0]!)
+    const preserved = await host({
+      connection: false,
+      discoverModels: true,
+      catalog: { "gemini-4-argon-high": {} },
+      catalogAccounts: { "antigravity-gemini-4-argon-high": [accountAID] },
+    })
+    const context = { signal: new AbortController().signal, error: () => { throw new Error("Unexpected RPC error") } }
+    await preserved.accountHandlers!.update({ id: accountAID, action: "select" }, context)
+    expect(preserved.models.has("antigravity-gemini-4-argon-high")).toBe(true)
+
+    const replaced = await host({
+      connection: false,
+      discoverModels: true,
+      catalog: { "gemini-3-flash": {}, "gemini-4-argon-high": {} },
+      catalogAccounts: { "antigravity-gemini-3-flash": [accountAID], "antigravity-gemini-4-argon-high": [accountAID] },
+    })
+    state.storage = {
+      version: 4,
+      accounts: [{ refreshToken: "account-b", projectId: "project", email: "b@example.test", enabled: true, addedAt: 2, lastUsed: 2 }],
+      activeIndex: 0,
+    }
+    replaced.setCredential(credential("account-b|project"), "native-b")
+    replaced.emit({ type: "credential.updated", id: "event-replace-pool", created: Date.now(), data: {} } as V2Event)
+
+    await vi.waitFor(() => expect(replaced.handledEvents()).toBe(1))
+    expect(replaced.models.has("antigravity-gemini-4-argon-high")).toBe(false)
+    expect(replaced.models.has("antigravity-gemini-3-flash")).toBe(true)
+    const { sdk } = await replaced.sdk("antigravity-gemini-3-flash")
+    await expect(stream(sdk, "antigravity-gemini-3-flash")).resolves.toContainEqual(expect.objectContaining({ type: "text-delta" }))
+  })
+
+  it("retains OAuth credentials and retries failed provider publication on subsequent credential events", async () => {
+    const realStorage = await import("./plugin/storage.ts")
+    state.storage = null
+    let catalogCalls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return Response.json({ access_token: "fresh", refresh_token: "rotated-reload-retry", expires_in: 3600 })
+      }
+      if (url.endsWith(":fetchAvailableModels")) {
+        catalogCalls += 1
+        return Response.json({
+          models: {
+            "gemini-4-argon-high": { displayName: "Gemini 4 Argon (High)", maxTokens: 1048576, maxOutputTokens: 65536 },
+          },
+        })
+      }
+      return Response.json({ buckets: [] })
+    })
+
+    const adapter = await host({ connection: false, discoverModels: true })
+    vi.mocked(adapter.ctx.provider.reload)
+      .mockRejectedValueOnce(new Error("Temporary provider reload outage 1"))
+      .mockRejectedValueOnce(new Error("Temporary provider reload outage 2"))
+
+    const authorization = await adapter.method.authorize({ manual: true, projectId: "project" })
+    if (authorization.mode !== "code") throw new Error("Expected manual auth")
+    const result = await authorization.callback("first-login-code")
+
+    expect(result.type).toBe("oauth")
+    expect(result.refresh).toContain("rotated-reload-retry")
+    expect((await realStorage.loadAccounts())?.accounts[0]?.refreshToken).toBe("rotated-reload-retry")
+    expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(false)
+    expect(catalogCalls).toBe(1)
+
+    adapter.setCredential(result, "first-native")
+    adapter.emit({ type: "credential.updated", id: "event-retry-reload", created: Date.now(), data: {} } as V2Event)
+    await vi.waitFor(() => expect(adapter.handledEvents()).toBe(1))
+
+    expect(adapter.ctx.provider.reload).toHaveBeenCalledTimes(3)
+    expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(true)
+    expect(catalogCalls).toBe(1)
+  })
+
+  it("does not abort in-flight google_search requests when retrying missing catalog discovery", async () => {
+    let searchStarted!: () => void
+    const started = new Promise<void>(resolve => { searchStarted = resolve })
+    let releaseSearch!: () => void
+    const gate = new Promise<void>(resolve => { releaseSearch = resolve })
+    let catalogCalls = 0
+    let searchAborted = false
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return Response.json({ access_token: "fresh", expires_in: 3600 })
+      }
+      if (url.endsWith(":fetchAvailableModels")) {
+        if (++catalogCalls === 1) return Response.json({ error: "initial outage" }, { status: 503 })
+        return Response.json({ models: { "gemini-4-argon-high": {} } })
+      }
+      if (url.endsWith(":retrieveUserQuota")) return Response.json({ buckets: [] })
+      if (url.includes(":generateContent")) {
+        const signal = init?.signal
+        signal?.addEventListener("abort", () => { searchAborted = true }, { once: true })
+        searchStarted()
+        await gate
+        if (signal?.aborted) throw signal.reason
+        return Response.json({ response: { candidates: [{ content: { parts: [{ text: "Search stayed alive" }] } }] } })
+      }
+      throw new Error(`Unexpected URL: ${url}`)
+    })
+
+    const adapter = await host({ discoverModels: true })
+    expect(catalogCalls).toBe(1)
+    expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(false)
+
+    const searchPromise = adapter.tool.execute({ query: "keep alive" }, { signal: new AbortController().signal } as ToolContext)
+    await started
+
+    try {
+      adapter.emit({ type: "credential.updated", id: "event-catalog-only-retry", created: Date.now(), data: {} } as V2Event)
+      await vi.waitFor(() => expect(adapter.handledEvents()).toBe(1))
+      expect(catalogCalls).toBe(2)
+      expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(true)
+      expect(searchAborted).toBe(false)
+    } finally {
+      releaseSearch()
+    }
+
+    await expect(searchPromise).resolves.toMatchObject({ content: expect.stringContaining("Search stayed alive") })
   })
 
   it("retains a discovery rotation when the account is disabled while catalog I/O is pending", async () => {
