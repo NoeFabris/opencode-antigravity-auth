@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ANTIGRAVITY_PROVIDER_ID } from "../constants";
 import { AntigravityTokenRefreshError, refreshAccessToken } from "./token";
@@ -24,6 +24,11 @@ function createClient() {
 describe("refreshAccessToken", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("updates the caller when refresh token is unchanged", async () => {
@@ -111,5 +116,30 @@ describe("refreshAccessToken", () => {
     const latest = await refreshAccessToken(baseAuth, client, ANTIGRAVITY_PROVIDER_ID);
     expect(latest?.refresh).toBe("shared-rotation|project-123");
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("times out refreshAccessToken and aborts its request signal when the response body stalls", async () => {
+    vi.useFakeTimers();
+    const client = createClient();
+    let capturedSignal: AbortSignal | undefined;
+    let bodyReadStarted = false;
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined;
+      return new Response(
+        new ReadableStream({
+          pull() {
+            bodyReadStarted = true;
+          },
+        }, { highWaterMark: 0 }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }));
+
+    const pending = refreshAccessToken(baseAuth, client, ANTIGRAVITY_PROVIDER_ID);
+    await vi.waitFor(() => expect(bodyReadStarted).toBe(true));
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(capturedSignal?.aborted).toBe(true);
   });
 });

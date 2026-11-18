@@ -211,19 +211,63 @@ function aggregateQuota(models?: Record<string, FetchAvailableModelEntry>, selec
   return { groups, modelCount: totalCount, models: catalog };
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+/**
+ * Executes a fetch request and reads its response body under a shared timeout and caller abort signal.
+ */
+async function fetchWithDeadline<T>(
+  url: string,
+  options: RequestInit,
+  readBody: (response: Response) => Promise<T>,
+  signal?: AbortSignal,
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const forwardAbort = () => {
+    controller.abort(signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+  };
+  if (signal) {
+    if (signal.aborted) {
+      forwardAbort();
+    } else {
+      signal.addEventListener("abort", forwardAbort, { once: true });
+    }
+  }
+  let onControllerAbort: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    onControllerAbort = () =>
+      reject(controller.signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+    if (controller.signal.aborted) {
+      onControllerAbort();
+      return;
+    }
+    controller.signal.addEventListener("abort", onControllerAbort, { once: true });
+  });
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException(`Quota request timed out after ${timeoutMs}ms`, "TimeoutError")),
+    timeoutMs,
+  );
+  const task = (async () => {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await readBody(response);
+  })();
+  void task.catch(() => undefined);
+  void abortPromise.catch(() => undefined);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await Promise.race([task, abortPromise]);
   } finally {
     clearTimeout(timeout);
+    if (signal) signal.removeEventListener("abort", forwardAbort);
+    if (onControllerAbort) controller.signal.removeEventListener("abort", onControllerAbort);
   }
 }
 
+/**
+ * Fetches the Antigravity model catalog and per-model quota metadata for an account.
+ */
 async function fetchAvailableModels(
   accessToken: string,
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<FetchAvailableModelsResponse> {
   // Antigravity quota comes from the same host and Hub User-Agent as content requests.
   const endpoint = ANTIGRAVITY_ENDPOINT;
@@ -231,55 +275,78 @@ async function fetchAvailableModels(
   const errors: string[] = [];
 
   const body = projectId ? { project: projectId } : {};
-  const response = await fetchWithTimeout(`${endpoint}/v1internal:fetchAvailableModels`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "User-Agent": quotaUserAgent,
+  const result = await fetchWithDeadline(
+    `${endpoint}/v1internal:fetchAvailableModels`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "User-Agent": quotaUserAgent,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    async (response) => {
+      if (response.ok) {
+        return { ok: true as const, data: (await response.json()) as FetchAvailableModelsResponse };
+      }
+      const message = await response.text().catch((err) => {
+        if (signal?.aborted) throw err;
+        return "";
+      });
+      return { ok: false as const, status: response.status, message };
+    },
+    signal,
+  );
 
-  if (response.ok) {
-    return (await response.json()) as FetchAvailableModelsResponse;
+  if (result.ok) {
+    return result.data;
   }
 
-  const message = await response.text().catch(() => "");
-  const snippet = message.trim().slice(0, 200);
+  const snippet = result.message.trim().slice(0, 200);
   errors.push(
-    `fetchAvailableModels ${response.status} at ${endpoint}${snippet ? `: ${snippet}` : ""}`,
+    `fetchAvailableModels ${result.status} at ${endpoint}${snippet ? `: ${snippet}` : ""}`,
   );
 
   throw new Error(errors.join("; ") || "fetchAvailableModels failed");
 }
 
+/**
+ * Fetches per-model Gemini CLI quota buckets for an account, returning empty buckets on transient errors.
+ */
 async function fetchGeminiCliQuota(
   accessToken: string,
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<RetrieveUserQuotaResponse> {
   const endpoint = ANTIGRAVITY_ENDPOINT_PROD;
   const body = projectId ? { project: projectId } : {};
-  
+
   try {
-    const response = await fetchWithTimeout(`${endpoint}/v1internal:retrieveUserQuota`, {
-      method: "POST",
-      headers: {
-        ...getRandomizedHeaders("gemini-cli"),
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
+    return await fetchWithDeadline(
+      `${endpoint}/v1internal:retrieveUserQuota`,
+      {
+        method: "POST",
+        headers: {
+          ...getRandomizedHeaders("gemini-cli"),
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    });
-
-    if (response.ok) {
-      const data = (await response.json()) as RetrieveUserQuotaResponse;
-      return data;
+      async (response) => {
+        if (response.ok) {
+          return (await response.json()) as RetrieveUserQuotaResponse;
+        }
+        await response.body?.cancel().catch(() => undefined);
+        return { buckets: [] };
+      },
+      signal,
+    );
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
     }
-
-    // Non-OK response - return empty buckets
-    return { buckets: [] };
-  } catch {
     // Network error or timeout - return empty buckets
     return { buckets: [] };
   }
@@ -337,6 +404,9 @@ function applyAccountUpdates(account: AccountMetadataV3, auth: OAuthAuthDetails)
   return changed ? updated : undefined;
 }
 
+/**
+ * Checks Antigravity and Gemini CLI quotas and available model catalogs for the supplied accounts.
+ */
 export async function checkAccountsQuota(
   accounts: AccountMetadataV3[],
   client: PluginClient,
@@ -387,10 +457,16 @@ export async function checkAccountsQuota(
       
       // Fetch both Antigravity and Gemini CLI quotas in parallel
       const [antigravityResponse, geminiCliResponse] = await Promise.all([
-        fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId)
-          .catch((error): FetchAvailableModelsResponse => ({ models: undefined })),
-        fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId),
+        fetchAvailableModels(auth.access ?? "", projectContext.effectiveProjectId, options.signal)
+          .catch((error): FetchAvailableModelsResponse => {
+            if (options.signal?.aborted) {
+              throw options.signal.reason ?? error;
+            }
+            return { models: undefined };
+          }),
+        fetchGeminiCliQuota(auth.access ?? "", projectContext.effectiveProjectId, options.signal),
       ]);
+      options.signal?.throwIfAborted();
 
       // Process Antigravity quota
       if (antigravityResponse.models === undefined) {

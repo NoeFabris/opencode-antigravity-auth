@@ -127,6 +127,49 @@ export async function refreshAccessToken(
   }) };
 }
 
+const TOKEN_REFRESH_TIMEOUT_MS = 15_000;
+
+/**
+ * Executes an OAuth token request and reads its response body under a single deadline.
+ */
+async function fetchTokenWithDeadline<T>(
+  url: string,
+  options: RequestInit,
+  readBody: (response: Response) => Promise<T>,
+  timeoutMs = TOKEN_REFRESH_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    onAbort = () =>
+      reject(controller.signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+    if (controller.signal.aborted) {
+      onAbort();
+      return;
+    }
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+  });
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException(`Token refresh timed out after ${timeoutMs}ms`, "TimeoutError")),
+    timeoutMs,
+  );
+  const task = (async () => {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await readBody(response);
+  })();
+  void task.catch(() => undefined);
+  void abortPromise.catch(() => undefined);
+  try {
+    return await Promise.race([task, abortPromise]);
+  } finally {
+    clearTimeout(timeout);
+    if (onAbort) controller.signal.removeEventListener("abort", onAbort);
+  }
+}
+
+/**
+ * Exchanges a stored OAuth refresh token for a fresh access token.
+ */
 async function requestAccessToken(auth: OAuthAuthDetails): Promise<OAuthAuthDetails | undefined> {
   const parts = parseRefreshParts(auth.refresh);
   if (!parts.refreshToken) {
@@ -135,32 +178,51 @@ async function requestAccessToken(auth: OAuthAuthDetails): Promise<OAuthAuthDeta
 
   try {
     const startTime = Date.now();
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+    const outcome = await fetchTokenWithDeadline(
+      "https://oauth2.googleapis.com/token",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: parts.refreshToken,
+          client_id: ANTIGRAVITY_CLIENT_ID,
+          client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        }),
       },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: parts.refreshToken,
-        client_id: ANTIGRAVITY_CLIENT_ID,
-        client_secret: ANTIGRAVITY_CLIENT_SECRET,
-      }),
-    });
+      async (response) => {
+        if (!response.ok) {
+          let errorText: string | undefined;
+          try {
+            errorText = await response.text();
+          } catch {
+            errorText = undefined;
+          }
+          return {
+            ok: false as const,
+            status: response.status,
+            statusText: response.statusText,
+            errorText,
+          };
+        }
 
-    if (!response.ok) {
-      let errorText: string | undefined;
-      try {
-        errorText = await response.text();
-      } catch {
-        errorText = undefined;
-      }
+        const payload = (await response.json()) as {
+          access_token: string;
+          expires_in: number;
+          refresh_token?: string;
+        };
+        return { ok: true as const, payload };
+      },
+    );
 
-      const { code, description } = parseOAuthErrorPayload(errorText);
-      const details = [code, description ?? errorText].filter(Boolean).join(": ");
-      const baseMessage = `Antigravity token refresh failed (${response.status} ${response.statusText})`;
+    if (!outcome.ok) {
+      const { code, description } = parseOAuthErrorPayload(outcome.errorText);
+      const details = [code, description ?? outcome.errorText].filter(Boolean).join(": ");
+      const baseMessage = `Antigravity token refresh failed (${outcome.status} ${outcome.statusText})`;
       const message = details ? `${baseMessage} - ${details}` : baseMessage;
-      log.warn("Token refresh failed", { status: response.status, code, details });
+      log.warn("Token refresh failed", { status: outcome.status, code, details });
 
       if (code === "invalid_grant") {
         log.warn("Google revoked the stored refresh token - reauthentication required");
@@ -171,17 +233,13 @@ async function requestAccessToken(auth: OAuthAuthDetails): Promise<OAuthAuthDeta
       throw new AntigravityTokenRefreshError({
         message,
         code,
-        description: description ?? errorText,
-        status: response.status,
-        statusText: response.statusText,
+        description: description ?? outcome.errorText,
+        status: outcome.status,
+        statusText: outcome.statusText,
       });
     }
 
-    const payload = (await response.json()) as {
-      access_token: string;
-      expires_in: number;
-      refresh_token?: string;
-    };
+    const payload = outcome.payload;
 
     const refreshedParts: RefreshParts = {
       refreshToken: payload.refresh_token ?? parts.refreshToken,

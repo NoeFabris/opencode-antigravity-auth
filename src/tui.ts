@@ -28,10 +28,12 @@ interface AccountMenuContext {
 
 export const AntigravityTuiPlugin = {
   id: "opencode-antigravity-auth",
+  /** Registers the /antigravity account and quota management TUI command. */
   setup(ctx: AccountMenuContext) {
     const rpc = ctx.client.rpc(AntigravityAccountsRpc)
     const location = () => ({ location: ctx.location ?? ctx.data.location.default() })
 
+    /** Runs the interactive Antigravity OAuth prompt from the account menu. */
     async function login() {
       const { data: attempt } = await ctx.client.integration.oauth.connect({
         integrationID: "google", methodID: "antigravity", answer: { manual: true }, ...location(),
@@ -42,7 +44,6 @@ export const AntigravityTuiPlugin = {
         if (!code?.trim()) return
         await ctx.client.integration.oauth.complete({ integrationID: "google", attemptID: attempt.attemptID, code: code.trim(), ...location() })
         completed = true
-        await rpc.models({}, location())
         ctx.ui.toast.show({ message: "Google account connected", variant: "success" })
       } finally {
         if (!completed) await ctx.client.integration.oauth.cancel({ integrationID: "google", attemptID: attempt.attemptID, ...location() })
