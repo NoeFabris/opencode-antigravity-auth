@@ -1221,6 +1221,106 @@ describe("independent integration edge cases", () => {
     await expect(searchPromise).resolves.toMatchObject({ content: expect.stringContaining("Search stayed alive") })
   })
 
+  it("invalidates a stale cached catalog when the account pool changes even with discoverModels disabled", async () => {
+    const fetchMock = mockNetwork()
+    const accountAID = accountID(state.storage!.accounts[0]!)
+    const preserved = await host({
+      discoverModels: false,
+      catalog: { "gemini-4-argon-high": {} },
+      catalogAccounts: { "antigravity-gemini-4-argon-high": [accountAID] },
+    })
+
+    preserved.emit({ type: "credential.updated", id: "event-same-pool", created: Date.now(), data: {} } as V2Event)
+    await vi.waitFor(() => expect(preserved.handledEvents()).toBe(1))
+    expect(preserved.models.has("antigravity-gemini-4-argon-high")).toBe(true)
+
+    const replaced = await host({
+      discoverModels: false,
+      catalog: { "gemini-3-flash": {}, "gemini-4-argon-high": {} },
+      catalogAccounts: { "antigravity-gemini-3-flash": [accountAID], "antigravity-gemini-4-argon-high": [accountAID] },
+    })
+    state.storage = {
+      version: 4,
+      accounts: [{ refreshToken: "account-b", projectId: "project", email: "b@example.test", enabled: true, addedAt: 2, lastUsed: 2 }],
+      activeIndex: 0,
+    }
+    replaced.setCredential(credential("account-b|project"), "native-b")
+    replaced.emit({ type: "credential.updated", id: "event-replaced-no-discovery", created: Date.now(), data: {} } as V2Event)
+
+    await vi.waitFor(() => expect(replaced.handledEvents()).toBe(1))
+    expect(replaced.models.has("antigravity-gemini-4-argon-high")).toBe(false)
+    expect(replaced.models.has("antigravity-gemini-3-flash")).toBe(true)
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith(":fetchAvailableModels"))).toBe(false)
+    const { sdk } = await replaced.sdk("antigravity-gemini-3-flash")
+    await expect(stream(sdk, "antigravity-gemini-3-flash")).resolves.toContainEqual(expect.objectContaining({ type: "text-delta" }))
+  })
+
+  it("still aborts a replaced pool's in-flight google_search even after a catalog-only retry discarded a mismatched pool", async () => {
+    let searchStarted!: () => void
+    const started = new Promise<void>(resolve => { searchStarted = resolve })
+    let retryStarted!: () => void
+    const retrying = new Promise<void>(resolve => { retryStarted = resolve })
+    let releaseRetry!: () => void
+    const retryGate = new Promise<void>(resolve => { releaseRetry = resolve })
+    let catalogCalls = 0
+    let searchAborted = false
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return Response.json({ access_token: "fresh", expires_in: 3600 })
+      }
+      if (url.endsWith(":fetchAvailableModels")) {
+        catalogCalls += 1
+        if (catalogCalls === 1) return Response.json({ error: "initial outage" }, { status: 503 })
+        if (catalogCalls === 2) {
+          retryStarted()
+          await retryGate
+        }
+        return Response.json({ models: { "gemini-4-argon-high": {} } })
+      }
+      if (url.endsWith(":retrieveUserQuota")) return Response.json({ buckets: [] })
+      if (url.includes(":generateContent")) {
+        return new Promise((_resolve, reject) => {
+          const signal = init?.signal
+          if (signal?.aborted) {
+            searchAborted = true
+            reject(signal.reason)
+            return
+          }
+          signal?.addEventListener("abort", () => {
+            searchAborted = true
+            reject(signal.reason)
+          }, { once: true })
+          searchStarted()
+        })
+      }
+      throw new Error(`Unexpected URL: ${url}`)
+    })
+
+    const adapter = await host({ discoverModels: true })
+    const searchPromise = adapter.tool.execute({ query: "pool A search" }, { signal: new AbortController().signal } as ToolContext)
+    await started
+
+    adapter.emit({ type: "credential.updated", id: "event-retry-pool-a", created: Date.now(), data: {} } as V2Event)
+    await retrying
+    state.storage = {
+      version: 4,
+      accounts: [{ refreshToken: "account-b", projectId: "project", email: "b@example.test", enabled: true, addedAt: 2, lastUsed: 2 }],
+      activeIndex: 0,
+    }
+    releaseRetry()
+    await vi.waitFor(() => expect(adapter.handledEvents()).toBe(1))
+    expect(searchAborted).toBe(false)
+
+    adapter.setCredential(credential("account-b|project"), "native-b")
+    adapter.emit({ type: "credential.updated", id: "event-pool-b", created: Date.now(), data: {} } as V2Event)
+    await expect(searchPromise).resolves.toMatchObject({ content: expect.stringContaining("Antigravity accounts changed") })
+    expect(searchAborted).toBe(true)
+    await vi.waitFor(() => expect(adapter.handledEvents()).toBe(2))
+    expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(true)
+  })
+
   it("retains a discovery rotation when the account is disabled while catalog I/O is pending", async () => {
     const adapter = await host({ connection: false })
     const realStorage = await import("./plugin/storage.ts")

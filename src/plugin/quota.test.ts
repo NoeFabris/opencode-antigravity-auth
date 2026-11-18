@@ -156,33 +156,54 @@ describe("checkAccountsQuota", () => {
 
   it.each([200, 503])("times out quota fetches when status %s response bodies stall after headers arrive", async status => {
     vi.useFakeTimers()
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start() {} }), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    })))
+    const signals: Array<AbortSignal | undefined> = []
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init?.signal ?? undefined)
+      return new Response(new ReadableStream({ start() {} }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      })
+    }))
 
     const pending = checkAccountsQuota([account], {} as PluginClient)
     await vi.advanceTimersByTimeAsync(10_000)
     const [result] = await pending
 
+    expect(signals).toHaveLength(2)
+    expect(signals[0]?.aborted).toBe(true)
+    expect(signals[1]?.aborted).toBe(status === 200)
     expect(result?.status).toBe("ok")
     expect(result?.quota?.error).toBe("Failed to fetch Antigravity quota")
     expect(result?.geminiCliQuota?.models).toEqual([])
   })
 
   it("aborts immediately when options.signal fires while quota response bodies are stalled", async () => {
-    const fetchMock = vi.fn(async () => new Response(new ReadableStream({ start() {} }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }))
+    const signals: Array<AbortSignal | undefined> = []
+    let bodyReadsStarted = 0
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init?.signal ?? undefined)
+      return new Response(
+        new ReadableStream({
+          pull() {
+            bodyReadsStarted += 1
+          },
+        }, { highWaterMark: 0 }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      )
+    })
     vi.stubGlobal("fetch", fetchMock)
     const controller = new AbortController()
 
     const pending = checkAccountsQuota([account], {} as PluginClient, undefined, { signal: controller.signal })
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(bodyReadsStarted).toBe(2))
     controller.abort(new Error("plugin disposed"))
     const [result] = await pending
 
+    expect(signals).toHaveLength(2)
+    expect(signals.every(signal => signal?.aborted === true)).toBe(true)
     expect(result?.status).toBe("error")
     expect(result?.error).toContain("plugin disposed")
   })

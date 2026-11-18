@@ -33,6 +33,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -143,5 +144,53 @@ describe("ensureProjectContext", () => {
     for (const call of fetchMock.mock.calls) {
       expect(String(call[0]).startsWith(`${DAILY}/`)).toBe(true)
     }
+  })
+
+  it("times out loadManagedProject and aborts its request signal when the response body stalls", async () => {
+    vi.useFakeTimers()
+    let capturedSignal: AbortSignal | undefined
+    let bodyReadStarted = false
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined
+      return new Response(
+        new ReadableStream({
+          pull() {
+            bodyReadStarted = true
+          },
+        }, { highWaterMark: 0 }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    }))
+
+    const pending = loadManagedProject("access-token")
+    await vi.waitFor(() => expect(bodyReadStarted).toBe(true))
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    await expect(pending).resolves.toBeNull()
+    expect(capturedSignal?.aborted).toBe(true)
+  })
+
+  it("times out onboardManagedProject and aborts its request signal when the response body stalls", async () => {
+    vi.useFakeTimers()
+    let capturedSignal: AbortSignal | undefined
+    let bodyReadStarted = false
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined
+      return new Response(
+        new ReadableStream({
+          pull() {
+            bodyReadStarted = true
+          },
+        }, { highWaterMark: 0 }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    }))
+
+    const pending = onboardManagedProject("access-token", "free-tier", undefined, 3, 0)
+    await vi.waitFor(() => expect(bodyReadStarted).toBe(true))
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    await expect(pending).resolves.toBeUndefined()
+    expect(capturedSignal?.aborted).toBe(true)
   })
 })

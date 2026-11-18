@@ -82,13 +82,41 @@ function wait(ms: number): Promise<void> {
   });
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+/**
+ * Executes a fetch request and reads its response body under a single deadline.
+ */
+async function fetchWithDeadline<T>(
+  url: string,
+  options: RequestInit,
+  readBody: (response: Response) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    onAbort = () =>
+      reject(controller.signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+    if (controller.signal.aborted) {
+      onAbort();
+      return;
+    }
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+  });
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException(`Project request timed out after ${timeoutMs}ms`, "TimeoutError")),
+    timeoutMs,
+  );
+  const task = (async () => {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await readBody(response);
+  })();
+  void task.catch(() => undefined);
+  void abortPromise.catch(() => undefined);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await Promise.race([task, abortPromise]);
   } finally {
     clearTimeout(timeout);
+    if (onAbort) controller.signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -134,7 +162,7 @@ export function invalidateProjectContextCache(refresh?: string): void {
  */
 export async function loadManagedProject(accessToken: string): Promise<LoadCodeAssistPayload | null> {
   try {
-    const response = await fetchWithTimeout(
+    return await fetchWithDeadline(
       `${ANTIGRAVITY_ENDPOINT}/v1internal:loadCodeAssist`,
       {
         method: "POST",
@@ -145,15 +173,17 @@ export async function loadManagedProject(accessToken: string): Promise<LoadCodeA
         },
         body: JSON.stringify({ metadata: LOAD_CODE_ASSIST_METADATA }),
       },
+      async (response) => {
+        if (!response.ok) {
+          log.debug("loadCodeAssist failed", { endpoint: ANTIGRAVITY_ENDPOINT, status: response.status });
+          await response.body?.cancel().catch(() => undefined);
+          return null;
+        }
+
+        return (await response.json()) as LoadCodeAssistPayload;
+      },
       LOAD_TIMEOUT_MS,
     );
-
-    if (!response.ok) {
-      log.debug("loadCodeAssist failed", { endpoint: ANTIGRAVITY_ENDPOINT, status: response.status });
-      return null;
-    }
-
-    return (await response.json()) as LoadCodeAssistPayload;
   } catch (error) {
     log.debug("Failed to load managed project", { endpoint: ANTIGRAVITY_ENDPOINT, error: String(error) });
     return null;
@@ -178,7 +208,7 @@ export async function onboardManagedProject(
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await fetchWithTimeout(
+      const outcome = await fetchWithDeadline(
         `${ANTIGRAVITY_ENDPOINT}/v1internal:onboardUser`,
         {
           method: "POST",
@@ -191,17 +221,24 @@ export async function onboardManagedProject(
           },
           body: JSON.stringify(requestBody),
         },
+        async (response) => {
+          if (!response.ok) {
+            log.debug("onboardUser failed", { endpoint: ANTIGRAVITY_ENDPOINT, status: response.status });
+            await response.body?.cancel().catch(() => undefined);
+            return { stop: true as const };
+          }
+
+          return { stop: false as const, payload: (await response.json()) as OnboardUserPayload };
+        },
         ONBOARD_TIMEOUT_MS,
       );
 
-      if (!response.ok) {
-        log.debug("onboardUser failed", { endpoint: ANTIGRAVITY_ENDPOINT, status: response.status });
+      if (outcome.stop) {
         return undefined;
       }
 
-      const payload = (await response.json()) as OnboardUserPayload;
-      if (payload.done) {
-        return extractProjectId(payload.response?.cloudaicompanionProject) ?? projectId;
+      if (outcome.payload.done) {
+        return extractProjectId(outcome.payload.response?.cloudaicompanionProject) ?? projectId;
       }
     } catch (error) {
       log.debug("Failed to onboard managed project", { endpoint: ANTIGRAVITY_ENDPOINT, error: String(error) });

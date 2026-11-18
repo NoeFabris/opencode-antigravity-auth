@@ -118,7 +118,7 @@ export const AntigravityV2Plugin = Plugin.define({
     let modelDefinitions = validCache ? buildAccountModelDefinitions(validCache) : OPENCODE_V2_MODEL_DEFINITIONS
     accountCatalogLoaded = !!validCache
     if (validCache) modelAccounts = cached.accounts
-    let observedPoolIdentity = accountPoolIdentity(saved?.accounts ?? [])
+    let requestPoolIdentity = accountPoolIdentity(saved?.accounts ?? [])
     let catalogPoolIdentity = validCache ? cached.identity : undefined
     let catalogReloadCount = 0
     let providerReloadPending = false
@@ -186,7 +186,6 @@ export const AntigravityV2Plugin = Plugin.define({
       // the newest complete discovery for this pool may replace the catalog.
       const latestPoolIdentity = accountPoolIdentity(latest?.accounts ?? [])
       hasSavedAccounts = Boolean(latest?.accounts.some(account => account.enabled !== false && !!account.refreshToken))
-      observedPoolIdentity = latestPoolIdentity
       if (disposed || discovery !== discoveryGeneration || latestPoolIdentity !== accountPoolIdentity(accounts)) return Object.keys(modelDefinitions).length
       if (!successful.length) throw new Error(results.find(result => result.error)?.error ?? "Google did not return a model catalog. Check account access and try again.")
       modelDefinitions = buildAccountModelDefinitions(models)
@@ -213,16 +212,20 @@ export const AntigravityV2Plugin = Plugin.define({
     const syncPoolModels = async (abortRequests = true) => {
       const beforeReloads = catalogReloadCount
       const initialAccounts = (await loadManagedAccounts())?.accounts ?? []
-      observedPoolIdentity = accountPoolIdentity(initialAccounts)
+      const initialPoolIdentity = accountPoolIdentity(initialAccounts)
       hasSavedAccounts = initialAccounts.some(account => account.enabled !== false && !!account.refreshToken)
+      if (abortRequests) requestPoolIdentity = initialPoolIdentity
       if (hasSavedAccounts && !disposed && ctx.options.discoverModels !== false) {
         try { await refreshModels(abortRequests) } catch (error) { if (!disposed) log.warn("Model refresh unavailable", { error: String(error) }) }
       }
       if (disposed) return
       const currentAccounts = (await loadManagedAccounts())?.accounts ?? []
       const currentPoolIdentity = accountPoolIdentity(currentAccounts)
-      observedPoolIdentity = currentPoolIdentity
       hasSavedAccounts = currentAccounts.some(account => account.enabled !== false && !!account.refreshToken)
+      if (abortRequests) {
+        if (requestPoolIdentity !== currentPoolIdentity) invalidateLoader(true)
+        requestPoolIdentity = currentPoolIdentity
+      }
       if (accountCatalogLoaded && catalogPoolIdentity !== currentPoolIdentity) {
         for (const id of Object.keys(modelDefinitions)) {
           if (!OPENCODE_V2_MODEL_DEFINITIONS[id]) staleCatalogModels.add(id)
@@ -323,27 +326,29 @@ export const AntigravityV2Plugin = Plugin.define({
           const stored = value?.type === "oauth" && value.methodID === "oauth" ? await loadAccounts() : undefined
           const boundID = connection?.type === "credential" ? await ctx.storage.get(`connection-account:${connection.id}`) : undefined
           const next = isAntigravityCredential(value, stored?.accounts, boundID)
-          const pool = reload && next ? (stored ?? await loadManagedAccounts()) : undefined
+          const pool = reload && (next || accountCatalogLoaded) ? (stored ?? await loadManagedAccounts()) : undefined
           const nextHasSavedAccounts = pool ? pool.accounts.some(account => account.enabled !== false && !!account.refreshToken) : hasSavedAccounts
           const poolIdentity = pool ? accountPoolIdentity(pool.accounts) : undefined
-          const poolChanged = poolIdentity !== undefined && poolIdentity !== observedPoolIdentity
+          const requestOwnerChanged = Boolean(reload && poolIdentity !== undefined && poolIdentity !== requestPoolIdentity)
+          const staleCatalog = Boolean(reload && accountCatalogLoaded && poolIdentity !== undefined && catalogPoolIdentity !== poolIdentity)
           const needsDiscovery = Boolean(reload && next && nextHasSavedAccounts && ctx.options.discoverModels !== false && (!accountCatalogLoaded || catalogPoolIdentity !== poolIdentity))
           const hadSavedAccounts = hasSavedAccounts
-          if (pool && poolIdentity !== undefined) {
-            hasSavedAccounts = nextHasSavedAccounts
-            observedPoolIdentity = poolIdentity
+          if (pool) hasSavedAccounts = nextHasSavedAccounts
+          if (requestOwnerChanged && poolIdentity !== undefined) {
+            invalidateLoader(true)
+            requestPoolIdentity = poolIdentity
           }
           if (reload && hadSavedAccounts !== hasSavedAccounts) providerReloadPending = true
           const accessChanged = next !== usesAntigravityOAuth
-          if (disposed || (!accessChanged && !modelReloadPending && !providerReloadPending && !needsDiscovery)) return
+          if (disposed || (!accessChanged && !modelReloadPending && !providerReloadPending && !needsDiscovery && !staleCatalog && !requestOwnerChanged)) return
           usesAntigravityOAuth = next
           if (reload && (accessChanged || modelReloadPending)) {
             modelReloadPending = true
             await ctx.model.reload()
             modelReloadPending = false
           }
-          if (needsDiscovery && !disposed) {
-            await syncPoolModels(poolChanged)
+          if ((needsDiscovery || staleCatalog) && !disposed) {
+            await syncPoolModels(requestOwnerChanged)
           } else if (reload && !disposed && providerReloadPending) {
             await reloadProvider()
           }

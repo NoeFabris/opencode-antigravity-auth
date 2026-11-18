@@ -222,22 +222,32 @@ async function fetchWithDeadline<T>(
   timeoutMs = FETCH_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-  let onAbort: (() => void) | undefined;
+  const forwardAbort = () => {
+    controller.abort(signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+  };
+  if (signal) {
+    if (signal.aborted) {
+      forwardAbort();
+    } else {
+      signal.addEventListener("abort", forwardAbort, { once: true });
+    }
+  }
+  let onControllerAbort: (() => void) | undefined;
   const abortPromise = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(combined.reason ?? new DOMException("The operation was aborted.", "AbortError"));
-    if (combined.aborted) {
-      onAbort();
+    onControllerAbort = () =>
+      reject(controller.signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+    if (controller.signal.aborted) {
+      onControllerAbort();
       return;
     }
-    combined.addEventListener("abort", onAbort, { once: true });
+    controller.signal.addEventListener("abort", onControllerAbort, { once: true });
   });
   const timeout = setTimeout(
     () => controller.abort(new DOMException(`Quota request timed out after ${timeoutMs}ms`, "TimeoutError")),
     timeoutMs,
   );
   const task = (async () => {
-    const response = await fetch(url, { ...options, signal: combined });
+    const response = await fetch(url, { ...options, signal: controller.signal });
     return await readBody(response);
   })();
   void task.catch(() => undefined);
@@ -246,7 +256,8 @@ async function fetchWithDeadline<T>(
     return await Promise.race([task, abortPromise]);
   } finally {
     clearTimeout(timeout);
-    if (onAbort) combined.removeEventListener("abort", onAbort);
+    if (signal) signal.removeEventListener("abort", forwardAbort);
+    if (onControllerAbort) controller.signal.removeEventListener("abort", onControllerAbort);
   }
 }
 
