@@ -8,7 +8,8 @@ const account: AccountSummary = { id: "account-id", email: "saved@example.test",
 
 afterEach(() => vi.useRealTimers())
 
-async function host(actions: Array<string | undefined>, options: { confirmed?: boolean; accounts?: AccountSummary[] } = {}) {
+/** Boots AntigravityTuiPlugin against an in-memory TUI dialog harness. */
+async function host(actions: Array<string | undefined>, options: { confirmed?: boolean; accounts?: AccountSummary[]; promptCode?: string } = {}) {
   let layer: KeymapLayer | undefined
   const rpc = {
     list: vi.fn(async () => options.accounts ?? [account]), connections: vi.fn(async () => ({ ids: ["native-credential"] })), quotas: vi.fn(async () => ({ report: "Antigravity claude: 84% remaining; resets tomorrow", accounts: [{ id: account.id, email: account.email, disabled: false, report: "Antigravity claude: 84% remaining; resets tomorrow" }] })),
@@ -25,7 +26,7 @@ async function host(actions: Array<string | undefined>, options: { confirmed?: b
       complete: vi.fn(async () => undefined), cancel,
     } } },
     location: { directory: "/tmp/menu-test" },
-    ui: { dialog: { select, alert, confirm: async () => options.confirmed ?? false, prompt: async () => undefined }, toast: { show: toast } },
+    ui: { dialog: { select, alert, confirm: async () => options.confirmed ?? false, prompt: async () => options.promptCode }, toast: { show: toast } },
     keymap: { layer: (factory: () => KeymapLayer) => { layer = factory() } },
   } as unknown as Plugin.Context
   await AntigravityTuiPlugin.setup(ctx)
@@ -58,6 +59,16 @@ describe("Antigravity native menu", () => {
   it("cancels the OAuth attempt when the account dialog is dismissed", async () => {
     const result = await host(["add", undefined])
     expect(result.cancel).toHaveBeenCalledWith(expect.objectContaining({ attemptID: "attempt" }))
+  })
+
+  it("completes OAuth without calling rpc.models again, while manual model refresh still invokes it", async () => {
+    const added = await host(["add", undefined], { promptCode: "oauth-code" })
+    expect(added.rpc.models).not.toHaveBeenCalled()
+    expect(added.toast).toHaveBeenCalledWith({ message: "Google account connected", variant: "success" })
+
+    const refreshed = await host(["models", undefined])
+    expect(refreshed.rpc.models).toHaveBeenCalledOnce()
+    expect(refreshed.toast).toHaveBeenCalledWith({ message: "12 available models loaded", variant: "success" })
   })
 
   it("shows cached quota in account rows without fetching quotas or native connections", async () => {

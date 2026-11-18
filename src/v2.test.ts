@@ -118,6 +118,7 @@ function pool() {
   }
 }
 
+/** Boots AntigravityV2Plugin against an in-memory OpenCode V2 host harness. */
 async function host(options: { value?: Credential.Value; connection?: boolean; nativeOverride?: boolean; catalog?: Record<string, AvailableModel>; catalogAccounts?: Record<string, string[]>; legacyOverride?: boolean; discoverModels?: boolean } = {}) {
   let value = options.value ?? credential()
   let connectionID: string | undefined
@@ -132,6 +133,7 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   if (options.catalog) storage.set("model-catalog", { version: 3, identity: accountPoolIdentity(state.storage?.accounts ?? []), updatedAt: Date.now(), models: options.catalog, accounts: options.catalogAccounts ?? {} })
   let method: OAuthMethod | undefined
   let sdkHook: ((event: AISDKHooks["sdk"]) => Promise<void> | void) | undefined
+  let providerTransform: ((editor: ProviderEditor) => void) | undefined
   let modelTransform: ((editor: ModelEditor) => void) | undefined
   let tool: ToolInfo | undefined
   let accountHandlers: RpcHandlers<typeof AntigravityAccountsRpc> | undefined
@@ -187,7 +189,17 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
         return registration()
       },
     },
-    provider: { reload: vi.fn(async () => undefined), transform: async (callback: (editor: ProviderEditor) => void) => { callback(providerEditor); return registration() } },
+    provider: {
+      reload: vi.fn(async () => {
+        providerTransform?.(providerEditor)
+        modelTransform?.(modelEditor)
+      }),
+      transform: async (callback: (editor: ProviderEditor) => void) => {
+        providerTransform = callback
+        callback(providerEditor)
+        return registration()
+      },
+    },
     model: {
       reload: vi.fn(async () => {
         // Core rebuilds from source definitions before applying transforms.
@@ -223,7 +235,7 @@ async function host(options: { value?: Credential.Value; connection?: boolean; n
   return {
     models, provider, method, tool, cleanup, disposals, accountHandlers, storage, ctx,
     emit: (event: V2Event) => events.emit("event", event),
-    setCredential: (next: Credential.Value, id?: string) => { value = next; connectionID = id },
+    setCredential: (next: Credential.Value, id?: string) => { value = next; connectionID = id; connected = true },
     disconnect: () => { connected = false },
     async sdk(id = "antigravity-gemini-3-flash", settings: Record<string, unknown> = {}) {
       const model = models.get(id)
@@ -968,6 +980,105 @@ describe("independent integration edge cases", () => {
     adapter.setCredential(result, "first-native")
     const { sdk } = await adapter.sdk()
     await expect(stream(sdk)).resolves.toContainEqual(expect.objectContaining({ type: "text-delta" }))
+  })
+
+  it("discovers available models during first native OAuth login without restarting or duplicating discovery", async () => {
+    const realStorage = await import("./plugin/storage.ts")
+    state.storage = null
+    let catalogCalls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return Response.json({ access_token: "fresh", refresh_token: "rotated-after-connect", expires_in: 3600 })
+      }
+      if (url.endsWith(":fetchAvailableModels")) {
+        catalogCalls += 1
+        return Response.json({
+          models: {
+            "gemini-4-argon-high": { displayName: "Gemini 4 Argon (High)", maxTokens: 1048576, maxOutputTokens: 65536 },
+          },
+        })
+      }
+      return Response.json({ buckets: [] })
+    })
+    const adapter = await host({ connection: false, discoverModels: true })
+    expect(adapter.provider.activation).toBe("auto")
+    expect(adapter.models.has("antigravity-gemini-3-flash")).toBe(true)
+    expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(false)
+
+    const authorization = await adapter.method.authorize({ manual: true, projectId: "project" })
+    if (authorization.mode !== "code") throw new Error("Expected manual auth")
+    const result = await authorization.callback("first-login-code")
+
+    expect(catalogCalls).toBe(1)
+    expect(adapter.provider.activation).toBe("enabled")
+    expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(true)
+    expect(adapter.models.has("antigravity-gemini-3-flash")).toBe(false)
+    expect(result.refresh).toContain("rotated-after-connect")
+    expect((await realStorage.loadAccounts())?.accounts[0]?.refreshToken).toBe("rotated-after-connect")
+
+    adapter.setCredential(result, "first-native")
+    adapter.emit({ type: "credential.updated", id: "event-after-connect", created: Date.now(), data: {} } as V2Event)
+    await vi.waitFor(() => expect(adapter.ctx.model.reload).toHaveBeenCalledTimes(1))
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
+    expect(catalogCalls).toBe(1)
+  })
+
+  it("keeps fallback models and rotated tokens when discovery fails during first native OAuth login", async () => {
+    const realStorage = await import("./plugin/storage.ts")
+    state.storage = null
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return Response.json({ access_token: "fresh", refresh_token: "rotated-on-503", expires_in: 3600 })
+      }
+      if (url.endsWith(":fetchAvailableModels")) {
+        return Response.json({ error: "temporary outage" }, { status: 503 })
+      }
+      return Response.json({ buckets: [] })
+    })
+    const adapter = await host({ connection: false, discoverModels: true })
+    const authorization = await adapter.method.authorize({ manual: true, projectId: "project" })
+    if (authorization.mode !== "code") throw new Error("Expected manual auth")
+    const result = await authorization.callback("first-login-code")
+
+    expect(result.type).toBe("oauth")
+    expect(result.refresh).toContain("rotated-on-503")
+    expect((await realStorage.loadAccounts())?.accounts[0]?.refreshToken).toBe("rotated-on-503")
+    expect(adapter.provider.activation).toBe("enabled")
+    expect(adapter.models.has("antigravity-gemini-3-flash")).toBe(true)
+  })
+
+  it("discovers models automatically when an external Antigravity credential becomes active", async () => {
+    state.storage = null
+    let catalogCalls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return Response.json({ access_token: "fresh", expires_in: 3600 })
+      }
+      if (url.endsWith(":fetchAvailableModels")) {
+        catalogCalls += 1
+        return Response.json({
+          models: {
+            "gemini-4-argon-high": { displayName: "Gemini 4 Argon (High)", maxTokens: 1048576, maxOutputTokens: 65536 },
+          },
+        })
+      }
+      return Response.json({ buckets: [] })
+    })
+    const adapter = await host({ connection: false, discoverModels: true })
+    expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(false)
+
+    state.storage = pool()
+    adapter.setCredential(credential(), "external-native")
+    adapter.emit({ type: "credential.updated", id: "event-external-login", created: Date.now(), data: {} } as V2Event)
+
+    await vi.waitFor(() => expect(adapter.models.has("antigravity-gemini-4-argon-high")).toBe(true))
+    expect(catalogCalls).toBe(1)
+    expect(adapter.provider.activation).toBe("enabled")
+    expect(adapter.models.get("gemini-native-only")?.enabled).toBe(false)
+    expect(adapter.models.has("antigravity-gemini-3-flash")).toBe(false)
   })
 
   it("retains a discovery rotation when the account is disabled while catalog I/O is pending", async () => {
