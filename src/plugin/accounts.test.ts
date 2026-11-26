@@ -858,6 +858,48 @@ describe("AccountManager", () => {
         expect(selected?.index).toBe(1);
       });
 
+      it("skips accounts rate-limited on requested headerStyle even when alternate headerStyle is available", () => {
+        const stored: AccountStorageV4 = {
+          version: 4,
+          accounts: [
+            { refreshToken: "r1", projectId: "p1", addedAt: 1, lastUsed: 1000 },
+            { refreshToken: "r2", projectId: "p2", addedAt: 1, lastUsed: 2000 },
+          ],
+          activeIndex: 1,
+          activeIndexByFamily: { claude: 1, gemini: 1 },
+        };
+
+        const manager = new AccountManager(undefined, stored);
+        const accounts = manager.getAccounts();
+        manager.markRateLimited(accounts[1]!, 60000, "gemini", "antigravity", "antigravity-gemini-3.8-flash-high");
+
+        const selected = manager.getCurrentOrNextForFamily(
+          "gemini",
+          "antigravity-gemini-3.8-flash-high",
+          "hybrid",
+          "antigravity",
+        );
+        expect(selected?.index).toBe(0);
+
+        manager.markRateLimited(accounts[0]!, 60000, "gemini", "antigravity", "antigravity-gemini-3.8-flash-high");
+        expect(
+          manager.getCurrentOrNextForFamily(
+            "gemini",
+            "antigravity-gemini-3.8-flash-high",
+            "hybrid",
+            "antigravity",
+          ),
+        ).toBeNull();
+        expect(
+          manager.getCurrentOrNextForFamily(
+            "gemini",
+            "antigravity-gemini-3.8-flash-high",
+            "hybrid",
+            "gemini-cli",
+          ),
+        ).not.toBeNull();
+      });
+
       it("skips cooling down accounts", () => {
         const stored: AccountStorageV4 = {
           version: 4,

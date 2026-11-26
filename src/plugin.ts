@@ -1609,6 +1609,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
             return accountManager.hasOtherAccountWithAntigravityAvailable(currentAccount.index, family, model, eligible);
           };
 
+          let consecutiveImmediateSwitches = 0;
+
           while (true) {
             // Check for abort at the start of each iteration
             checkAborted();
@@ -1689,6 +1691,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   softQuotaToastShown = true;
                 }
                 
+                consecutiveImmediateSwitches = 0;
                 await sleep(softQuotaWaitMs, abortSignal);
                 continue;
               }
@@ -1738,6 +1741,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
               }
 
               // Wait for the rate-limit cooldown to expire, then retry
+              consecutiveImmediateSwitches = 0;
               await sleep(waitMs, abortSignal);
               continue;
             }
@@ -2022,6 +2026,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
             
             while (!shouldSwitchAccount) {
+            consecutiveImmediateSwitches = 0;
             
             // Flag to force thinking recovery on retry after API error
             let forceThinkingRecovery = false;
@@ -2535,8 +2540,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
             } // end headerStyleLoop
             
             if (shouldSwitchAccount) {
-              // Avoid tight retry loops when there's only one account.
-              if (accountCount <= 1) {
+              consecutiveImmediateSwitches += 1;
+              // Avoid tight retry loops when there's only one account or when
+              // multi-account switching spins without reaching an endpoint attempt.
+              if (accountCount <= 1 || consecutiveImmediateSwitches > accountCount) {
                 if (lastFailure) {
                   return transformAntigravityResponse(
                     lastFailure.response,
